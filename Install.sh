@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 
 kmer="" # --kmer-len in kraken2-build
 min_l="" # --minimizer-len in kraken2-build
@@ -26,7 +26,7 @@ touch condaPath
 echo "$condapath" > $dir/condaPath
 
 source $condapath/etc/profile.d/conda.sh
-
+conda install -y -c conda-forge pkg-config
 conda deactivate
 
 echo 'installing conda environments...'
@@ -43,6 +43,8 @@ echo '>>                  [10%]'
 # conda deactivate
 
 conda activate halla0820 # install dependencies of halla
+R -e 'install.packages("~/MTD/update_fix/pvr_pkg/Matrix_1.6-5.tar.gz", repos=NULL, type="source")'
+R -e 'install.packages("~/MTD/update_fix/pvr_pkg/MASS_7.3-60.tar.gz", repos=NULL, type="source")'
 R -e 'install.packages(c("XICOR","mclust","BiocManager"), repos="http://cran.us.r-project.org")'
 R -e 'BiocManager::install("preprocessCore", ask = FALSE)'
 R -e 'install.packages("eva", INSTALL_opts = "--no-lock", repos="http://cran.us.r-project.org")'
@@ -232,6 +234,39 @@ echo 'installing R packages...'
 # install R packages
 conda deactivate
 conda activate R412
+
+R -e 'install.packages("httr",repos = "http://cran.us.r-project.org")'
+R -e 'BiocManager::install("SummarizedExperiment",repos = "http://cran.us.r-project.org")'
+R -e 'install.packages("~/MTD/update_fix/pvr_pkg/Matrix_1.6-5.tar.gz", repos=NULL, type="source")'
+R -e 'BiocManager::install("ggplot2",repos = "http://cran.us.r-project.org")'
+R -e 'install.packages("~/MTD/update_fix/pvr_pkg/httpuv_1.6.0.tar.gz"", repos=NULL, type="source")'
+R -e 'install.packages("ade4",repos = "http://cran.us.r-project.org")'
+R -e 'install.packages("biomformat",repos = "http://cran.us.r-project.org")'
+R -e 'BiocManager::install("igraph", force = TRUE, update = FALSE,repos = "http://cran.us.r-project.org")'
+R -e 'BiocManager::install("multtest", force = TRUE, update = FALSE,repos = "http://cran.us.r-project.org")'
+R -e 'install.packages("vegan",repos = "http://cran.us.r-project.org")'
+R -e 'install.packages("~/MTD/update_fix/pvr_pkg/RProtoBufLib_2.14.1.tar.gz", repos=NULL, type="source")'
+R -e 'remotes::install_github("RGLab/cytolib",repos = "http://cran.us.r-project.org")'
+R -e 'remotes::install_github("RGLab/flowcore",repos = "http://cran.us.r-project.org")'
+R -e 'BiocManager::install("AnnotationDbi", force = TRUE, update = FALSE,repos = "http://cran.us.r-project.org")'
+R -e 'BiocManager::install("igraph", force = TRUE, update = FALSE,repos = "http://cran.us.r-project.org")'
+R -e 'BiocManager::install("ggfun", force = TRUE, update = FALSE,repos = "http://cran.us.r-project.org")'
+R -e 'BiocManager::install("SingleCellExperiment", force = TRUE, update = FALSE,repos = "http://cran.us.r-project.org")'
+R -e 'BiocManager::install("phyloseq", force = TRUE, update = FALSE,repos = "http://cran.us.r-project.org")'
+R -e 'BiocManager::install("curl", force = TRUE, update = FALSE,repos = "http://cran.us.r-project.org")'
+R -e 'BiocManager::install("annotate", force = TRUE, update = FALSE,repos = "http://cran.us.r-project.org")'
+R -e 'BiocManager::install("BiocFileCache", force = TRUE, update = FALSE,repos = "http://cran.us.r-project.org")'
+R -e 'install.packages("~/MTD/update_fix/pvr_pkg/MASS_7.3-60.tar.gz", repos=NULL, type="source")'
+R -e 'BiocManager::install("aplot", force = TRUE, update = FALSE,repos = "http://cran.us.r-project.org")'
+R -e 'BiocManager::install("lme4", force = TRUE, update = FALSE,repos = "http://cran.us.r-project.org")'
+R -e 'BiocManager::install("TMB", force = TRUE, update = FALSE,repos = "http://cran.us.r-project.org")'
+R -e 'BiocManager::install("GenomicFeatures", force = TRUE, update = FALSE,repos = "http://cran.us.r-project.org")'
+R -e 'BiocManager::install("metagenomeSeq", force = TRUE, update = FALSE,repos = "http://cran.us.r-project.org")'
+R -e 'remotes::install_github("YuLab-SMU/ggtree",repos = "http://cran.us.r-project.org")'
+R -e 'remotes::install_github("YuLab-SMU/enrichplot",repos = "http://cran.us.r-project.org")'
+R -e 'BiocManager::install("ragg", force = TRUE, update = FALSE,repos = "http://cran.us.r-project.org")'
+R -e 'BiocManager::install("sctransform", force = TRUE, update = FALSE,repos = "http://cran.us.r-project.org")'
+
 # debug in case libcurl cannot be located in the conda R environment
 wget https://cloud.r-project.org/src/contrib/curl_4.3.2.tar.gz
 # if /usr/lib/x86_64-linux-gnu/pkgconfig/libcurl.pc exists, use it
