@@ -1,12 +1,13 @@
-#!/bin/bash
-conda install -y -c conda-forge pkg-config
+#!/bin/bash -x
+
 conda activate halla0820
-./Install.R.packages.sh
+~/MTD/update_fix/Install.R.packages.sh
 conda deactivate
-./Install.R.packages.sh
+exit 1
 conda activate MTD
-./Install.R.packages.sh
+~/MTD/update_fix/Install.R.packages.sh
 conda deactivate
+
 conda activate R412
-./Install.R.packages.sh
+~/MTD/update_fix/Install.R.packages.sh
 conda deactivate
