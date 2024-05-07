@@ -1,0 +1,13 @@
+sample_name,group,,comparisons,group1,vs,group2
+MOR01_LIVER,Liver,,,Liver,vs,Telencephalon
+MOR01_TEL,Telencephalon,,,,,
+MOR02_LIVER,Liver,,,,,
+MOR02_TEL,Telencephalon,,,,,
+MOR03_LIVER,Liver,,,,,
+MOR03_TEL,Telencephalon,,,,,
+MOR04_LIVER,Liver,,,,,
+MOR04_TEL,Telencephalon,,,,,
+MOR05_LIVER,Liver,,,,,
+MOR05_TEL,Telencephalon,,,,,
+MOR06_LIVER,Liver,,,,,
+MOR06_TEL,Telencephalon,,,,,
