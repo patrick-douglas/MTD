@@ -14,11 +14,12 @@ done
 # get MTD folder place; same as Install.sh script file path (in the MTD folder)
 dir=$(dirname $(readlink -f $0))
 cd $dir # MTD folder place
-
+MTDIR=~/MTD
 # get conda path
 condapath=$(head -n 1 $MTDIR/condaPath)
 # activate MTD conda environment
 source $condapath/etc/profile.d/conda.sh
+
 conda activate MTD
 
 # Kraken2 database building - Customized

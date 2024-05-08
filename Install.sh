@@ -1,4 +1,4 @@
-#!/bin/bash -x
+#!/bin/bash
 
 kmer="" # --kmer-len in kraken2-build
 min_l="" # --minimizer-len in kraken2-build
@@ -27,8 +27,10 @@ echo "$condapath" > $dir/condaPath
 
 source $condapath/etc/profile.d/conda.sh
 conda install -y -c conda-forge pkg-config
+conda install -c bioconda pin-1 -y
+conda install -y python=3.10 
+conda install -y -c bioconda metaphlan=3.0.7=pyh7b7c402_0 #Instalar no env MTD
 conda deactivate
-
 echo 'installing conda environments...'
 conda env create -f Installation/MTD.yml
 conda env create -f Installation/py2.yml
@@ -55,6 +57,8 @@ echo 'MTD installation progress:'
 echo '>>>                 [15%]'
 echo 'downloading virome database...'
 conda activate MTD
+#conda install -y python=3.10 
+conda install -y -c bioconda metaphlan=3.0.7=pyh7b7c402_0 #Instalar no env MTD
 wget -c https://www.genome.jp/ftp/db/virushostdb/virushostdb.genomic.fna.gz
 unpigz virushostdb.genomic.fna.gz
 cat Installation/M33262_SIVMM239.fa virushostdb.genomic.fna > viruses4kraken.fa
