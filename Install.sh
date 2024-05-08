@@ -57,7 +57,7 @@ echo 'MTD installation progress:'
 echo '>>>                 [15%]'
 echo 'downloading virome database...'
 conda activate MTD
-#conda install -y python=3.10 
+##conda install -y python=3.10 
 conda install -y -c bioconda metaphlan=3.0.7=pyh7b7c402_0 #Instalar no env MTD
 wget -c https://www.genome.jp/ftp/db/virushostdb/virushostdb.genomic.fna.gz
 unpigz virushostdb.genomic.fna.gz
