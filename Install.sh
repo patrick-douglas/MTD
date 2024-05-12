@@ -26,9 +26,7 @@ touch condaPath
 echo "$condapath" > $dir/condaPath
 
 source $condapath/etc/profile.d/conda.sh
-conda install -y -c conda-forge pkg-config
-conda install -c bioconda pin-1 -y
-conda install -y python=3.10 
+
 conda install -y -c bioconda metaphlan=3.0.7=pyh7b7c402_0 #Instalar no env MTD
 conda deactivate
 echo 'installing conda environments...'
@@ -59,7 +57,9 @@ echo 'downloading virome database...'
 conda activate MTD
 ##conda install -y python=3.10 
 conda install -y -c bioconda metaphlan=3.0.7=pyh7b7c402_0 #Instalar no env MTD
-wget -c https://www.genome.jp/ftp/db/virushostdb/virushostdb.genomic.fna.gz
+#Chck if the file exists and have the same size before download
+wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/virushostdb.genomic.fna.gz
+#wget -c https://www.genome.jp/ftp/db/virushostdb/virushostdb.genomic.fna.gz
 unpigz virushostdb.genomic.fna.gz
 cat Installation/M33262_SIVMM239.fa virushostdb.genomic.fna > viruses4kraken.fa
 
@@ -139,9 +139,26 @@ echo 'installing HUMAnN3 databases...'
 # install HUMAnN3 databases
 mkdir -p $dir/HUMAnN/ref_database/
 cd $dir/HUMAnN/ref_database/
-wget -c http://huttenhower.sph.harvard.edu/humann2_data/chocophlan/full_chocophlan.v296_201901.tar.gz
-wget -c http://huttenhower.sph.harvard.edu/humann2_data/uniprot/uniref_annotated/uniref90_annotated_v201901.tar.gz
-wget -c http://huttenhower.sph.harvard.edu/humann2_data/full_mapping_v201901.tar.gz
+#Link 403 forbidden
+#wget -c http://huttenhower.sph.harvard.edu/humann2_data/chocophlan/full_chocophlan.v296_201901.tar.gz
+#Link working but slow
+#wget -c http://cmprod1.cibio.unitn.it/databases/HUMAnN/full_chocophlan.v296_201901.tar.gz
+#Temporary cp solution
+cp /media/me/BACKUP_LBN_HD4TB/Compressed/MTD/full_chocophlan.v296_201901.tar.gz .
+
+#Link 403 forbidden
+#wget -c http://huttenhower.sph.harvard.edu/humann2_data/uniprot/uniref_annotated/uniref90_annotated_v201901.tar.gz
+#Link working but slow
+#wget -c http://cmprod1.cibio.unitn.it/databases/HUMAnN/uniref90_annotated_v201901.tar.gz
+#Temporary cp solution
+cp /media/me/BACKUP_LBN_HD4TB/Compressed/MTD/uniref90_annotated_v201901.tar.gz .
+
+#Link 403 forbidden
+#wget -c http://huttenhower.sph.harvard.edu/humann2_data/full_mapping_v201901.tar.gz
+#Link working but slow
+#wget -c http://cmprod1.cibio.unitn.it/databases/HUMAnN/full_mapping_v201901.tar.gz
+#Link source forge patrick-douglas
+wget -c https://master.dl.sourceforge.net/project/mtd/MTD/HUMAnN/ref_database/full_mapping_v201901.tar.gz
 
 mkdir -p $dir/HUMAnN/ref_database/chocophlan
 tar xzvf full_chocophlan.v296_201901.tar.gz -C chocophlan
@@ -161,11 +178,17 @@ echo 'Downloading host (default: rhesus, human, mouse) references...'
 # install host references
 # download host GTF
     # download rhesus macaque GTF
-    wget -c http://ftp.ensembl.org/pub/release-104/gtf/macaca_mulatta/Macaca_mulatta.Mmul_10.104.gtf.gz -P ref_rhesus
+#    wget -c http://ftp.ensembl.org/pub/release-104/gtf/macaca_mulatta/Macaca_mulatta.Mmul_10.104.gtf.gz -P ref_rhesus
+    wget -c https://master.dl.sourceforge.net/project/mtd/MTD/ref_rhesus/Macaca_mulatta.Mmul_10.104.gtf.gz -P ref_rhesus
+
     # download human GTF
-    wget -c http://ftp.ensembl.org/pub/release-104/gtf/homo_sapiens/Homo_sapiens.GRCh38.104.gtf.gz -P ref_human
+#    wget -c http://ftp.ensembl.org/pub/release-104/gtf/homo_sapiens/Homo_sapiens.GRCh38.104.gtf.gz -P ref_human
+    wget -c https://master.dl.sourceforge.net/project/mtd/MTD/ref_human/Homo_sapiens.GRCh38.104.gtf.gz -P ref_human
+
     # download mouse GTF
-    wget -c http://ftp.ensembl.org/pub/release-104/gtf/mus_musculus/Mus_musculus.GRCm39.104.gtf.gz -P ref_mouse
+#    wget -c http://ftp.ensembl.org/pub/release-104/gtf/mus_musculus/Mus_musculus.GRCm39.104.gtf.gz -P ref_mouse
+    wget -c https://master.dl.sourceforge.net/project/mtd/MTD/ref_mouse/Mus_musculus.GRCm39.104.gtf.gz -P ref_mouse
+
 
 # Building indexes for hisat2
 echo 'MTD installation progress:'
@@ -179,7 +202,8 @@ gzip -d Macaca_mulatta.Mmul_10.104.gtf.gz
 mv Macaca_mulatta.Mmul_10.104.gtf genome.gtf
 python $dir/Installation/hisat2_extract_splice_sites.py genome.gtf > genome.ss
 python $dir/Installation/hisat2_extract_exons.py genome.gtf > genome.exon
-wget -c http://ftp.ensembl.org/pub/release-104/fasta/macaca_mulatta/dna/Macaca_mulatta.Mmul_10.dna.toplevel.fa.gz #use ensembl genome to compatible with featureCount
+wget -c https://master.dl.sourceforge.net/project/mtd/MTD/ref_rhesus/Macaca_mulatta.Mmul_10.dna.toplevel.fa.gz
+#wget -c http://ftp.ensembl.org/pub/release-104/fasta/macaca_mulatta/dna/Macaca_mulatta.Mmul_10.dna.toplevel.fa.gz #use ensembl genome to compatible with featureCount
 gzip -d Macaca_mulatta.Mmul_10.dna.toplevel.fa.gz
 mv Macaca_mulatta.Mmul_10.dna.toplevel.fa genome.fa
 hisat2-build -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
@@ -196,7 +220,8 @@ gzip -d Mus_musculus.GRCm39.104.gtf.gz
 mv Mus_musculus.GRCm39.104.gtf genome.gtf
 python $dir/Installation/hisat2_extract_splice_sites.py genome.gtf > genome.ss
 python $dir/Installation/hisat2_extract_exons.py genome.gtf > genome.exon
-wget -c http://ftp.ensembl.org/pub/release-104/fasta/mus_musculus/dna/Mus_musculus.GRCm39.dna.primary_assembly.fa.gz #use ensembl genome to compatible with featureCount
+#wget -c http://ftp.ensembl.org/pub/release-104/fasta/mus_musculus/dna/Mus_musculus.GRCm39.dna.primary_assembly.fa.gz #use ensembl genome to compatible with featureCount
+wget -c https://master.dl.sourceforge.net/project/mtd/MTD/ref_mouse/Mus_musculus.GRCm39.dna.primary_assembly.fa.gz
 gzip -d Mus_musculus.GRCm39.dna.primary_assembly.fa.gz
 mv Mus_musculus.GRCm39.dna.primary_assembly.fa genome.fa
 hisat2-build -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
@@ -213,7 +238,8 @@ gzip -d Homo_sapiens.GRCh38.104.gtf.gz
 mv Homo_sapiens.GRCh38.104.gtf genome.gtf
 python $dir/Installation/hisat2_extract_splice_sites.py genome.gtf > genome.ss
 python $dir/Installation/hisat2_extract_exons.py genome.gtf > genome.exon
-wget -c http://ftp.ensembl.org/pub/release-104/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz #use ensembl genome to compatible with featureCount
+#wget -c http://ftp.ensembl.org/pub/release-104/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz #use ensembl genome to compatible with featureCount
+wget -c https://master.dl.sourceforge.net/project/mtd/MTD/ref_human/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz
 gzip -d Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz
 mv Homo_sapiens.GRCh38.dna.primary_assembly.fa genome.fa
 hisat2-build -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
@@ -238,40 +264,8 @@ echo 'installing R packages...'
 # install R packages
 conda deactivate
 conda activate R412
+~/MTD/update_fix/update_conda_pkgs.sh
 
-R -e 'install.packages("httr",repos = "http://cran.us.r-project.org")'
-R -e 'BiocManager::install("SummarizedExperiment",repos = "http://cran.us.r-project.org")'
-R -e 'install.packages("~/MTD/update_fix/pvr_pkg/Matrix_1.6-5.tar.gz", repos=NULL, type="source")'
-R -e 'BiocManager::install("ggplot2",repos = "http://cran.us.r-project.org")'
-R -e 'install.packages("~/MTD/update_fix/pvr_pkg/httpuv_1.6.0.tar.gz"", repos=NULL, type="source")'
-R -e 'install.packages("ade4",repos = "http://cran.us.r-project.org")'
-R -e 'install.packages("biomformat",repos = "http://cran.us.r-project.org")'
-R -e 'BiocManager::install("igraph", force = TRUE, update = FALSE)'
-R -e 'BiocManager::install("multtest", force = TRUE, update = FALSE)'
-R -e 'install.packages("vegan",repos = "http://cran.us.r-project.org")'
-R -e 'install.packages("~/MTD/update_fix/pvr_pkg/RProtoBufLib_2.14.1.tar.gz", repos=NULL, type="source")'
-R -e 'remotes::install_github("RGLab/cytolib",repos = "http://cran.us.r-project.org")'
-R -e 'remotes::install_github("RGLab/flowcore",repos = "http://cran.us.r-project.org")'
-R -e 'BiocManager::install("AnnotationDbi", force = TRUE, update = FALSE)'
-R -e 'BiocManager::install("igraph", force = TRUE, update = FALSE)'
-R -e 'BiocManager::install("ggfun", force = TRUE, update = FALSE)'
-R -e 'BiocManager::install("SingleCellExperiment", force = TRUE, update = FALSE)'
-R -e 'BiocManager::install("phyloseq", force = TRUE, update = FALSE)'
-R -e 'BiocManager::install("curl", force = TRUE, update = FALSE)'
-R -e 'BiocManager::install("annotate", force = TRUE, update = FALSE)'
-R -e 'BiocManager::install("BiocFileCache", force = TRUE, update = FALSE)'
-R -e 'install.packages("~/MTD/update_fix/pvr_pkg/MASS_7.3-60.tar.gz", repos=NULL, type="source")'
-R -e 'BiocManager::install("aplot", force = TRUE, update = FALSE)'
-R -e 'BiocManager::install("lme4", force = TRUE, update = FALSE)'
-R -e 'BiocManager::install("TMB", force = TRUE, update = FALSE)'
-R -e 'BiocManager::install("GenomicFeatures", force = TRUE, update = FALSE)'
-R -e 'BiocManager::install("metagenomeSeq", force = TRUE, update = FALSE)'
-R -e 'remotes::install_github("YuLab-SMU/ggtree",repos = "http://cran.us.r-project.org")'
-R -e 'remotes::install_github("YuLab-SMU/enrichplot",repos = "http://cran.us.r-project.org")'
-R -e 'BiocManager::install("ragg", force = TRUE, update = FALSE)'
-R -e 'BiocManager::install("sctransform", force = TRUE, update = FALSE)'
-R -e 'BiocManager::install("cmapR", force = TRUE, update = FALSE)'
-R -e 'BiocManager::install("clusterProfiler", force = TRUE, update = FALSE)'
 
 # debug in case libcurl cannot be located in the conda R environment
 wget https://cloud.r-project.org/src/contrib/curl_4.3.2.tar.gz

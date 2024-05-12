@@ -29,6 +29,10 @@ R --no-restore -e 'packageVersion("ggtree")' | grep packageVersion -A 1 | grep '
 R --no-restore -e 'packageVersion("enrichplot")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
 R --no-restore -e 'packageVersion("ragg")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
 R --no-restore -e 'packageVersion("sctransform")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
+R --no-restore -e 'packageVersion("cmapR")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
+R --no-restore -e 'packageVersion("clusterProfiler")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
+
+exit 1
 R --no-restore -e 'packageVersion("biomaRt")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
 R --no-restore -e 'packageVersion("DESeq2")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
 R --no-restore -e 'packageVersion("tximeta")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
