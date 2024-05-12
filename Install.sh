@@ -57,7 +57,7 @@ echo 'downloading virome database...'
 conda activate MTD
 ##conda install -y python=3.10 
 conda install -y -c bioconda metaphlan=3.0.7=pyh7b7c402_0 #Instalar no env MTD
-#Chck if the file exists and have the same size before download
+#Check if the file exists and have the same size before download
 wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/virushostdb.genomic.fna.gz
 #wget -c https://www.genome.jp/ftp/db/virushostdb/virushostdb.genomic.fna.gz
 unpigz virushostdb.genomic.fna.gz
@@ -100,7 +100,7 @@ echo 'Preparing host (mouse) database...'
 DBNAME=kraken2DB_mice
 mkdir -p $DBNAME
 cd $DBNAME
-wget -c https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/635/GCF_000001635.27_GRCm39/GCF_000001635.27_GRCm39_genomic.fna.gz
+wget -T 300 -t 5 -N --no-if-modified-since https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/635/GCF_000001635.27_GRCm39/GCF_000001635.27_GRCm39_genomic.fna.gz
 unpigz GCF_000001635.27_GRCm39_genomic.fna.gz
 mv GCF_000001635.27_GRCm39_genomic.fna GCF_000001635.27_GRCm39_genomic.fa
 cd ..
@@ -115,7 +115,7 @@ echo 'Preparing host (rhesus monkey) database...'
 DBNAME=kraken2DB_rhesus
 mkdir -p $DBNAME
 cd $DBNAME
-wget -c https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/003/339/765/GCF_003339765.1_Mmul_10/GCF_003339765.1_Mmul_10_genomic.fna.gz
+wget -T 300 -t 5 -N --no-if-modified-since https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/003/339/765/GCF_003339765.1_Mmul_10/GCF_003339765.1_Mmul_10_genomic.fna.gz
 unpigz GCF_003339765.1_Mmul_10_genomic.fna.gz
 mv GCF_003339765.1_Mmul_10_genomic.fna GCF_003339765.1_Mmul_10_genomic.fa
 cd ..
@@ -142,14 +142,14 @@ cd $dir/HUMAnN/ref_database/
 #Link 403 forbidden
 #wget -c http://huttenhower.sph.harvard.edu/humann2_data/chocophlan/full_chocophlan.v296_201901.tar.gz
 #Link working but slow
-#wget -c http://cmprod1.cibio.unitn.it/databases/HUMAnN/full_chocophlan.v296_201901.tar.gz
+#wget -T 300 -t 5 -N --no-if-modified-since http://cmprod1.cibio.unitn.it/databases/HUMAnN/full_chocophlan.v296_201901.tar.gz
 #Temporary cp solution
 cp /media/me/BACKUP_LBN_HD4TB/Compressed/MTD/full_chocophlan.v296_201901.tar.gz .
 
 #Link 403 forbidden
 #wget -c http://huttenhower.sph.harvard.edu/humann2_data/uniprot/uniref_annotated/uniref90_annotated_v201901.tar.gz
 #Link working but slow
-#wget -c http://cmprod1.cibio.unitn.it/databases/HUMAnN/uniref90_annotated_v201901.tar.gz
+#wget -T 300 -t 5 -N --no-if-modified-since http://cmprod1.cibio.unitn.it/databases/HUMAnN/uniref90_annotated_v201901.tar.gz
 #Temporary cp solution
 cp /media/me/BACKUP_LBN_HD4TB/Compressed/MTD/uniref90_annotated_v201901.tar.gz .
 
@@ -158,7 +158,7 @@ cp /media/me/BACKUP_LBN_HD4TB/Compressed/MTD/uniref90_annotated_v201901.tar.gz .
 #Link working but slow
 #wget -c http://cmprod1.cibio.unitn.it/databases/HUMAnN/full_mapping_v201901.tar.gz
 #Link source forge patrick-douglas
-wget -c https://master.dl.sourceforge.net/project/mtd/MTD/HUMAnN/ref_database/full_mapping_v201901.tar.gz
+wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/HUMAnN/ref_database/full_mapping_v201901.tar.gz
 
 mkdir -p $dir/HUMAnN/ref_database/chocophlan
 tar xzvf full_chocophlan.v296_201901.tar.gz -C chocophlan
@@ -179,15 +179,15 @@ echo 'Downloading host (default: rhesus, human, mouse) references...'
 # download host GTF
     # download rhesus macaque GTF
 #    wget -c http://ftp.ensembl.org/pub/release-104/gtf/macaca_mulatta/Macaca_mulatta.Mmul_10.104.gtf.gz -P ref_rhesus
-    wget -c https://master.dl.sourceforge.net/project/mtd/MTD/ref_rhesus/Macaca_mulatta.Mmul_10.104.gtf.gz -P ref_rhesus
+    wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/ref_rhesus/Macaca_mulatta.Mmul_10.104.gtf.gz -P ref_rhesus
 
     # download human GTF
 #    wget -c http://ftp.ensembl.org/pub/release-104/gtf/homo_sapiens/Homo_sapiens.GRCh38.104.gtf.gz -P ref_human
-    wget -c https://master.dl.sourceforge.net/project/mtd/MTD/ref_human/Homo_sapiens.GRCh38.104.gtf.gz -P ref_human
+    wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/ref_human/Homo_sapiens.GRCh38.104.gtf.gz -P ref_human
 
     # download mouse GTF
 #    wget -c http://ftp.ensembl.org/pub/release-104/gtf/mus_musculus/Mus_musculus.GRCm39.104.gtf.gz -P ref_mouse
-    wget -c https://master.dl.sourceforge.net/project/mtd/MTD/ref_mouse/Mus_musculus.GRCm39.104.gtf.gz -P ref_mouse
+    wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/ref_mouse/Mus_musculus.GRCm39.104.gtf.gz -P ref_mouse
 
 
 # Building indexes for hisat2
@@ -202,7 +202,7 @@ gzip -d Macaca_mulatta.Mmul_10.104.gtf.gz
 mv Macaca_mulatta.Mmul_10.104.gtf genome.gtf
 python $dir/Installation/hisat2_extract_splice_sites.py genome.gtf > genome.ss
 python $dir/Installation/hisat2_extract_exons.py genome.gtf > genome.exon
-wget -c https://master.dl.sourceforge.net/project/mtd/MTD/ref_rhesus/Macaca_mulatta.Mmul_10.dna.toplevel.fa.gz
+wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/ref_rhesus/Macaca_mulatta.Mmul_10.dna.toplevel.fa.gz
 #wget -c http://ftp.ensembl.org/pub/release-104/fasta/macaca_mulatta/dna/Macaca_mulatta.Mmul_10.dna.toplevel.fa.gz #use ensembl genome to compatible with featureCount
 gzip -d Macaca_mulatta.Mmul_10.dna.toplevel.fa.gz
 mv Macaca_mulatta.Mmul_10.dna.toplevel.fa genome.fa
@@ -221,7 +221,7 @@ mv Mus_musculus.GRCm39.104.gtf genome.gtf
 python $dir/Installation/hisat2_extract_splice_sites.py genome.gtf > genome.ss
 python $dir/Installation/hisat2_extract_exons.py genome.gtf > genome.exon
 #wget -c http://ftp.ensembl.org/pub/release-104/fasta/mus_musculus/dna/Mus_musculus.GRCm39.dna.primary_assembly.fa.gz #use ensembl genome to compatible with featureCount
-wget -c https://master.dl.sourceforge.net/project/mtd/MTD/ref_mouse/Mus_musculus.GRCm39.dna.primary_assembly.fa.gz
+wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/ref_mouse/Mus_musculus.GRCm39.dna.primary_assembly.fa.gz
 gzip -d Mus_musculus.GRCm39.dna.primary_assembly.fa.gz
 mv Mus_musculus.GRCm39.dna.primary_assembly.fa genome.fa
 hisat2-build -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
@@ -239,7 +239,7 @@ mv Homo_sapiens.GRCh38.104.gtf genome.gtf
 python $dir/Installation/hisat2_extract_splice_sites.py genome.gtf > genome.ss
 python $dir/Installation/hisat2_extract_exons.py genome.gtf > genome.exon
 #wget -c http://ftp.ensembl.org/pub/release-104/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz #use ensembl genome to compatible with featureCount
-wget -c https://master.dl.sourceforge.net/project/mtd/MTD/ref_human/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz
+wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/ref_human/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz
 gzip -d Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz
 mv Homo_sapiens.GRCh38.dna.primary_assembly.fa genome.fa
 hisat2-build -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
@@ -268,7 +268,7 @@ conda activate R412
 
 
 # debug in case libcurl cannot be located in the conda R environment
-wget https://cloud.r-project.org/src/contrib/curl_4.3.2.tar.gz
+wget -T 300 -t 5 -N --no-if-modified-since https://cloud.r-project.org/src/contrib/curl_4.3.2.tar.gz
 # if /usr/lib/x86_64-linux-gnu/pkgconfig/libcurl.pc exists, use it
 if [ -f /usr/lib/x86_64-linux-gnu/pkgconfig/libcurl.pc ]; then
     locate_lib=/usr/lib/x86_64-linux-gnu/pkgconfig
