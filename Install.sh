@@ -60,7 +60,7 @@ conda install -y -c bioconda metaphlan=3.0.7=pyh7b7c402_0 #Instalar no env MTD
 #Check if the file exists and have the same size before download
 wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/virushostdb.genomic.fna.gz
 #wget -c https://www.genome.jp/ftp/db/virushostdb/virushostdb.genomic.fna.gz
-unpigz virushostdb.genomic.fna.gz
+unpigz -f virushostdb.genomic.fna.gz
 cat Installation/M33262_SIVMM239.fa virushostdb.genomic.fna > viruses4kraken.fa
 
 # debug rsync error of kraken2-build
