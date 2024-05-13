@@ -27,8 +27,7 @@ echo "$condapath" > $dir/condaPath
 
 source $condapath/etc/profile.d/conda.sh
 
-conda install -y -c bioconda metaphlan=3.0.7=pyh7b7c402_0
-conda install -n MTD -y -c bioconda metaphlan=3.0.7=pyh7b7c402_0 #Instalar no env MTD
+
 
 conda deactivate
 echo 'installing conda environments...'
@@ -58,7 +57,8 @@ echo '>>>                 [15%]'
 echo 'downloading virome database...'
 conda activate MTD
 ##conda install -y python=3.10 
-conda install -y -c bioconda metaphlan=3.0.7=pyh7b7c402_0 #Instalar no env MTD
+conda install -n MTD -y -c bioconda metaphlan=3.0.7=pyh7b7c402_0 #Instalar no env MTD
+
 #Check if the file exists and have the same size before download
 wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/virushostdb.genomic.fna.gz
 #wget -c https://www.genome.jp/ftp/db/virushostdb/virushostdb.genomic.fna.gz
@@ -274,6 +274,8 @@ echo 'installing R packages...'
 # install R packages
 conda deactivate
 conda activate R412
+conda install -y -c bioconda metaphlan=3.0.7=pyh7b7c402_0
+conda install -y -n R412 -c bioconda metaphlan=3.0.7=pyh7b7c402_0
 ~/MTD/update_fix/update_conda_pkgs.sh
 
 
