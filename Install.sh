@@ -291,7 +291,8 @@ fi
 R CMD INSTALL --configure-vars='LIB_DIR='"$locate_lib" curl_4.3.2.tar.gz
 
 Rscript $dir/Installation/R_packages_installation.R
-
+~/miniconda3/envs/MTD/opt/krona/updateTaxonomy.sh
+conda run -n MTD ~/miniconda3/envs/MTD/opt/krona/updateTaxonomy.sh
 chmod +x MTD.sh
 
 echo 'MTD installation progress:'
