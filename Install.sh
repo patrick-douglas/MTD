@@ -275,8 +275,6 @@ echo 'installing R packages...'
 # install R packages
 conda deactivate
 conda activate R412
-conda install -y -c bioconda metaphlan=3.0.7=pyh7b7c402_0
-conda install -y -n R412 -c bioconda metaphlan=3.0.7=pyh7b7c402_0
 ~/MTD/update_fix/update_conda_pkgs.sh
 
 

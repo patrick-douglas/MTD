@@ -1,4 +1,5 @@
 #!/bin/bash -x
+R -e 'install.packages("lattice",repos = "http://cran.us.r-project.org")'
 R -e 'install.packages("~/MTD/update_fix/pvr_pkg/Matrix_1.6-5.tar.gz", repos=NULL, type="source")'
 R -e 'install.packages("~/MTD/update_fix/pvr_pkg/MASS_7.3-60.tar.gz", repos=NULL, type="source")'
 R -e 'install.packages(c("XICOR","mclust","BiocManager"), repos="http://cran.us.r-project.org")'
