@@ -1,5 +1,9 @@
 #!/bin/bash
-
+w=$(tput sgr0) 
+r=$(tput setaf 1)
+g=$(tput setaf 2) 
+y=$(tput setaf 3) 
+p=$(tput setaf 5) 
 kmer="" # --kmer-len in kraken2-build
 min_l="" # --minimizer-len in kraken2-build
 min_s="" # --minimizer-spaces in kraken2-build
@@ -44,13 +48,31 @@ echo '>>                  [10%]'
 # conda deactivate
 
 conda activate halla0820 # install dependencies of halla
+#halla0820
+conda install -n halla0820 -y -c conda-forge pkg-config
 R -e 'install.packages("lattice",repos = "http://cran.us.r-project.org")'
 R -e 'install.packages("~/MTD/update_fix/pvr_pkg/Matrix_1.6-5.tar.gz", repos=NULL, type="source")'
 R -e 'install.packages("~/MTD/update_fix/pvr_pkg/MASS_7.3-60.tar.gz", repos=NULL, type="source")'
 R -e 'install.packages(c("XICOR","mclust","BiocManager"), repos="http://cran.us.r-project.org")'
 R -e 'BiocManager::install("preprocessCore", ask = FALSE)'
 R -e 'install.packages("eva", INSTALL_opts = "--no-lock", repos="http://cran.us.r-project.org")'
+
+#Check Dependencies installation
+R_ver=`R --version | grep version | grep R | awk '{print $3}'`
+echo "${g}*************************************************"
+echo "${w}R $R_ver packages versions${g}"
+echo "*************************************************${g}"
+echo -n "${g}lattice:                      	        ${w}" ; R --no-restore -e 'packageVersion("lattice")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
+echo -n "${g}MASS: 	                       	        ${w}" ; R --no-restore -e 'packageVersion("MASS")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
+echo -n "${g}Matrix:                       	        ${w}" ; R --no-restore -e 'packageVersion("Matrix")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
+echo -n "${g}XICOR: 	                       	        ${w}" ; R --no-restore -e 'packageVersion("XICOR")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
+echo -n "${g}mclust:                       	        ${w}" ; R --no-restore -e 'packageVersion("mclust")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
+echo -n "${g}BiocManager:                   	        ${w}" ; R --no-restore -e 'packageVersion("BiocManager")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
+echo -n "${g}eva: 	                       	        ${w}" ; R --no-restore -e 'packageVersion("eva")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
+echo "${g}*************************************************${w}"
+
 conda deactivate
+
 echo 'conda environments installed'
 
 echo 'MTD installation progress:'
@@ -59,6 +81,7 @@ echo 'downloading virome database...'
 conda activate MTD
 ##conda install -y python=3.10 
 conda install -n MTD -y -c bioconda metaphlan=3.0.7=pyh7b7c402_0 #Instalar no env MTD
+conda install -n MTD -y -c conda-forge pkg-config
 
 #Check if the file exists and have the same size before download
 wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/virushostdb.genomic.fna.gz
@@ -76,6 +99,7 @@ echo 'MTD installation progress:'
 echo '>>>>                [20%]'
 echo 'Preparing microbiome (virus, bacteria, archaea, protozoa, fungi, plasmid, UniVec_Core) database...'
 # Kraken2 database building - Microbiome
+
 DBNAME=kraken2DB_micro
 kraken2-build --download-taxonomy --threads $threads --db $DBNAME $kmer $min_l $min_s
 kraken2-build --download-library archaea --threads $threads --db $DBNAME $kmer $min_l $min_s
@@ -212,7 +236,7 @@ python $dir/Installation/hisat2_extract_splice_sites.py genome.gtf > genome.ss
 python $dir/Installation/hisat2_extract_exons.py genome.gtf > genome.exon
 #wget -c http://ftp.ensembl.org/pub/release-104/fasta/macaca_mulatta/dna/Macaca_mulatta.Mmul_10.dna.toplevel.fa.gz #use ensembl genome to compatible with featureCount
 #wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/ref_rhesus/Macaca_mulatta.Mmul_10.dna.toplevel.fa.gz
-cp /media/me/BACKUP_LBN_HD4TB/Compressed/MTD/Mus_musculus.GRCm39.104.gtf.gz .
+cp /media/me/BACKUP_LBN_HD4TB/Compressed/MTD/Macaca_mulatta.Mmul_10.dna.toplevel.fa.gz .
 gzip -d Macaca_mulatta.Mmul_10.dna.toplevel.fa.gz
 mv Macaca_mulatta.Mmul_10.dna.toplevel.fa genome.fa
 hisat2-build -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
@@ -279,7 +303,7 @@ conda activate R412
 
 
 # debug in case libcurl cannot be located in the conda R environment
-wget -T 300 -t 5 -N --no-if-modified-since https://cloud.r-project.org/src/contrib/curl_4.3.2.tar.gz
+wget -T 300 -t 5 -N --no-if-modified-since https://cran.r-project.org/src/contrib/Archive/curl/curl_4.3.2.tar.gz
 # if /usr/lib/x86_64-linux-gnu/pkgconfig/libcurl.pc exists, use it
 if [ -f /usr/lib/x86_64-linux-gnu/pkgconfig/libcurl.pc ]; then
     locate_lib=/usr/lib/x86_64-linux-gnu/pkgconfig
@@ -290,7 +314,8 @@ R CMD INSTALL --configure-vars='LIB_DIR='"$locate_lib" curl_4.3.2.tar.gz
 
 Rscript $dir/Installation/R_packages_installation.R
 ~/miniconda3/envs/MTD/opt/krona/updateTaxonomy.sh
-conda run -n MTD ~/miniconda3/envs/MTD/opt/krona/updateTaxonomy.sh
+conda activate MTD
+~/miniconda3/envs/MTD/opt/krona/updateTaxonomy.sh
 chmod +x MTD.sh
 
 echo 'MTD installation progress:'
