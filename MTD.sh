@@ -5,7 +5,7 @@
 pdm="spearman" # method in HALLA
 length=40 # read length trimming by fastp
 read_len=75 # the read length in bracken
-
+threads=`nproc`
 while getopts i:o:h:t:m:p:l:r:b: option
 do
     case "${option}" in

@@ -8,7 +8,7 @@ kmer="" # --kmer-len in kraken2-build
 min_l="" # --minimizer-len in kraken2-build
 min_s="" # --minimizer-spaces in kraken2-build
 read_len=75 # the read length in bracken-build
-
+threads=`nproc`
 condapath=~/miniconda3
 while getopts t:p:k:m:s:r: option # user can ingore -c and -p if conda has been already installed in the home directory
 do
@@ -25,7 +25,6 @@ done
 # get MTD folder place; same as Install.sh script file path (in the MTD folder)
 dir=$(dirname $(readlink -f $0))
 cd $dir # MTD folder place
-
 touch condaPath
 echo "$condapath" > $dir/condaPath
 
