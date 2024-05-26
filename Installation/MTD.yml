@@ -112,7 +112,7 @@ dependencies:
   - mash=2.2.2=ha61e061_2
   - matplotlib-base=3.3.4=py38h0efea84_0
 #  - metaphlan=3.0.7=pyh7b7c402_0
-  - metaphlan=4.0.67=pyhca03a8a_0
+  - metaphlan=4.0.6=pyhca03a8a_0
   - muscle=3.8.1551=hc9558a2_5
   - ncbi-ngs-sdk=2.10.9=h3e72335_0
   - ncurses=6.2=h58526e2_4
