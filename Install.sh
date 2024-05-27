@@ -190,11 +190,11 @@ cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/uniref90_annotated_v201901.tar.gz .
 cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/full_mapping_v201901.tar.gz .
 
 mkdir -p $dir/HUMAnN/ref_database/chocophlan
-tar xzvf full_chocophlan.v296_201901.tar.gz -C chocophlan
+tar xzvf full_chocophlan.v296_201901.tar.gz -C chocophlan/
 mkdir -p $dir/HUMAnN/ref_database/full_UniRef90
-tar xzvf uniref90_annotated_v201901.tar.gz -C full_UniRef90
+tar xzvf uniref90_annotated_v201901.tar.gz -C full_UniRef90/
 mkdir -p $dir/HUMAnN/ref_database/utility_mapping
-tar xzvf full_mapping_v201901.tar.gz -C utility_mapping
+tar xzvf full_mapping_v201901.tar.gz -C utility_mapping/
 cd $dir
 
 humann_config --update database_folders nucleotide $dir/HUMAnN/ref_database/chocophlan

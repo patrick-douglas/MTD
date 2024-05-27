@@ -1,10 +1,12 @@
 #!/bin/bash
 MTDIR=~/MTD
 condapath=~/miniconda3
-while getopts t:c:d:g: option
+threads=`nproc`
+
+while getopts c:d:g: option
 do
     case "${option}" in
-        t) threads=${OPTARG};;
+ #       t) threads=${OPTARG};;
         d) download=${OPTARG};; # download address of host genome from Ensembl (e.g, http://ftp.ensembl.org/pub/release-104/fasta/callithrix_jacchus/dna/Callithrix_jacchus.ASM275486v1.dna.toplevel.fa.gz)
         c) customized=${OPTARG};; # taxid for the host species
         g) gtf=${OPTARG};; # download address of host gtf from Emsenbl (e.g, http://ftp.ensembl.org/pub/release-104/gtf/callithrix_jacchus/Callithrix_jacchus.ASM275486v1.104.gtf.gz)
@@ -26,12 +28,12 @@ conda activate MTD
 DBNAME=kraken2DB_${customized}
 mkdir -p $DBNAME
 cd $DBNAME
-wget -c $download #http://ftp.ensembl.org/pub/release-104/fasta/mus_musculus/dna/Mus_musculus.GRCm39.dna.primary_assembly.fa.gz
+cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/Calidris_pugnax.ASM143184v1.dna.toplevel.fa.gz .
+#wget -c $download #http://ftp.ensembl.org/pub/release-104/fasta/mus_musculus/dna/Mus_musculus.GRCm39.dna.primary_assembly.fa.gz
 
 #bash -x ~/MTD/Customized_host.sh -t 12 -d http://ftp.ensembl.org/pub/release-111/fasta/myotis_lucifugus/dna/Myotis_lucifugus.Myoluc2.0.dna.toplevel.fa.gz -c 59463 -g http://ftp.ensembl.org/pub/release-111/gtf/myotis_lucifugus/Myotis_lucifugus.Myoluc2.0.111.gtf.gz
 #Calidris pugnax
 #bash  ~/MTD/Customized_host.sh -t 20 -d https://ftp.ensembl.org/pub/release-111/fasta/calidris_pugnax/dna/Calidris_pugnax.ASM143184v1.dna.toplevel.fa.gz -c 198806 -g https://ftp.ensembl.org/pub/release-111/gtf/calidris_pugnax/Calidris_pugnax.ASM143184v1.111.gtf.gz
-
 
 unpigz *.fa.gz
 mv *.fa genome_${customized}.fa
@@ -41,7 +43,8 @@ kraken2-build --add-to-library $DBNAME/genome_${customized}.fa --threads $thread
 kraken2-build --build --threads $threads --db $DBNAME
 
 # download host GTF
-wget -c $gtf -P ref_${customized} -O ref_${customized}.gtf.gz
+#wget -c $gtf -P ref_${customized} -O ref_${customized}.gtf.gz
+cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/Calidris_pugnax.ASM143184v1.111.gtf.gz .
 
 # Building indexes for hisat2
 mkdir -p hisat2_index_${customized}
