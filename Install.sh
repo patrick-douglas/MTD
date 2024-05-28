@@ -79,7 +79,7 @@ echo '>>>                 [15%]'
 echo 'downloading virome database...'
 conda activate MTD
 ##conda install -y python=3.10 
-conda install -n MTD -y -c bioconda metaphlan=4.0.6=pyhca03a8a_0 #Instalar no env MTD
+#conda install -n MTD -y -c bioconda metaphlan=4.0.6=pyhca03a8a_0 #Instalar no env MTD
 conda install -n MTD -y -c conda-forge pkg-config
 
 #Check if the file exists and have the same size before download
@@ -298,7 +298,7 @@ echo 'installing R packages...'
 # install R packages
 conda deactivate
 conda activate R412
-~/MTD/update_fix/update_conda_pkgs.sh
+$dir/update_fix/update_conda_pkgs.sh
 
 
 # debug in case libcurl cannot be located in the conda R environment
