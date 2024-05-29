@@ -28,8 +28,8 @@ conda activate MTD
 DBNAME=kraken2DB_${customized}
 mkdir -p $DBNAME
 cd $DBNAME
-cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/Calidris_pugnax.ASM143184v1.dna.toplevel.fa.gz .
-#wget -c $download #http://ftp.ensembl.org/pub/release-104/fasta/mus_musculus/dna/Mus_musculus.GRCm39.dna.primary_assembly.fa.gz
+#cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/Calidris_pugnax.ASM143184v1.dna.toplevel.fa.gz .
+wget -c $download #http://ftp.ensembl.org/pub/release-104/fasta/mus_musculus/dna/Mus_musculus.GRCm39.dna.primary_assembly.fa.gz
 
 #bash -x ~/MTD/Customized_host.sh -t 12 -d http://ftp.ensembl.org/pub/release-111/fasta/myotis_lucifugus/dna/Myotis_lucifugus.Myoluc2.0.dna.toplevel.fa.gz -c 59463 -g http://ftp.ensembl.org/pub/release-111/gtf/myotis_lucifugus/Myotis_lucifugus.Myoluc2.0.111.gtf.gz
 #Calidris pugnax
@@ -43,8 +43,8 @@ kraken2-build --add-to-library $DBNAME/genome_${customized}.fa --threads $thread
 kraken2-build --build --threads $threads --db $DBNAME
 
 # download host GTF
-#wget -c $gtf -P ref_${customized} -O ref_${customized}.gtf.gz
-cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/Calidris_pugnax.ASM143184v1.111.gtf.gz .
+wget -c $gtf -P ref_${customized} -O ref_${customized}.gtf.gz
+#cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/Calidris_pugnax.ASM143184v1.111.gtf.gz .
 
 # Building indexes for hisat2
 mkdir -p hisat2_index_${customized}
