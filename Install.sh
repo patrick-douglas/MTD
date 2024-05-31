@@ -297,9 +297,11 @@ echo '>>>>>>>>>>>>>>>>>>  [90%]'
 echo 'installing R packages...'
 # install R packages
 conda deactivate
+conda install -n py2 -y -c conda-forge pkg-config
 conda activate R412
-$dir/update_fix/update_conda_pkgs.sh
-
+#$dir/update_fix/update_conda_pkgs.sh
+conda install -n R412 -y -c conda-forge pkg-config
+~/MTD/update_fix/Install.R.packages.R412.sh
 
 # debug in case libcurl cannot be located in the conda R environment
 wget -T 300 -t 5 -N --no-if-modified-since https://cran.r-project.org/src/contrib/Archive/curl/curl_4.3.2.tar.gz

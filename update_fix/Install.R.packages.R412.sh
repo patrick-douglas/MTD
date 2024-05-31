@@ -1,5 +1,5 @@
 #!/bin/bash -x
-
+R -e 'install.packages("~/MTD/update_fix/pvr_pkg/lattice_0.22-5.tar.gz", repos=NULL, type="source")'
 R -e 'install.packages("httr",repos = "http://cran.us.r-project.org")'
 R -e 'install.packages(c("BiocManager"), repos="http://cran.us.r-project.org")'
 R -e 'install.packages("lattice",repos = "http://cran.us.r-project.org")'
