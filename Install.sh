@@ -318,7 +318,7 @@ Rscript $dir/Installation/R_packages_installation.R
 conda activate MTD
 ~/miniconda3/envs/MTD/opt/krona/updateTaxonomy.sh
 chmod +x MTD.sh
-
+cp $dir/update_fix/hclust2.py ~/miniconda3/envs/py2/lib/python2.7/site-packages/hclust2.py
 echo 'MTD installation progress:'
 echo '>>>>>>>>>>>>>>>>>>>>[100%]'
 echo "MTD installation is finished"
