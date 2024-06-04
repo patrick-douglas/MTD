@@ -12,12 +12,14 @@ MTD is a software that has two sub-pipelines to jointly analyze of host transcri
 * Conda was installed
 * GNU/Linux system with Bash
 # Installation
-1. Download directly or git clone MTD (git clone https://github.com/FEI38750/MTD.git) to the place you want to install. The full version of software (~530GB) will be installed in this MTD folder.
+1. Download directly or git clone to the place you want to install. The full version of software (~530GB) will be installed in this MTD folder.
+
+<pre><code>git clone git@github.com:patrick-douglas/MTD.git</code></pre>
+
 2. In termial, type\
 **bash [path/to/MTD]/Install.sh -p [path/to/conda]**\
 For example:
-        <pre><code>bash ~/MTD/Install.sh -p ~/miniconda3
-</code></pre>
+<pre><code>bash ~/MTD/Install.sh -p ~/miniconda3</code></pre>
 ## Notes
 * Installation may take 1-2 days (10-20 threads).
 * If conda hasn't been installed in your system, please use the code below to install the conda:
