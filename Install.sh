@@ -172,29 +172,34 @@ cd $dir/HUMAnN/ref_database/
 #Link working but slow
 #wget -T 300 -t 5 -N --no-if-modified-since http://cmprod1.cibio.unitn.it/databases/HUMAnN/full_chocophlan.v296_201901.tar.gz
 #Temporary cp solution
-cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/full_chocophlan.v296_201901.tar.gz .
-
+#cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/full_chocophlan.v296_201901.tar.gz .
+cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/HUMAnN_updated/full_chocophlan.v296_201901b.tar.gz .
 #Link 403 forbidden
 #wget -c http://huttenhower.sph.harvard.edu/humann2_data/uniprot/uniref_annotated/uniref90_annotated_v201901.tar.gz
 #Link working but slow
 #wget -T 300 -t 5 -N --no-if-modified-since http://cmprod1.cibio.unitn.it/databases/HUMAnN/uniref90_annotated_v201901.tar.gz
 #Temporary cp solution
-cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/uniref90_annotated_v201901.tar.gz .
-
+#cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/uniref90_annotated_v201901.tar.gz .
+cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/HUMAnN_updated/uniref90_annotated_v201901b_full.tar.gz .
 #Link 403 forbidden
 #wget -c http://huttenhower.sph.harvard.edu/humann2_data/full_mapping_v201901.tar.gz
 #Link working but slow
 #wget -c http://cmprod1.cibio.unitn.it/databases/HUMAnN/full_mapping_v201901.tar.gz
 #Link source forge patrick-douglas
 #wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/HUMAnN/ref_database/full_mapping_v201901.tar.gz
-cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/full_mapping_v201901.tar.gz .
+#cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/full_mapping_v201901.tar.gz .
+cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/HUMAnN_updated/full_mapping_v201901b.tar.gz
 
 mkdir -p $dir/HUMAnN/ref_database/chocophlan
-tar xzvf full_chocophlan.v296_201901.tar.gz -C chocophlan/
-mkdir -p $dir/HUMAnN/ref_database/full_UniRef90
-tar xzvf uniref90_annotated_v201901.tar.gz -C full_UniRef90/
+#tar xzvf full_chocophlan.v296_201901.tar.gz -C chocophlan/
+tar xzvf full_chocophlan.v296_201901b.tar.gz -C chocophlan/
+#mkdir -p $dir/HUMAnN/ref_database/full_UniRef90
+mkdir -p $dir/HUMAnN/ref_database/uniref
+#tar xzvf uniref90_annotated_v201901.tar.gz -C full_UniRef90/
+tar xzvf uniref90_annotated_v201901b_full.tar.gz -C uniref/
 mkdir -p $dir/HUMAnN/ref_database/utility_mapping
-tar xzvf full_mapping_v201901.tar.gz -C utility_mapping/
+#tar xzvf full_mapping_v201901.tar.gz -C utility_mapping/full_mapping_v201901b.tar.gz
+tar xzvf full_mapping_v201901.tar.gz -C utility_mapping/full_mapping_v201901b.tar.gz
 cd $dir
 
 humann_config --update database_folders nucleotide $dir/HUMAnN/ref_database/chocophlan
