@@ -173,7 +173,7 @@ cd $dir/HUMAnN/ref_database/
 #wget -T 300 -t 5 -N --no-if-modified-since http://cmprod1.cibio.unitn.it/databases/HUMAnN/full_chocophlan.v296_201901.tar.gz
 #Temporary cp solution
 #cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/full_chocophlan.v296_201901.tar.gz .
-cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/HUMAnN_updated/full_chocophlan.v296_201901b.tar.gz .
+cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/HUMAnN_updated/full_chocophlan.v201901_v31.tar.gz .
 #Link 403 forbidden
 #wget -c http://huttenhower.sph.harvard.edu/humann2_data/uniprot/uniref_annotated/uniref90_annotated_v201901.tar.gz
 #Link working but slow
@@ -188,7 +188,7 @@ cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/HUMAnN_updated/uniref90_annotated_v20
 #Link source forge patrick-douglas
 #wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/HUMAnN/ref_database/full_mapping_v201901.tar.gz
 #cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/full_mapping_v201901.tar.gz .
-cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/HUMAnN_updated/full_mapping_v201901b.tar.gz
+cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/HUMAnN_updated/full_mapping_v201901b.tar.gz .
 
 mkdir -p $dir/HUMAnN/ref_database/chocophlan
 #tar xzvf full_chocophlan.v296_201901.tar.gz -C chocophlan/
