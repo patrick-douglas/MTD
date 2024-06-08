@@ -199,7 +199,7 @@ done
 
 echo 'MTD running  progress:'
 echo '>>>>>>>>>           [45%]'
-
+exit 1
 #combined .bracken files (table like) into a single outputdr for Deseq2
 python $MTDIR/Tools/combine_bracken_outputs.py --files *.phylum.bracken -o $outputdr/bracken_phylum_all
 python $MTDIR/Tools/combine_bracken_outputs.py --files *.genus.bracken -o $outputdr/bracken_genus_all
