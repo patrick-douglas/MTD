@@ -324,6 +324,13 @@ conda activate MTD
 ~/miniconda3/envs/MTD/opt/krona/updateTaxonomy.sh
 chmod +x MTD.sh
 cp $dir/update_fix/hclust2.py ~/miniconda3/envs/py2/lib/python2.7/site-packages/hclust2.py
+echo "*********************************"
+echo "R packages version for conda envs"
+echo "*********************************"
+~/MTD/update_fix/check_R_pkg.R412.sh
+conda run -n halla0820 ~/MTD/update_fix/check_R_pkg_halla0820.sh
+echo "*********************************"
+echo ""
 echo 'MTD installation progress:'
 echo '>>>>>>>>>>>>>>>>>>>>[100%]'
 echo "MTD installation is finished"
