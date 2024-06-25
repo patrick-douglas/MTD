@@ -1,26 +1,63 @@
 #!/bin/bash
+
+# Defining colors
 w=$(tput sgr0) 
 r=$(tput setaf 1)
 g=$(tput setaf 2) 
 y=$(tput setaf 3) 
 p=$(tput setaf 5) 
+
+# Setting default values
 kmer="" # --kmer-len in kraken2-build
 min_l="" # --minimizer-len in kraken2-build
 min_s="" # --minimizer-spaces in kraken2-build
 read_len=75 # the read length in bracken-build
-threads=`nproc`
+threads=$(nproc)
 condapath=~/miniconda3
-while getopts p:k:m:s:r:o: option # user can ingore -c and -p if conda has been already installed in the home directory
-do
+offline_files_folder=""
+
+# Function to display usage message
+usage() {
+    echo "Usage: $0 -p <condapath> -o <offline_files_folder> [-k <kmer>] [-m <minimizer_length>] [-s <minimizer_spaces>] [-r <read_length>]"
+    exit 1
+}
+
+# Checking if the required parameters are provided
+if [ $# -lt 4 ]; then
+    usage
+fi
+
+# Processing arguments
+while getopts ":p:o:k:m:s:r:" option; do
     case "${option}" in
-        p) condapath=${OPTARG};; # path to miniconda/anaconda (default is in home directory: ~/miniconda3)
-        k) kmer=${OPTARG};; # --kmer-len in kraken2-build
-        m) min_l=${OPTARG};; # --minimizer-len in kraken2-build
-        s) min_s=${OPTARG};; # --minimizer-spaces in kraken2-build
-        r) read_len=${OPTARG};; # the read length in bracken-build
-        o) offline_files_folder=${OPTARG};; 
+        p)
+            condapath=${OPTARG}
+            ;;
+        o)
+            offline_files_folder=${OPTARG}
+            ;;
+        k)
+            kmer=${OPTARG}
+            ;;
+        m)
+            min_l=${OPTARG}
+            ;;
+        s)
+            min_s=${OPTARG}
+            ;;
+        r)
+            read_len=${OPTARG}
+            ;;
+        *)
+            usage
+            ;;
     esac
 done
+
+# Verifying if the required parameters are provided
+if [ -z "$condapath" ] || [ -z "$offline_files_folder" ]; then
+    usage
+fi
 
 # get MTD folder place; same as Install.sh script file path (in the MTD folder)
 dir=$(dirname $(readlink -f $0))
