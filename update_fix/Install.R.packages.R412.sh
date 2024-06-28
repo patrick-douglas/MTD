@@ -34,6 +34,9 @@ R -e 'BiocManager::install("ragg", force = TRUE, update = FALSE)'
 R -e 'BiocManager::install("sctransform", force = TRUE, update = FALSE)'
 R -e 'BiocManager::install("cmapR", force = TRUE, update = FALSE)'
 R -e 'BiocManager::install("clusterProfiler", force = TRUE, update = FALSE)'
+R -e 'install.packages("~/MTD/update_fix/pvr_pkg/pbkrtest_0.5.2.tar.gz", repos=NULL, type="source")'
+R -e 'install.packages("car",repos = "http://cran.us.r-project.org")'
+R -e 'BiocManager::install("Maaslin2", force = TRUE, update = FALSE)'
 #fix httpd installations
 rm -rf /home/me/miniconda3/envs/R412/lib/R/library/*LOCK-httpuv/
 R -e 'install.packages("promises",repos = "http://cran.us.r-project.org")'
