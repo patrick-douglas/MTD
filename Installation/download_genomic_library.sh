@@ -14,7 +14,7 @@ set -e  # Stop on error
 
 LIBRARY_DIR="$KRAKEN2_DB_NAME/library"
 NCBI_SERVER="ftp.ncbi.nlm.nih.gov"
-FTP_SERVER="ftp://$NCBI_SERVER"
+FTP_SERVER="https://$NCBI_SERVER"
 RSYNC_SERVER="rsync://$NCBI_SERVER"
 THIS_DIR=$PWD
 
@@ -29,7 +29,12 @@ function download_file() {
   file="$1"
   if [ -n "$KRAKEN2_USE_FTP" ]
   then
-    wget -q ${FTP_SERVER}${file}
+#rm -rf $dir/kraken2DB_micro/library/bacteria/ 
+#mkdir -p $dir/kraken2DB_micro/library/bacteria/all
+#cp $offline_files_folder/Kraken2DB_micro/library/bacteria/assembly_summary.txt $dir/kraken2DB_micro/library/bacteria/
+#cp $offline_files_folder/Kraken2DB_micro/library/bacteria/manifest.txt $dir/kraken2DB_micro/library/bacteria/
+#for file in $offline_files_folder/Kraken2DB_micro/library/bacteria/all/*.gz; do cp "$file" $dir/kraken2DB_micro/library/bacteria/all/; done
+wget ${FTP_SERVER}${file}
   else
     rsync --no-motd ${RSYNC_SERVER}${file} .
   fi
@@ -46,7 +51,7 @@ case $library_name in
     fi
     if ! download_file "/genomes/refseq/$remote_dir_name/assembly_summary.txt"; then
       1>&2 echo "Error downloading assembly summary file for $library_name, exiting."
-      exit 1
+#      exit 1
     fi
     if [ "$library_name" = "human" ]; then
       grep "Genome Reference Consortium" assembly_summary.txt > x

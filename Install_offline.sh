@@ -84,12 +84,12 @@ echo '>>                  [10%]'
 conda activate halla0820 # install dependencies of halla
 #halla0820
 conda install -n halla0820 -y -c conda-forge pkg-config
-R -e 'install.packages("lattice",repos = "http://cran.us.r-project.org")'
-R -e 'install.packages("~/MTD/update_fix/pvr_pkg/Matrix_1.6-5.tar.gz", repos=NULL, type="source")'
-R -e 'install.packages("~/MTD/update_fix/pvr_pkg/MASS_7.3-60.tar.gz", repos=NULL, type="source")'
-R -e 'install.packages(c("XICOR","mclust","BiocManager"), repos="http://cran.us.r-project.org")'
+R -e "install.packages('lattice',repos = 'http://cran.us.r-project.org')"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/Matrix_1.6-5.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/MASS_7.3-60.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages(c('XICOR','mclust','BiocManager'), repos='http://cran.us.r-project.org', Ncpus=$threads)"
 R -e 'BiocManager::install("preprocessCore", ask = FALSE)'
-R -e 'install.packages("eva", INSTALL_opts = "--no-lock", repos="http://cran.us.r-project.org")'
+R -e "install.packages('eva', INSTALL_opts = '--no-lock', repos='http://cran.us.r-project.org', Ncpus=$threads)"
 
 #Check Dependencies installation
 R_ver=`R --version | grep version | grep R | awk '{print $3}'`
@@ -118,7 +118,8 @@ conda activate MTD
 conda install -n MTD -y -c conda-forge pkg-config
 
 #Check if the file exists and have the same size before download
-wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/virushostdb.genomic.fna.gz
+#wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/virushostdb.genomic.fna.gz
+cp -f $dir/virushostdb.genomic.fna.gz .
 #wget -c https://www.genome.jp/ftp/db/virushostdb/virushostdb.genomic.fna.gz
 unpigz -f virushostdb.genomic.fna.gz
 cat Installation/M33262_SIVMM239.fa virushostdb.genomic.fna > viruses4kraken.fa
