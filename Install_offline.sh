@@ -286,7 +286,7 @@ python $dir/Installation/hisat2_extract_splice_sites.py genome.gtf > genome.ss
 python $dir/Installation/hisat2_extract_exons.py genome.gtf > genome.exon
 #wget -c http://ftp.ensembl.org/pub/release-104/fasta/macaca_mulatta/dna/Macaca_mulatta.Mmul_10.dna.toplevel.fa.gz #use ensembl genome to compatible with featureCount
 #wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/ref_rhesus/Macaca_mulatta.Mmul_10.dna.toplevel.fa.gz
-cp $offline_files_folderMacaca_mulatta.Mmul_10.dna.toplevel.fa.gz .
+cp $offline_files_folder/Macaca_mulatta.Mmul_10.dna.toplevel.fa.gz .
 gzip -d Macaca_mulatta.Mmul_10.dna.toplevel.fa.gz
 mv Macaca_mulatta.Mmul_10.dna.toplevel.fa genome.fa
 hisat2-build -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
@@ -305,7 +305,7 @@ python $dir/Installation/hisat2_extract_splice_sites.py genome.gtf > genome.ss
 python $dir/Installation/hisat2_extract_exons.py genome.gtf > genome.exon
 #wget -c http://ftp.ensembl.org/pub/release-104/fasta/mus_musculus/dna/Mus_musculus.GRCm39.dna.primary_assembly.fa.gz #use ensembl genome to compatible with featureCount
 #wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/ref_mouse/Mus_musculus.GRCm39.dna.primary_assembly.fa.gz
-cp $offline_files_folderMus_musculus.GRCm39.dna.primary_assembly.fa.gz .
+cp $offline_files_folder/Mus_musculus.GRCm39.dna.primary_assembly.fa.gz .
 gzip -d Mus_musculus.GRCm39.dna.primary_assembly.fa.gz
 mv Mus_musculus.GRCm39.dna.primary_assembly.fa genome.fa
 hisat2-build -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
@@ -324,7 +324,7 @@ python $dir/Installation/hisat2_extract_splice_sites.py genome.gtf > genome.ss
 python $dir/Installation/hisat2_extract_exons.py genome.gtf > genome.exon
 #wget -c http://ftp.ensembl.org/pub/release-104/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz #use ensembl genome to compatible with featureCount
 #wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/ref_human/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz
-cp $offline_files_folderHomo_sapiens.GRCh38.dna.primary_assembly.fa.gz .
+cp $offline_files_folder/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz .
 gzip -d Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz
 mv Homo_sapiens.GRCh38.dna.primary_assembly.fa genome.fa
 hisat2-build -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
@@ -365,15 +365,17 @@ fi
 R CMD INSTALL --configure-vars='LIB_DIR='"$locate_lib" curl_4.3.2.tar.gz
 
 Rscript $dir/Installation/R_packages_installation.R
-~/miniconda3/envs/MTD/opt/krona/updateTaxonomy.sh
+~/MTD/update_fix/check_R_pkg.R412.sh
+#~/miniconda3/envs/MTD/opt/krona/updateTaxonomy.sh
+conda deactivate
 conda activate MTD
-~/miniconda3/envs/MTD/opt/krona/updateTaxonomy.sh
+#~/miniconda3/envs/MTD/opt/krona/updateTaxonomy.sh
 chmod +x MTD.sh
 cp $dir/update_fix/hclust2.py ~/miniconda3/envs/py2/lib/python2.7/site-packages/hclust2.py
 echo "*********************************"
 echo "R packages version for conda envs"
 echo "*********************************"
-~/MTD/update_fix/check_R_pkg.R412.sh
+conda run -n R412 ~/MTD/update_fix/check_R_pkg.R412.sh
 conda run -n halla0820 ~/MTD/update_fix/check_R_pkg_halla0820.sh
 echo "*********************************"
 echo ""
