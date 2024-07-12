@@ -20,7 +20,7 @@ MTD is a software that has two sub-pipelines to jointly analyze of host transcri
 **bash [path/to/MTD]/Install.sh -p [path/to/conda]**\
 For example:
 <pre><code>bash ~/MTD/Install.sh -p ~/miniconda3</code></pre>
-Or for offline installations
+Or for offline installation
 <pre><code>bash ~/MTD/Install_offline.sh -p ~/miniconda3 -o /media/me/4TB_BACKUP_LBN/Compressed/MTD/</code></pre>
 ## Notes
 * Installation may take 1-2 days (10-20 threads).
