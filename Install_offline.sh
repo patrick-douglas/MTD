@@ -113,6 +113,8 @@ echo 'MTD installation progress:'
 echo '>>>                 [15%]'
 echo 'downloading virome database...'
 conda activate MTD
+sudo apt-get update
+sudo apt-get install rsync -y
 ##conda install -y python=3.10 
 #conda install -n MTD -y -c bioconda metaphlan=4.0.6=pyhca03a8a_0 #Instalar no env MTD
 conda install -n MTD -y -c conda-forge pkg-config
