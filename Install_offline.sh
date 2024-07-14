@@ -125,13 +125,11 @@ unpigz -f virushostdb.genomic.fna.gz
 cat Installation/M33262_SIVMM239.fa virushostdb.genomic.fna > viruses4kraken.fa
 
 # debug rsync error of kraken2-build
+# debug rsync error of kraken2-build
 cp -f $dir/Installation/rsync_from_ncbi.pl $condapath/pkgs/kraken2-2.1.2-pl5262h7d875b9_0/libexec/rsync_from_ncbi.pl
-mkdir -p $dir/kraken2DB_micro/library/bacteria/all
 cp -f $dir/Installation/rsync_from_ncbi.pl $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
-#cp -f $dir/Installation/rsync_from_ncbi.pl $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
-
-#cp -f $dir/Installation/download_genomic_library.sh $condapath/pkgs/kraken2-2.1.2-pl5262h7d875b9_0/libexec/download_genomic_library.sh
-#cp -f $dir/Installation/download_genomic_library.sh $condapath/envs/MTD/libexec/download_genomic_library.sh
+cp -f $dir/Installation/download_genomic_library.sh $condapath/pkgs/kraken2-2.1.2-pl5262h7d875b9_0/libexec/download_genomic_library.sh
+cp -f $dir/Installation/download_genomic_library.sh $condapath/envs/MTD/libexec/download_genomic_library.sh
 
 echo 'MTD installation progress:'
 echo '>>>>                [20%]'
@@ -141,13 +139,13 @@ echo 'Preparing microbiome (virus, bacteria, archaea, protozoa, fungi, plasmid, 
 DBNAME=kraken2DB_micro
 kraken2-build --download-taxonomy --threads $threads --db $DBNAME $kmer $min_l $min_s
 kraken2-build --download-library archaea --threads $threads --db $DBNAME $kmer $min_l $min_s
-cp -f $dir/Installation/rsync_from_ncbi_offline.pl $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
-kraken2-build --download-library bacteria --threads $threads --db $DBNAME $kmer $min_l $min_s
-cp -f $dir/Installation/rsync_from_ncbi.pl $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
 kraken2-build --download-library protozoa --threads $threads --db $DBNAME $kmer $min_l $min_s
 kraken2-build --download-library fungi --threads $threads --db $DBNAME $kmer $min_l $min_s
 kraken2-build --download-library plasmid --threads $threads --db $DBNAME $kmer $min_l $min_s
 kraken2-build --download-library UniVec_Core --threads $threads --db $DBNAME $kmer $min_l $min_s
+cp -f $dir/Installation/rsync_from_ncbi_offline.pl $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
+kraken2-build --download-library bacteria --threads $threads --db $DBNAME $kmer $min_l $min_s
+cp -f $dir/Installation/rsync_from_ncbi.pl $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
 kraken2-build --add-to-library viruses4kraken.fa --threads $threads --db $DBNAME $kmer $min_l $min_s
 kraken2-build --build --threads $threads --db $DBNAME $kmer $min_l $min_s
 
