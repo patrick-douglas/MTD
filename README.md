@@ -27,7 +27,9 @@ Or for offline installation
 * If conda hasn't been installed in your system, please use the code below to install the conda:
 <addr><pre><code>URL=https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
 curl $URL > miniconda-installer.sh
-bash miniconda-installer.sh -b</code></pre>
+bash miniconda-installer.sh -b
+sudo apt-get install rsync -y</code></pre>
+
 Conda then will be installed in your home directory, such as path: ~/miniconda3
 * MTD conda environments occupies ~24GB in your conda folder.
 * Tips: file management software such as FileZilla (https://filezilla-project.org/download.php?show_all=1) can help you to manage your files on HPC/server.
