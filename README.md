@@ -28,8 +28,8 @@ Or for offline installation
 <addr><pre><code>URL=https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
 curl $URL > miniconda-installer.sh
 bash miniconda-installer.sh -b</code></pre>
-*You will probably need to update rsync
-<addr><pre><codesudo apt-get install rsync -y
+* You will probably need to update rsync
+<addr><pre><code>sudo apt-get install rsync -y
 sudo apt-get update</code></pre>
 
 Conda then will be installed in your home directory, such as path: ~/miniconda3
