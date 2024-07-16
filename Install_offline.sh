@@ -12,7 +12,7 @@ kmer="" # --kmer-len in kraken2-build
 min_l="" # --minimizer-len in kraken2-build
 min_s="" # --minimizer-spaces in kraken2-build
 read_len=75 # the read length in bracken-build
-threads=$(nproc)
+threads=$(($(nproc) - 2))
 condapath=~/miniconda3
 offline_files_folder=""
 
