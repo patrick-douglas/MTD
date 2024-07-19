@@ -73,6 +73,12 @@ echo 'installing conda environments...'
 conda env create -f Installation/MTD.yml
 conda env create -f Installation/py2.yml
 conda env create -f Installation/halla0820.yml
+conda activate halla0820
+pip install --upgrade setuptools pip
+pip install -r Installation/pip.requirements
+pip install jenkspy matplotlib numpy pandas PyYAML scipy seaborn
+pip install --no-deps halla==0.8.20
+conda deactivate
 conda env create -f Installation/R412.yml
 
 echo 'MTD installation progress:'
