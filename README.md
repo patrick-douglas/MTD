@@ -40,7 +40,7 @@ Conda then will be installed in your home directory, such as path: ~/miniconda3
 MTD pipeline is a very complex approche which requires a lot of diffrent apckages, so a good pratice would be run test
  using the NCBI database as bellow:
 * Test run: For user who does not have the bulk RNA-seq raw data on hand could have a test run by command:
-  <pre><code>bash ~/MTD]/MTD.sh -i ~/MTD/test/test1/samplesheet.csv -o ~/test1/output -h 9606</code></pre>
+  <pre><code>bash ~/MTD/MTD.sh -i ~/MTD/test/test1/samplesheet.csv -o ~/test1/output -h 9606</code></pre>
 NOTE: The number of threads is defined automatically by `threads=nproc`, but you can change it by editing the installation script
 
 # Run MTD
