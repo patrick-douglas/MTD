@@ -67,7 +67,7 @@ touch condaPath
 echo "$condapath" > $dir/condaPath
 
 source $condapath/etc/profile.d/conda.sh
-
+sudo apt-get update
 conda deactivate
 echo 'installing conda environments...'
 conda env create -f Installation/MTD.yml
