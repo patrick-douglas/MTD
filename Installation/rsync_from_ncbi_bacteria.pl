@@ -18,7 +18,7 @@ use List::Util qw/max/;
 my $PROG = basename $0;
 
 # Specify the original directory where your downloaded .gz files are stored
-my $local_download_dir = "$offline_files_folder/Kraken2DB_micro/library/bacteria/all/";
+my $local_download_dir = "/media/me/4TB_BACKUP_LBN/Compressed/MTD/Kraken2DB_micro/library/bacteria/all/";
 
 # Specify the new directory where you want to copy the files
 my $new_download_dir = "$ENV{HOME}/MTD/kraken2DB_micro/library/bacteria/all";
