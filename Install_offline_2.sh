@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # Defining colors
-w=$(tput sgr0) 
+w=$(tput sgr0)
 r=$(tput setaf 1)
-g=$(tput setaf 2) 
-y=$(tput setaf 3) 
-p=$(tput setaf 5) 
+g=$(tput setaf 2)
+y=$(tput setaf 3)
+p=$(tput setaf 5)
 echo "${w}"
 
 # Setting default values
@@ -161,18 +161,21 @@ echo 'Preparing microbiome (virus, bacteria, archaea, protozoa, fungi, plasmid, 
 DBNAME=kraken2DB_micro
 kraken2-build --download-taxonomy --threads $threads --db $DBNAME $kmer $min_l $min_s
 check_status "Downloading Kraken2 taxonomy for microbiome"
+
+# Substituição de FTP por wget para o download da biblioteca de plasmídeos
+echo 'Downloading plasmid files from FTP...' | tee -a $logfile
+wget -r -nd -np -A 'plasmid.*' ftp://ftp.ncbi.nlm.nih.gov/refseq/release/plasmid/ -P $DBNAME/library/plasmid/
+check_status "Downloading Kraken2 plasmid library"
+
 kraken2-build --download-library archaea --threads $threads --db $DBNAME $kmer $min_l $min_s
 check_status "Downloading Kraken2 archaea library"
-cp -f $dir/Installation/rsync_from_ncbi_offline.pl $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
 kraken2-build --download-library bacteria --threads $threads --db $DBNAME $kmer $min_l $min_s
 check_status "Downloading Kraken2 bacteria library"
-cp -f $dir/Installation/rsync_from_ncbi.pl $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
 kraken2-build --download-library protozoa --threads $threads --db $DBNAME $kmer $min_l $min_s
 check_status "Downloading Kraken2 protozoa library"
 kraken2-build --download-library fungi --threads $threads --db $DBNAME $kmer $min_l $min_s
 check_status "Downloading Kraken2 fungi library"
-kraken2-build --download-library plasmid --threads $threads --db $DBNAME $kmer $min_l $min_s
-check_status "Downloading Kraken2 plasmid library"
+
 kraken2-build --download-library UniVec_Core --threads $threads --db $DBNAME $kmer $min_l $min_s
 check_status "Downloading Kraken2 UniVec_Core library"
 kraken2-build --add-to-library viruses4kraken.fa --threads $threads --db $DBNAME $kmer $min_l $min_s
