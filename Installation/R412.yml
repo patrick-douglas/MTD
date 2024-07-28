@@ -41,6 +41,7 @@ dependencies:
   - icu=69.1=h9c3ff4c_0
   - jbig=2.1=h7f98852_2003
   - jpeg=9d=h36c2ea0_0
+  - kraken2=2.1.2=pl5262h7d875b9_0
   - kernel-headers_linux-64=2.6.32=he073ed8_15
   - krb5=1.19.2=h48eae69_3
   - ld_impl_linux-64=2.36.1=hea4e1c9_2

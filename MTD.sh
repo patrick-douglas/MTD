@@ -12,7 +12,7 @@ do
         i) inputdr=${OPTARG};;
         o) outputdr=${OPTARG};;
         h) hostid=${OPTARG};;
-#        t) threads=${OPTARG};;
+#       t) threads=${OPTARG};;
         m) metadata=${OPTARG};;
         p) pdm=${OPTARG};;
         l) length=${OPTARG};;

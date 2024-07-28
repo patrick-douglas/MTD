@@ -80,7 +80,6 @@ pip install jenkspy matplotlib numpy pandas PyYAML scipy seaborn
 pip install --no-deps halla==0.8.20
 conda deactivate
 conda env create -f Installation/R412.yml
-
 echo 'MTD installation progress:'
 echo '>>                  [10%]'
 
