@@ -71,6 +71,7 @@ sudo apt-get update
 conda deactivate
 echo 'installing conda environments...'
 conda env create -f Installation/MTD.yml
+$dir/update_fix/Install.R.packages.MTD.sh
 conda env create -f Installation/py2.yml
 conda env create -f Installation/halla0820.yml
 conda activate halla0820
