@@ -113,7 +113,12 @@ fi
 
 echo 'MTD running  progress:'
 echo '>>                  [10%]'
-
+max_fastp_cores=16
+if [ "$threads" -gt "$max_fastp_cores" ]; then
+    fastp_threads=$max_fastp_cores
+else
+    fastp_threads=$threads
+fi
 # Raw reads trimming
 echo 'Raw reads trimming and filtering...'
 for i in $lsn; do # store input sample name in i; eg. DJ01
@@ -123,7 +128,7 @@ for i in $lsn; do # store input sample name in i; eg. DJ01
 	    # fastp with polyA/T trimming
         fastp --trim_poly_x \
             --length_required $length \
-            --thread 16 \
+            --thread $fastp_threads \
             -i $fq1 -I $fq2 \
             -o Trimmed_${i}_1.fq -O Trimmed_${i}_2.fq 
 done

@@ -3,8 +3,8 @@
 # default settings
 
 pdm="spearman" # method in HALLA
-length=30 # read length trimming by fastp
-read_len=75 # the read length in bracken
+length=25 # read length trimming by fastp
+read_len=30 # the read length in bracken
 threads=`nproc`
 while getopts i:o:h:m:p:l:r:b: option
 do
@@ -114,6 +114,12 @@ echo 'MTD running  progress:'
 echo '>>                  [10%]'
 
 # Raw reads trimming
+max_fastp_cores=16
+if [ "$threads" -gt "$max_fastp_cores" ]; then
+    fastp_threads=$max_fastp_cores
+else
+    fastp_threads=$threads
+fi
 echo 'Raw reads trimming and filtering...'
 for i in $lsn; do # store input sample name in i; eg. DJ01
     # To get the corresponding fastq file as input (support .fq.gz, .fastq.gz, .fq, or .fastq)
@@ -121,7 +127,7 @@ for i in $lsn; do # store input sample name in i; eg. DJ01
 	    # fastp with polyA/T trimming
         fastp --trim_poly_x \
             --length_required $length \
-            --thread 16 \
+            --thread $fastp_threads \
             -i $fq \
             -o Trimmed_${i}.fq.gz
 done
