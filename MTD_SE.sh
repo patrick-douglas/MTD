@@ -3,8 +3,8 @@
 # default settings
 
 pdm="spearman" # method in HALLA
-length=25 # read length trimming by fastp
-read_len=30 # the read length in bracken
+length=35 # read length trimming by fastp
+read_len=75 # the read length in bracken
 threads=`nproc`
 while getopts i:o:h:m:p:l:r:b: option
 do
