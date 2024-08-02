@@ -60,5 +60,11 @@ python $dir/Installation/hisat2_extract_exons.py genome.gtf > genome.exon
 mv ../$DBNAME/genome_${customized}.fa genome.fa
 hisat2-build -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
 cd ..
+mkdir -p $MTDIR/blastdb_$customized
+cd $MTDIR/blastdb_$customized
+cp $download . 
+gunzip *.fa.gz 
+mv *.fa blastdb_59463
+makeblastdb -in $MTDIR/blastdb_59463/blastdb_59463 -dbtype nucl -out $MTDIR/blastdb_59463/blastdb_59463 -parse_seqids
 
 echo "Customized host reference building is done"
