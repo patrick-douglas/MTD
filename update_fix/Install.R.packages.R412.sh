@@ -49,3 +49,4 @@ R -e "BiocManager::install('Seurat', force = TRUE, update = FALSE, Ncpus=$thread
 R -e "install.packages('Seurat',repos = 'http://cran.us.r-project.org', Ncpus=$threads)"
 R -e "BiocManager::install('tximeta', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/rlang_1.1.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/vctrs_0.5.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
