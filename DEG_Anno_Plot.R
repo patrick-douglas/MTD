@@ -722,7 +722,7 @@ if (filename %in% c("bracken_species_all",
 
   # change color scale for plot_bar
   HowManyPhyla <- length(levels(as.factor(data_sam@tax_table[,2])))
-  getPalette = colorRampPalette(brewer.pal(9, "Set2"))
+  getPalette = colorRampPalette(brewer.pal(12, "Set2"))
   PhylaPalette = getPalette(HowManyPhyla)
 
   # phyloseq bar plots
