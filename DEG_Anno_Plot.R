@@ -961,7 +961,7 @@ if (length(unique(coldata$group))>=2){
 }
 
 
-# non-host/host reads ratio comparison
+# non_host_host_reads_ratio comparison
 if (filename %in% c("bracken_species_all","bracken_phylum_all","bracken_genus_all")){
   files_h <- list.files(paste0(dirname(args[1]),"/temp"), pattern="^Report_host_.*\\.txt$", full.names=TRUE, recursive=FALSE)
   lh<-c() #generate a empty list
@@ -969,28 +969,28 @@ if (filename %in% c("bracken_species_all","bracken_phylum_all","bracken_genus_al
   for (i in files_h){
     t<-read.table(i,sep="\t", quote= "")
     a<-t[1,1] #get unclassified reads ratio: non-host part
-    r<-a/(100-a) #non-host/host reads ratio in kraken2 host report
+    r<-a/(100-a) #non_host_host_reads_ratio in kraken2 host report
     fn<-gsub("^Report_host_|\\.txt$","",basename(i)) #grep the sample name
-    lh<-c(lh,setNames(r,fn)) #add sample name with value to the list lh; non-host/host reads ratio
+    lh<-c(lh,setNames(r,fn)) #add sample name with value to the list lh; non_host_host_reads_ratio
     la<-c(la,setNames(a,fn)) #unclassified reads ratio: non-host part
   }
   lah<-cbind(la,lh)
   lah<-merge(lah,coldata,by.x="row.names",by.y="sample_name")
-  colnames(lah)<-c("Sample","unclassified reads ratio %","non-host/host reads ratio","Groups")
+  colnames(lah)<-c("Sample","unclassified_reads_ratio_percent","non_host_host_reads_ratio","Groups")
 
   # to draw box plot with comparison of unclassified ratio
   my_comparisons<-list()
   for (i in 1:nrow(coldata_vs)){
     my_comparisons[[i]] <- c(coldata_vs$group1[i],coldata_vs$group2[i])
   }
-  ggboxplot(lah, x = "Groups", y = "non-host/host reads ratio",
+  ggboxplot(lah, x = "Groups", y = "non_host_host_reads_ratio",
             color = "Groups", palette = "jco",
             add = "jitter") +
     stat_compare_means(comparisons = my_comparisons,
                        method = "t.test") # Add pairwise comparisons p-value
   ggsave("non-host_vs_host_reads_ratio.pdf")
 
-  ggboxplot(lah, x = "Groups", y = "unclassified reads ratio %",
+  ggboxplot(lah, x = "Groups", y = "unclassified_reads_ratio_percent",
             color = "Groups", palette = "jco",
             add = "jitter") +
     stat_compare_means(comparisons = my_comparisons,
