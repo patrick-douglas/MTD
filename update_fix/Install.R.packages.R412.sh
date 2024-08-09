@@ -36,7 +36,7 @@ R -e "BiocManager::install('sctransform', force = TRUE, update = FALSE, Ncpus=$t
 R -e "BiocManager::install('cmapR', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "BiocManager::install('clusterProfiler', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/lifecycle_1.0.3.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/tidyselect_1.2.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/tidyselect_1.2.1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/rlang_1.1.2.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/vctrs_0.6.4.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/cli_3.6.2.tar.gz', repos=NULL, type='source', Ncpus=$threads)"

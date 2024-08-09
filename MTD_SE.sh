@@ -1,5 +1,9 @@
 #!/bin/bash
-
+w=$(tput sgr0) 
+r=$(tput setaf 1)
+g=$(tput setaf 2) 
+y=$(tput setaf 3) 
+p=$(tput setaf 5)
 # default settings
 
 pdm="spearman" # method in HALLA
@@ -113,7 +117,7 @@ fi
 echo 'MTD running  progress:'
 echo '>>                  [10%]'
 
-# Raw reads trimming
+echo "Raw reads trimming"
 max_jobs=$(nproc)
 max_fastp_cores=16
 
@@ -156,7 +160,7 @@ if [ -n "$no_trimm" ]; then
             # Se o arquivo não estiver comprimido, remova o sufixo e comprima
             base_name_no_suffix=$(echo "$base_name" | sed "s/_R[0-9]$//")
             output_file="$2/Trimmed_${base_name_no_suffix}.fq.gz"
-            gzip -c "$input_file" > "$output_file"
+            gzip --fast -c "$input_file" > "$output_file"
         fi
     ' _ {} "$outputdr/temp"
 fi
