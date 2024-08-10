@@ -43,7 +43,9 @@ R -e "install.packages('~/MTD/update_fix/pvr_pkg/cli_3.6.2.tar.gz', repos=NULL, 
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/purrr_1.0.1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/tibble_3.2.1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/cmapR_1.16.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/dplyr_1.1.3.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/dplyr_1.1.4.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/dbplyr_2.5.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/biomaRt_2.60.1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 conda install -y -n R412 -c conda-forge r-ggpubr
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/tidyr_1.3.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 
