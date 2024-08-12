@@ -10,6 +10,7 @@ pdm="spearman" # method in HALLA
 length=35 # read length trimming by fastp
 read_len=75 # the read length in bracken
 threads=`nproc`
+blast="hisat"  # Define "hisat" como padrão
 while getopts i:o:h:m:p:l:r:b:t option
 do
     case "${option}" in
@@ -20,7 +21,7 @@ do
         p) pdm=${OPTARG};;
         l) length=${OPTARG};;
         r) read_len=${OPTARG};;
-        b) blast=${OPTARG};;
+        b) blast="blast";;  # Se -b for usado, define blast como "blast"
         t) no_trimm=1;;
     esac
 done

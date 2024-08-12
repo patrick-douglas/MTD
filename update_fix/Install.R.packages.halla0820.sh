@@ -6,4 +6,5 @@ R -e "install.packages('~/MTD/update_fix/pvr_pkg/MASS_7.3-60.tar.gz', repos=NULL
 R -e "install.packages(c('XICOR','mclust','BiocManager'), repos='http://cran.us.r-project.org', Ncpus=$threads)"
 R -e "BiocManager::install('preprocessCore', ask = FALSE)"
 R -e "install.packages('eva', INSTALL_opts = '--no-lock', repos='http://cran.us.r-project.org', Ncpus=$threads)"
+conda install -y -n halla0820 scikit-learn
 

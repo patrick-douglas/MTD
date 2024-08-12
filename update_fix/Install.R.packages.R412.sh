@@ -29,8 +29,16 @@ R -e "BiocManager::install('lme4', force = TRUE, update = FALSE, Ncpus=$threads)
 R -e "BiocManager::install('TMB', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "BiocManager::install('GenomicFeatures', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "BiocManager::install('metagenomeSeq', force = TRUE, update = FALSE, Ncpus=$threads)"
+
+R -e 'remotes::install_github("YuLab-SMU/yulab.utils")'
+conda install -y -n R412 -c conda-forge r-systemfonts
+conda install -y -n R412 -c conda-forge r-textshaping
+conda install -y -n R412 -c conda-forge r-ragg
+R -e 'remotes::install_bioc("biomaRt")'
+
 R -e "remotes::install_github('YuLab-SMU/ggtree',repos = 'http://cran.us.r-project.org', Ncpus=$threads)"
-R -e "remotes::install_github('YuLab-SMU/enrichplot',repos = 'http://cran.us.r-project.org', Ncpus=$threads)"
+conda install -y -n R412 bioconda::bioconductor-enrichplot
+conda install -y -n R412 conda-forge::r-tidyverse
 R -e "BiocManager::install('ragg', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "BiocManager::install('sctransform', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "BiocManager::install('cmapR', force = TRUE, update = FALSE, Ncpus=$threads)"
@@ -58,7 +66,9 @@ R -e "install.packages('promises',repos = 'http://cran.us.r-project.org', Ncpus=
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/httpuv_1.6.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "BiocManager::install('miniUI', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "BiocManager::install('shiny', force = TRUE, update = FALSE, Ncpus=$threads)"
-R -e "BiocManager::install('Seurat', force = TRUE, update = FALSE, Ncpus=$threads)"
+conda install -y -n R412 conda-forge::r-htmltools
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/htmltools_0.5.8.1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/fastmap_1.2.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('Seurat',repos = 'http://cran.us.r-project.org', Ncpus=$threads)"
 R -e "BiocManager::install('tximeta', force = TRUE, update = FALSE, Ncpus=$threads)"
 
