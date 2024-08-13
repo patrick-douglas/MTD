@@ -171,14 +171,14 @@ dependencies:
   - yaml=0.2.5=h7f98852_2
   - zlib=1.2.11=h166bdaf_1014
   - zstd=1.5.2=ha95c52a_0
-#  - pip:
-#    - cffi==1.15.0
-#    - halla==0.8.20
-#    - jinja2==3.1.1
-#    - markupsafe==2.1.1
-#    - pycparser==2.21
-#    - pytz-deprecation-shim==0.1.0.post0
-#    - rpy2==3.4.5
-#    - sklearn==0.0
-#    - tzdata==2022.1
-#    - tzlocal==4.1
+  - pip:
+    - cffi==1.15.0
+    - halla==0.8.20
+    - jinja2==3.1.1
+    - markupsafe==2.1.1
+    - pycparser==2.21
+    - pytz-deprecation-shim==0.1.0.post0
+    - rpy2==3.4.5
+    - sklearn==0.0
+    - tzdata==2022.1
+    - tzlocal==4.1

@@ -492,7 +492,7 @@ echo "DEG & Annotation & Plots & preprocess for host"
 conda deactivate
 conda activate R412
 Rscript $MTDIR/DEG_Anno_Plot.R $outputdr/host_counts.txt $inputdr/samplesheet.csv $hostid $MTDIR/HostSpecies.csv $metadata
-
+#Aqui o arquivo definido pela variavel $metadata pode causar erros na analise DE, principalemnte se tiver grupos com apenas 1 fator, melhor rodar sem o $metadata e usar apenas do samplessheet.csv
 echo 'MTD running  progress:'
 echo '>>>>>>>>>>>>>>>     [75%]'
 

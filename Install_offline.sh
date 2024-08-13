@@ -75,10 +75,10 @@ $dir/update_fix/Install.R.packages.MTD.sh
 conda env create -f Installation/py2.yml
 conda env create -f Installation/halla0820.yml
 conda activate halla0820
-pip install --upgrade setuptools pip
-pip install -r Installation/pip.requirements
-pip install jenkspy matplotlib numpy pandas PyYAML scipy seaborn
-pip install --no-deps halla==0.8.20
+#pip install --upgrade setuptools pip
+#pip install -r Installation/pip.requirements
+#pip install jenkspy matplotlib numpy pandas PyYAML scipy seaborn
+#pip install --no-deps halla==0.8.20
 conda deactivate
 conda env create -f Installation/R412.yml
 echo 'MTD installation progress:'
@@ -94,28 +94,14 @@ conda install -n halla0820 -y -c conda-forge pkg-config
 R -e "install.packages('lattice',repos = 'http://cran.us.r-project.org', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/Matrix_1.6-5.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/MASS_7.3-60.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/psychTools_2.4.3.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages(c('XICOR','mclust','BiocManager'), repos='http://cran.us.r-project.org', Ncpus=$threads)"
 R -e 'BiocManager::install("preprocessCore", ask = FALSE)'
 R -e "install.packages('eva', INSTALL_opts = '--no-lock', repos='http://cran.us.r-project.org', Ncpus=$threads)"
-
-#Check Dependencies installation
-R_ver=`R --version | grep version | grep R | awk '{print $3}'`
-echo "${g}*************************************************"
-echo "${w}R $R_ver packages versions${g}"
-echo "*************************************************${g}"
-echo -n "${g}lattice:                      	        ${w}" ; R --no-restore -e 'packageVersion("lattice")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
-echo -n "${g}MASS: 	                       	        ${w}" ; R --no-restore -e 'packageVersion("MASS")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
-echo -n "${g}Matrix:                       	        ${w}" ; R --no-restore -e 'packageVersion("Matrix")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
-echo -n "${g}XICOR: 	                       	        ${w}" ; R --no-restore -e 'packageVersion("XICOR")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
-echo -n "${g}mclust:                       	        ${w}" ; R --no-restore -e 'packageVersion("mclust")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
-echo -n "${g}BiocManager:                   	        ${w}" ; R --no-restore -e 'packageVersion("BiocManager")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
-echo -n "${g}eva: 	                       	        ${w}" ; R --no-restore -e 'packageVersion("eva")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
-echo "${g}*************************************************${w}"
-
+conda run -n halla0820 ~/MTD/update_fix/check_R_pkg.halla0820.sh
 conda deactivate
 
 echo 'conda environments installed'
-
 echo 'MTD installation progress:'
 echo '>>>                 [15%]'
 echo 'downloading virome database...'
@@ -393,7 +379,7 @@ echo "*********************************"
 echo "R packages version for conda envs"
 echo "*********************************"
 conda run -n R412 ~/MTD/update_fix/check_R_pkg.R412.sh
-conda run -n halla0820 ~/MTD/update_fix/check_R_pkg_halla0820.sh
+conda run -n halla0820 ~/MTD/update_fix/check_R_pkg.halla0820.sh
 echo "*********************************"
 echo ""
 echo 'MTD installation progress:'
