@@ -474,6 +474,8 @@ featureCounts -T $threads \
    -o $outputdr/host_counts.txt \
    *.sam
 
+#for i in $lsn; do samtools view -bS $i.sam -@ $threads > $i.bam && samtools sort $i.bam -o $i.sorted.bam -@ $threads && samtools index $i.sorted.bam -@ $threads; done
+
 for i in $lsn; do
     samtools view -bS $i.sam > $i.bam -@ $threads
     samtools sort $i.bam -o $i.sorted.bam -@ $threads
@@ -487,6 +489,11 @@ cd $outputdr
 # trim the featureCounts output(host_counts.txt) for downstream analysis
 echo "Delete the first line/row of a file then trim the sample name"
 sed '1d; 2 s/\.sam//g' host_counts.txt > tmpfile; mv tmpfile host_counts.txt
+
+#Adicionar a coluna TaxonID no arquivo hostcounts
+#Rscript $MTDIR/add_taxon_id.R --input $outputdr/host_counts.txt --output $outputdr/Host_counts_tax_id.txt --taxonid $hostid
+#mv $outputdr/host_counts.txt $outputdr/host_counts.txt.original.MTD
+#mv $outputdr/Host_counts_tax_id.txt $outputdr/host_counts.txt
 
 echo "DEG & Annotation & Plots & preprocess for host"
 conda deactivate

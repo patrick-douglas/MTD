@@ -427,7 +427,7 @@ if (filename %in%
     geom_point(size=3) +
     xlab(paste0("PC1: ",percentVar[1],"% variance")) +
     ylab(paste0("PC2: ",percentVar[2],"% variance")) +
-    geom_text_repel(aes(label=pcadata$name),size=3) +
+    geom_text_repel(aes(label=pcadata$name), size=3, max.overlaps = 21) +
     coord_fixed() +
     theme_bw() +
     ggtitle("PCA")
@@ -437,7 +437,7 @@ if (filename %in%
     geom_point(size=3) +
     xlab(paste0("PC1: ",percentVar[1],"% variance")) +
     ylab(paste0("PC2: ",percentVar[2],"% variance")) +
-    geom_text_repel(aes(label=pcadata$name),size=3) +
+    geom_text_repel(aes(label=pcadata$name),size=3, max.overlaps = 21) +
     coord_fixed() +
     theme_bw() +
     ggtitle("PCA")
@@ -662,7 +662,7 @@ if (filename %in% c("bracken_species_all",
       geom_point(size=3) +
       xlab(paste0("PCoA1: ",round(100*b[1]),"% variance")) +
       ylab(paste0("PCoA2: ",round(100*b[2]),"% variance")) +
-      geom_text_repel(aes(label=row.names(braycurtis.pcoa.export)),size=3) +
+      geom_text_repel(aes(label=row.names(braycurtis.pcoa.export)),size=3, max.overlaps = 21) +
       coord_fixed() +
       theme_bw() +
       ggtitle("Bray-Curtis Distances PCoA")
@@ -861,7 +861,7 @@ for (i in 1:nrow(coldata_vs)){
                               col=diffexpressed, label=label)) +
     geom_point(size = 1.5) +
     theme_minimal() +
-    geom_text_repel(size=3) +
+    geom_text_repel(size=3, max.overlaps = 21) +
     scale_color_manual(values=c("blue", "black", "red")) +
     geom_vline(xintercept=c(-0.5, 0.5), col="red",linetype="dashed") +
     geom_hline(yintercept=-log10(0.05), col="red",linetype="dashed") +
@@ -1222,14 +1222,15 @@ setwd("../")
 if (filename == "host_counts.txt"){
   setwd("Host_DEG")
   do.db <- host_sp[host_sp$Taxon_ID==args[3],4] # match host taxID with DO.db database
+print(do.db)
+#do.db <- "myoLuc1.db" # Use myoLuc1.db directly
   # check if variable is NULL
   if(is.null(do.db)){
     print("host species is not supported for pathway enrichment yet")
   } else {
-    # if package is not installed, install it
+# if package is not installed, install it
     if (!requireNamespace(do.db, quietly = TRUE))
-      BiocManager::install(do.db)
-    
+    BiocManager::install(do.db)
     library(clusterProfiler)
     library(enrichplot)
     library(ggnewscale)
