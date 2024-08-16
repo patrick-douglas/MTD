@@ -52,11 +52,12 @@ kraken2-build --build --threads $threads --db $DBNAME
 
 # download host GTF
 #wget -c $gtf -P ref_${customized} -O ref_${customized}.gtf.gz
+echo "Coping GTF file to $ref_${customized}/ref_${customized}.gtf.gz"
 rm -rf ref_${customized} && mkdir -p ref_${customized} && cp $gtf ref_${customized}/ref_${customized}.gtf.gz
 #cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/Calidris_pugnax.ASM143184v1.111.gtf.gz .
 #cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/Myotis_lucifugus/Myotis_lucifugus.Myoluc2.0.111.gtf.gz .
 
-# Building indexes for hisat2
+echo "Building indexes for hisat2"
 mkdir -p hisat2_index_${customized}
 cd hisat2_index_${customized}
 cp ../ref_${customized}*.gtf.gz .
@@ -67,11 +68,14 @@ python $dir/Installation/hisat2_extract_exons.py genome.gtf > genome.exon
 mv ../$DBNAME/genome_${customized}.fa genome.fa
 hisat2-build -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
 cd ..
+
+echo "Creating blast databases for custom reference $customized"
 mkdir -p $MTDIR/blastdb_$customized
 cd $MTDIR/blastdb_$customized
 cp $download . 
 gunzip *.fa.gz 
-mv *.fa blastdb_59463
-makeblastdb -in $MTDIR/blastdb_59463/blastdb_59463 -dbtype nucl -out $MTDIR/blastdb_59463/blastdb_59463 -parse_seqids
+mv *.fa blastdb_$customized
+
+makeblastdb -in $MTDIR/blastdb_$customized/blastdb_$customized -dbtype nucl -out $MTDIR/blastdb_$customized/blastdb_$customized -parse_seqids
 
 echo "Customized host reference building is done"
