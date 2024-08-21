@@ -12,6 +12,9 @@ do
         g) gtf=${OPTARG};; # download address of host gtf from Emsenbl (e.g, http://ftp.ensembl.org/pub/release-104/gtf/callithrix_jacchus/Callithrix_jacchus.ASM275486v1.104.gtf.gz)
     esac
 done
+# Remove any previously created directories or files from previous runs
+rm -rf $MTDIR/kraken2DB_${customized} $MTDIR/ref_${customized} $MTDIR/hisat2_index_${customized} $MTDIR/blastdb_${customized}
+
 
 # get MTD folder place; same as Install.sh script file path (in the MTD folder)
 dir=$(dirname $(readlink -f $0))
@@ -26,7 +29,8 @@ conda activate MTD
 
 # Kraken2 database building - Customized
 DBNAME=kraken2DB_${customized}
-rm -rf $DBNAME && mkdir -p $DBNAME
+rm -rf $DBNAME 
+mkdir -p $DBNAME
 cd $DBNAME
 #cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/Calidris_pugnax.ASM143184v1.dna.toplevel.fa.gz .
 #cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/Myotis_lucifugus/Myotis_lucifugus.Myoluc2.0.dna.toplevel.fa.gz .
@@ -42,25 +46,48 @@ cp -u $download .
 #Rattus norvegicus
 #bash ~/MTD/Customized_host_offline.sh -d /media/me/4TB_BACKUP_LBN/Compressed/MTD/Rattus_norvegicus/Rattus_norvegicus.mRatBN7.2.dna.toplevel.fa.gz -g /media/me/4TB_BACKUP_LBN/Compressed/MTD/-c 10116
 
+#Gallus gallus
+#bash ~/MTD/Customized_host_offline.sh -d /media/me/4TB_BACKUP_LBN/Compressed/MTD/Gallus_gallus/Gallus_gallus.bGalGal1.mat.broiler.GRCg7b.dna.toplevel.fa.gz -g /media/me/4TB_BACKUP_LBN/Compressed/MTD/Gallus_gallus/Gallus_gallus.bGalGal1.mat.broiler.GRCg7b.111.gtf.gz -c 9031
 
 unpigz *.fa.gz
 mv *.fa genome_${customized}.fa
+
+# Extraia o nome científico da espécie baseado no Taxon_ID
+species_name=$(awk -F, -v taxid="$customized" '$1 == taxid {print $3}' "$MTDIR/HostSpecies.csv")
+
+# Verifique se o nome da espécie foi encontrado
+if [ -z "$species_name" ]; then
+  echo "Error: species name not found for Taxon_ID $customized."
+  exit 1
+fi
+
+# Extraia o assembly_name do cabeçalho da sequência de entrada
+assembly_name=$(grep -m 1 '^>' genome_${customized}.fa | sed -n 's/.*dna:primary_assembly \([^ ]*\).*/\1/p')
+
+# Modifique o cabeçalho do arquivo FASTA usando sed
+sed -i "s/^>\(.*\) dna:primary_assembly \(.*\):\(.*\) REF$/>kraken:taxid|${customized}|\\3 ${species_name} chromosome \\3, ${assembly_name} Primary Assembly/" genome_${customized}.fa
+
 cd ..
 kraken2-build --download-taxonomy --threads $threads --db $DBNAME
 kraken2-build --add-to-library $DBNAME/genome_${customized}.fa --threads $threads --db $DBNAME
 kraken2-build --build --threads $threads --db $DBNAME
-
 # download host GTF
 #wget -c $gtf -P ref_${customized} -O ref_${customized}.gtf.gz
 echo "Coping GTF file to $ref_${customized}/ref_${customized}.gtf.gz"
-rm -rf ref_${customized} && mkdir -p ref_${customized} && cp $gtf ref_${customized}/ref_${customized}.gtf.gz
+rm -rf ref_${customized}
+mkdir -p ref_${customized}
+cp $gtf ref_${customized}
+cd ref_${customized}
+mv *.gtf.gz ref_${customized}.gtf.gz
+
 #cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/Calidris_pugnax.ASM143184v1.111.gtf.gz .
 #cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/Myotis_lucifugus/Myotis_lucifugus.Myoluc2.0.111.gtf.gz .
-
+cd ..
 echo "Building indexes for hisat2"
+rm -rf hisat2_index_${customized}
 mkdir -p hisat2_index_${customized}
 cd hisat2_index_${customized}
-cp ../ref_${customized}*.gtf.gz .
+cp ../ref_${customized}/ref_${customized}.gtf.gz .
 gzip -d *.gtf.gz
 mv *.gtf genome.gtf
 python $dir/Installation/hisat2_extract_splice_sites.py genome.gtf > genome.ss
@@ -70,6 +97,7 @@ hisat2-build -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
 cd ..
 
 echo "Creating blast databases for custom reference $customized"
+rm -rf $MTDIR/blastdb_$customized
 mkdir -p $MTDIR/blastdb_$customized
 cd $MTDIR/blastdb_$customized
 cp $download . 

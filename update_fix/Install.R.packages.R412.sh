@@ -54,9 +54,9 @@ R -e "install.packages('~/MTD/update_fix/pvr_pkg/cmapR_1.16.0.tar.gz', repos=NUL
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/dplyr_1.1.4.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/dbplyr_2.5.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/biomaRt_2.60.1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
-conda install -y -n R412 -c conda-forge r-ggpubr
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/tidyr_1.3.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
-
+conda install -y -n R412 -c conda-forge r-ggpubr
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/ggpubr_0.6.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/pbkrtest_0.5.2.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('car',repos = 'http://cran.us.r-project.org', Ncpus=$threads)"
 R -e "BiocManager::install('Maaslin2', force = TRUE, update = FALSE, Ncpus=$threads)"

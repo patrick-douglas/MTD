@@ -427,7 +427,7 @@ if (filename %in%
     geom_point(size=3) +
     xlab(paste0("PC1: ",percentVar[1],"% variance")) +
     ylab(paste0("PC2: ",percentVar[2],"% variance")) +
-    geom_text_repel(aes(label=pcadata$name), size=3, max.overlaps = 21) +
+    geom_text_repel(aes(label=pcadata$name), size=3, max.overlaps = 25) +
     coord_fixed() +
     theme_bw() +
     ggtitle("PCA")
@@ -437,7 +437,7 @@ if (filename %in%
     geom_point(size=3) +
     xlab(paste0("PC1: ",percentVar[1],"% variance")) +
     ylab(paste0("PC2: ",percentVar[2],"% variance")) +
-    geom_text_repel(aes(label=pcadata$name),size=3, max.overlaps = 21) +
+    geom_text_repel(aes(label=pcadata$name),size=3, max.overlaps = 25) +
     coord_fixed() +
     theme_bw() +
     ggtitle("PCA")
@@ -662,7 +662,7 @@ if (filename %in% c("bracken_species_all",
       geom_point(size=3) +
       xlab(paste0("PCoA1: ",round(100*b[1]),"% variance")) +
       ylab(paste0("PCoA2: ",round(100*b[2]),"% variance")) +
-      geom_text_repel(aes(label=row.names(braycurtis.pcoa.export)),size=3, max.overlaps = 21) +
+      geom_text_repel(aes(label=row.names(braycurtis.pcoa.export)),size=3, max.overlaps = 25) +
       coord_fixed() +
       theme_bw() +
       ggtitle("Bray-Curtis Distances PCoA")
@@ -861,7 +861,7 @@ for (i in 1:nrow(coldata_vs)){
                               col=diffexpressed, label=label)) +
     geom_point(size = 1.5) +
     theme_minimal() +
-    geom_text_repel(size=3, max.overlaps = 21) +
+    geom_text_repel(size=3, max.overlaps = 25) +
     scale_color_manual(values=c("blue", "black", "red")) +
     geom_vline(xintercept=c(-0.5, 0.5), col="red",linetype="dashed") +
     geom_hline(yintercept=-log10(0.05), col="red",linetype="dashed") +
