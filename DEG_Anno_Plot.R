@@ -1,3 +1,10 @@
+#!/usr/bin/Rscript
+options(echo = TRUE)
+# Função para exibir mensagem em verde
+message_green <- function(text) {
+  message("\033[32m", text, "\033[39m")
+}
+
 args = commandArgs(trailingOnly=TRUE) # Passing arguments to an R script from bash/shell command lines
 # make folder DEG to store outputs
 setwd(dirname(args[1]))
@@ -726,6 +733,7 @@ if (filename %in% c("bracken_species_all",
   PhylaPalette = getPalette(HowManyPhyla)
 
   # phyloseq bar plots
+message_green("phyloseq bar plots line 734")  
   try(plot_bar(data, fill="Phylum") +
     scale_fill_manual(values =PhylaPalette))
   try(ggsave("Bar_phy.pdf"))
@@ -855,7 +863,8 @@ for (i in 1:nrow(coldata_vs)){
     nt4v_label<-merge(nt4v,topFC, all=T)
   }
 
-  ## Volcano plotting
+## Volcano plotting
+message_green("Volcano plotting line 865")  
   # plot adding up all layers we have seen so far
   ggplot(data=nt4v_label, aes(x=log2FoldChange, y=-log10(pvalue),
                               col=diffexpressed, label=label)) +
@@ -870,6 +879,7 @@ for (i in 1:nrow(coldata_vs)){
   ggsave(paste0(group1,"_vs_",group2,"/Volcano_",group1,"_vs_",group2,".pdf"))
 
   ## bar plotting
+message_green("bar plotting line 880")  
   bar <- diffexpressed
   if (nrow(bar)!=0){
     # sort log2FoldChange top to down
@@ -899,6 +909,7 @@ for (i in 1:nrow(coldata_vs)){
 }
 
 ## Venn Diagram
+message_green("Venn Diagram 910") 
 if (length(unique(coldata$group))>=2){
   dv.list<-list()
   for (i in unique(coldata$group)){
@@ -937,7 +948,7 @@ if (length(unique(coldata$group))>=2){
      compression = "lzw",
 
     # Circles
-    lwd = 1,
+    size = 1,
     #lty = 'blank',
     col=cols,
     #fill = myCol,
@@ -962,6 +973,8 @@ if (length(unique(coldata$group))>=2){
 
 
 # non_host_host_reads_ratio comparison
+message_green("974") 
+
 if (filename %in% c("bracken_species_all","bracken_phylum_all","bracken_genus_all")){
   files_h <- list.files(paste0(dirname(args[1]),"/temp"), pattern="^Report_host_.*\\.txt$", full.names=TRUE, recursive=FALSE)
   lh<-c() #generate a empty list
@@ -979,6 +992,7 @@ if (filename %in% c("bracken_species_all","bracken_phylum_all","bracken_genus_al
   colnames(lah)<-c("Sample","unclassified_reads_ratio_percent","non_host_host_reads_ratio","Groups")
 
   # to draw box plot with comparison of unclassified ratio
+message_green("993") 
   my_comparisons<-list()
   for (i in 1:nrow(coldata_vs)){
     my_comparisons[[i]] <- c(coldata_vs$group1[i],coldata_vs$group2[i])
@@ -1000,6 +1014,7 @@ if (filename %in% c("bracken_species_all","bracken_phylum_all","bracken_genus_al
 
 
 # preprocess for graphlan
+message_green("1015") 
 if (filename %in% c("bracken_species_all","bracken_phylum_all","bracken_genus_all")){
 gph.anno<-read.table(paste0(dirname(args[1]),"/graphlan/annot.txt"),
                      header = F,blank.lines.skip=F, fill=TRUE,sep="\t",
@@ -1064,6 +1079,7 @@ for (i in 31:nrow(gph.anno)){
 Sys.time() - start_time
 
 # add rings to graphlan
+message_green("1080") 
 ring.list<-list() # make a list for ring color of each group
 for (i in unique(coldata$group)){
   ring.gp<-coldata[coldata$group==i,]
@@ -1146,6 +1162,7 @@ group4gph.table<-unique(group4gph.table)
 names(group4gph.table)[1]<-"V1"
 
 # remove "ring_alpha" from the sig. exp. white list
+message_green("1163") 
 #group4gph.table1<-group4gph.table[!(group4gph.table[,1]==white.list & group4gph.table[,2]=="ring_alpha"),]
 #group4gph.table<-group4gph.table[!((group4gph.table[,1] %in% white.list) & group4gph.table[,2]=="ring_alpha"),]
 library(reshape2)
@@ -1157,6 +1174,7 @@ for (g in unique(white.ls$L1)){
 }
 
 # gatekeeper of species name format between graphlan and bracken
+message_green("1175")
 gph.match<-grep(paste(group4gph.table[[1]],collapse="|"), gph.anno[[1]], value=TRUE)
 gph.nomatch<-unique(grep(paste(gph.match,collapse="|"),group4gph.table[[1]],value=TRUE, invert=T))
 gph.nomatch<-gph.nomatch[which(!gph.nomatch %in%
@@ -1190,6 +1208,7 @@ write.table(gph.anno1,paste0(dirname(args[1]),"/graphlan/annot.txt"),
 
 
 # adjust covariance effect
+message_green("1209")
 normtrans_adj <- limma::removeBatchEffect(normtrans, vsd$group)
 if (length(args) == 5){
   coldata.n<-coldata
@@ -1197,6 +1216,7 @@ if (length(args) == 5){
   normtrans_adj <- limma::removeBatchEffect(normtrans, covariates=coldata.n[,2:ncol(coldata.n)])
 }
 # make a folder for outputs
+message_green("1217")
 dir.create("../halla",recursive = T)
 setwd("../halla")
 # save normalized & transformed & covariance corrected data for downstream correlation analysis (e.g. halla)
@@ -1219,6 +1239,7 @@ setwd("../")
 
 
 ### Pathway enrichment for host genes ###
+message_green("1240")
 if (filename == "host_counts.txt"){
   setwd("Host_DEG")
   do.db <- host_sp[host_sp$Taxon_ID==args[3],4] # match host taxID with DO.db database
@@ -1238,6 +1259,7 @@ print(do.db)
     library(ggplot2)
     
     # function to make plots for GSEA results
+message_green("1260")
     plots4gsea<-function(edb, data, datax, edb0, genelist, group1, group2){
       # save the top10 GSEA results
       if (nrow(data@result)==0){
@@ -1250,12 +1272,14 @@ print(do.db)
           gseaplot2(data, geneSetID = 1:nrow(data@result))
           ggsave(paste0(edb,"/GSEA_GO.pdf"),height = (6+0.5*nrow(data@result)))
         }
+message_green("1273")
         # save all plots of the GSEA GO results
         dir.create(paste0(edb,"/GSEA_all"))
         for (g in 1:nrow(data@result)){
           gseaplot2(data, geneSetID = g, title = data$Description[g])
           ggsave(paste0(edb,"/GSEA_all/",gsub("/","_",data$Description[g]),"_GSEA_",edb0,".pdf"))
         }
+message_green("1280")
         # ridgeline plot for expression distribution of GSEA GO result
         ridgeplot(data)
         if (nrow(data@result)<30){
@@ -1263,9 +1287,11 @@ print(do.db)
         } else {
           ggsave(paste0(edb,"/GSEA_",edb0,"_ridgeplots.pdf"), height = 12)
         }
+message_green("1288")
         # dot plot
         dotplot(data) + ggtitle("dotplot for GSEA")
         ggsave(paste0(edb,"/GSEA_",edb0,"_dotplot.pdf"),height = 4.8, width = 6)
+message_green("1288")
         #networks
         cnetplot(datax, foldChange=genelist,cex_label_gene = 0.6)
         if (nrow(data@result)<25){
@@ -1273,6 +1299,8 @@ print(do.db)
         } else {
           ggsave(paste0(edb,"/GSEA_",edb0,"_net.pdf"),scale= 2)
         }
+message_green("1300")
+grep("lwd", ls(), value = TRUE)
         # tree plot
         datax2 <- pairwise_termsim(datax)
         treeplot(datax2)
@@ -1281,6 +1309,7 @@ print(do.db)
         } else {
           ggsave(paste0(edb,"/GSEA_",edb0,"_tree.pdf"),height=6)
         }
+message_green("1309")
         # enrichment map
         emapplot(datax2,layout="kk")
         if (nrow(data@result)<25){
@@ -1288,6 +1317,7 @@ print(do.db)
         } else {
           ggsave(paste0(edb,"/GSEA_",edb0,"_map.pdf"),scale= 2)
         }
+message_green("1317")
         # Heatmap-like functional classification
         heatplot(datax2, foldChange=genelist)
         if (nrow(data@result)<30){
@@ -1295,6 +1325,7 @@ print(do.db)
         } else {
           ggsave(paste0(edb,"/GSEA_",edb0,"_heat.pdf"),height=6.5,width=0.64*round(max(nchar((data@result$core_enrichment[1:30])))/19),limitsize=F)
         }
+message_green("1325")
         # upset plot
         if (nrow(data@result)<30){
           pdf(file= paste0(edb,"/GSEA_",edb0,"_upset.pdf"),height=0.4*nrow(data@result),width=12)
@@ -1305,7 +1336,9 @@ print(do.db)
         }
         print(p.upset) # save pdf inside a function
         dev.off()
+message_green("1336")
         # bar plot
+message_green("Bar plotting line 1317")  
         bar<-data@result
         bar$c<-with(bar,reorder(Description,-log(pvalue)))
         p.bar<-ggplot(bar,aes(x=-log(pvalue),y=c,fill=enrichmentScore))+
@@ -1318,7 +1351,8 @@ print(do.db)
           theme(text = element_text(size = 18))+
           scale_y_discrete(breaks=bar$Description,labels=stringr::str_trunc(bar$Description,40))
         ggsave(paste0(edb,"/GSEA_",edb0,"_barplots.pdf"),plot =p.bar,width=10,height=nrow(data@result)/12*5,limitsize=F)
-        
+
+message_green("1352")        
         # to save plots for all results
         if (nrow(data@result)>30){
           ridgeplot(data,showCatdatary = nrow(data@result))
@@ -1327,7 +1361,16 @@ print(do.db)
           ggsave(paste0(edb,"/GSEA_",edb0,"_dotplot_all.pdf"),height = 0.48*nrow(data@result), width = 6,limitsize=F)
           cnetplot(datax, foldChange=genelist,cex_label_gene = 0.6, showCatdatary = round(nrow(data@result)/6))
           ggsave(paste0(edb,"/GSEA_",edb0,"_net_all.pdf"),limitsize=F)
-          treeplot(datax2,showCatdatary =nrow(data@result),nCluster = round(nrow(data@result)/6))
+#Codigo original
+#          treeplot(datax2,showCatdatary =nrow(data@result),nCluster = round(nrow(data@result)/6))
+#Codigo modificado 
+#Calcular o número de clusters
+nCluster <- round(nrow(data@result) / 6)
+# Garantir que o número de clusters esteja no intervalo de 1 a 3
+nCluster <- max(1, min(nCluster, 3))
+# Passar o número de clusters ajustado para a função treeplot
+treeplot(datax2, showCategory = nrow(data@result), nCluster = nCluster)
+
           ggsave(paste0(edb,"/GSEA_",edb0,"_tree_all.pdf"),height=0.48*nrow(data@result),limitsize=F)
           emapplot(datax2,layout="kk",showCatdatary = nrow(data@result))
           ggsave(paste0(edb,"/GSEA_",edb0,"_map_all.pdf"),scale=nrow(data@result)/12,limitsize=F)
@@ -1336,7 +1379,7 @@ print(do.db)
         }
       }
     }
-    
+message_green("1370")    
     # function for KEGG Pathview plots
     pathview.p<-function(kk,ko.db,kegg_gene_list,dir){
       if (nrow(kk@result)==0){
@@ -1351,7 +1394,7 @@ print(do.db)
         }
       }
     }
-    
+message_green("1385")    
     # function for pathway enrichment by using comparison results between groups
     enrichment <- function(coldata_vs,args1,do.db){
       for (i in 1:nrow(coldata_vs)){
@@ -1412,6 +1455,8 @@ print(do.db)
         
         # KEGG pathway gene set enrichment analysis
         kk.p <- gseKEGG(geneList     = kegg_gene_list,
+#                       organism     = 'rno' ,
+#                       Rattus norvegicus above
                         organism     = ko.db,
                         keyType      = 'ncbi-geneid',
                         minGSSize    = 8,

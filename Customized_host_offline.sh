@@ -63,7 +63,11 @@ fi
 
 # Extraia o assembly_name do cabeçalho da sequência de entrada
 assembly_name=$(grep -m 1 '^>' genome_${customized}.fa | sed -n 's/.*dna:primary_assembly \([^ ]*\).*/\1/p')
-
+echo ''
+echo -e "Selected host species:\e[3m $species_name\e[0m"
+#echo "Selected host species:$species_name"
+echo "Taxon ID: $customized"
+echo ''
 # Modifique o cabeçalho do arquivo FASTA usando sed
 sed -i "s/^>\(.*\) dna:primary_assembly \(.*\):\(.*\) REF$/>kraken:taxid|${customized}|\\3 ${species_name} chromosome \\3, ${assembly_name} Primary Assembly/" genome_${customized}.fa
 

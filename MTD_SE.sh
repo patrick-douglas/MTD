@@ -1,11 +1,6 @@
 #!/bin/bash
-w=$(tput sgr0) 
-r=$(tput setaf 1)
-g=$(tput setaf 2) 
-y=$(tput setaf 3) 
-p=$(tput setaf 5)
+#Colors
 # default settings
-
 pdm="spearman" # method in HALLA
 length=35 # read length trimming by fastp
 read_len=75 # the read length in bracken
@@ -64,7 +59,7 @@ elif [[ $hostid == 9544 ]]; then
 
 elif [[ $hostid == 10090 ]]; then
     DB_host=$MTDIR/kraken2DB_mice
-    DB_hisat2=$MTDIR/hisat2_index_mouse/genome_tran
+t    DB_hisat2=$MTDIR/hisat2_index_mouse/genome_tran
     DB_blast=$MTDIR/mouse_blastdb/mouse_blastdb # for blast
     gtf=$MTDIR/ref_mouse/Mus_musculus.GRCm39.104.gtf.gz # for featureCounts
 
@@ -115,11 +110,69 @@ if [[ "$fastq_files" != "$SamplesInSheet" ]]; then
     exit 1
 fi
 
-echo 'MTD running  progress:'
-echo '>>                  [10%]'
+echo "MTD running  progress:"
+echo ">>                  [10%]"
 
 echo "Raw reads trimming"
-cp /media/me/4TB_BACKUP_LBN/temp/bat/* .
+choice="skip"
+#choice="skip" Just copy pre compressed files path is required
+#choice="execute" Perform the filtering or not based if the parameter -t is declared or not
+case $choice in
+  execute)
+max_jobs=$(nproc)
+max_fastp_cores=16
+
+if [ "$threads" -gt "$max_fastp_cores" ]; then
+    fastp_threads=$max_fastp_cores
+else
+    fastp_threads=$threads
+fi
+
+# Processar cada amostra
+for i in $lsn; do
+    # Encontre o arquivo fastq correspondente (suporta .fq.gz, .fastq.gz, .fq, ou .fastq)
+    fq=$(find $inputdr -name "${i}*.fq.gz" -o -name "${i}*.fastq.gz" -o -name "${i}*.fq" -o -name "${i}*.fastq" -type f)
+
+    if [ -z "$no_trimm" ]; then
+        # Se no_trimm não for definido, use o fastp para limpeza dos dados
+        echo 'Trimming fastq files with fastp'
+        fastp --trim_poly_x \
+              --length_required $length \
+              --thread $fastp_threads \
+              -i $fq \
+              -o $outputdr/temp/Trimmed_${i}.fq.gz
+    fi
+done
+
+# Compressão paralela e cópia se no_trimm for definido
+if [ -n "$no_trimm" ]; then
+    echo 'Compressing fastq files to .gz'
+    find $inputdr -name "*.fq" -o -name "*.fastq" -o -name "*.fq.gz" -o -name "*.fastq.gz" | xargs -I {} -P $max_jobs sh -c '
+        input_file="$1"
+        base_name=$(basename "${input_file%.*}")
+        
+        if [ "${input_file##*.}" = "gz" ]; then
+            # Se o arquivo já estiver comprimido, apenas processe o nome
+            base_name_no_suffix=$(echo "$base_name" | sed "s/_R[0-9]$//")
+            output_file="$2/Trimmed_${base_name_no_suffix}.fq.gz"
+            # Copie o arquivo comprimido para o diretório de saída com o novo nome
+            cp "$input_file" "$output_file"
+        else
+            # Se o arquivo não estiver comprimido, remova o sufixo e comprima
+            base_name_no_suffix=$(echo "$base_name" | sed "s/_R[0-9]$//")
+            output_file="$2/Trimmed_${base_name_no_suffix}.fq.gz"
+            gzip --fast -c "$input_file" > "$output_file"
+        fi
+    ' _ {} "$outputdr/temp"
+fi
+    ;;
+  skip)
+    echo "Copying files directly..."
+    cp /media/me/4TB_BACKUP_LBN/temp/bat/* .
+    ;;
+esac
+
+#cp /media/me/4TB_BACKUP_LBN/temp/bat/* .
 #$MTDIR/MTD_scripts/data_trimming.sh 
 
 echo 'MTD running  progress:'
@@ -217,7 +270,7 @@ echo "Adjust bracken file (tree like) by normalizated reads counts; for addition
 conda deactivate
 conda activate R412
 Rscript $MTDIR/Normalization_afbr.R $outputdr/bracken_species_all $inputdr/samplesheet.csv $outputdr/temp/Report_non-host_bracken_species_normalized $metadata
-read -p "Press ENTER to continue"
+
 conda deactivate
 conda activate MTD
 
@@ -457,6 +510,8 @@ conda deactivate
 conda activate R412
 Rscript $MTDIR/DEG_Anno_Plot.R $outputdr/host_counts.txt $inputdr/samplesheet.csv $hostid $MTDIR/HostSpecies.csv $metadata
 #Aqui o arquivo definido pela variavel $metadata pode causar erros na analise DE, principalemnte se tiver grupos com apenas 1 fator, melhor rodar sem o $metadata e usar apenas do samplessheet.csv
+echo ""
+read -p "PRESS ENTER"
 echo 'MTD running  progress:'
 echo '>>>>>>>>>>>>>>>     [75%]'
 

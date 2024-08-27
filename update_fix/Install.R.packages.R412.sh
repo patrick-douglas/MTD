@@ -43,6 +43,8 @@ R -e "BiocManager::install('ragg', force = TRUE, update = FALSE, Ncpus=$threads)
 R -e "BiocManager::install('sctransform', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "BiocManager::install('cmapR', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "BiocManager::install('clusterProfiler', force = TRUE, update = FALSE, Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/gson_0.1.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/clusterProfiler_4.12.2.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/lifecycle_1.0.3.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/tidyselect_1.2.1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/rlang_1.1.2.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
@@ -52,7 +54,7 @@ R -e "install.packages('~/MTD/update_fix/pvr_pkg/purrr_1.0.1.tar.gz', repos=NULL
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/tibble_3.2.1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/cmapR_1.16.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/dplyr_1.1.4.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/dbplyr_2.5.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/dbplyr_2.3.4.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/biomaRt_2.60.1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/tidyr_1.3.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 conda install -y -n R412 -c conda-forge r-ggpubr
@@ -88,4 +90,9 @@ R -e "install.packages('~/MTD/update_fix/pvr_pkg/DO.db_2.9.tar.gz', repos=NULL, 
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/AnnotationDbi_1.66.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/forcats_1.0.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/tidyverse_2.0.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
-
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/tidytree_0.4.2.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/pathview_1.44.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/GO.db_3.19.1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('prettydoc',repos = 'http://cran.us.r-project.org', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/GOSemSim_2.30.2.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/DOSE_3.30.4.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
