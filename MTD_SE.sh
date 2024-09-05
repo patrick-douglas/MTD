@@ -109,6 +109,19 @@ if [[ "$fastq_files" != "$SamplesInSheet" ]]; then
     echo "Please double-check with the samplesheet.csv and input files. Please ensure no other fastq files are under the input folder and its subfolders. You can refer to the user guide on https://github.com/FEI38750/MTD."
     exit 1
 fi
+species_name=$(awk -F, -v taxid="$hostid" '$1 == taxid {print $3}' "$MTDIR/HostSpecies.csv")
+
+# Verifique se o nome da espécie foi encontrado
+if [ -z "$species_name" ]; then
+  echo "Error: species name not found for Taxon_ID $hostid."
+  exit 1
+fi
+
+echo ''
+echo -e "Selected host species:\e[3m $species_name\e[0m"
+#echo "Selected host species:$species_name"
+echo "Taxon ID: $hostid"
+echo ''
 
 echo "MTD running  progress:"
 echo ">>                  [10%]"
@@ -167,8 +180,9 @@ if [ -n "$no_trimm" ]; then
 fi
     ;;
   skip)
-    echo "Copying files directly..."
-    cp /media/me/4TB_BACKUP_LBN/temp/bat/* .
+    echo "WARNING: USING UNTRIMMED DATA FROM /media/me/4TB_BACKUP_LBN/temp/bat/
+Skipping trimming with fastp step..."
+    cp /media/me/4TB_BACKUP_LBN/temp/bird/* .
     ;;
 esac
 
@@ -525,7 +539,7 @@ Rscript $MTDIR/Tools/ssGSEA2.0/ssgsea-cli.R \
     -y $MTDIR/Tools/ssGSEA2.0/config.yaml \
     -u $threads
 
-Rscript $MTDIR/for_halla.R $outputdr/ssGSEA/ssgsea-results-scores.gct $inputdr/samplesheet.csv $metadata
+Rscript $MTDIR/for_halla.R $outputdr/ssGSEA/ssgsea-results-scores.gct $inputdr/samplesheet.csv #$metadata
 
 echo 'MTD running  progress:'
 echo '>>>>>>>>>>>>>>>>    [80%]'

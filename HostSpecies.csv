@@ -157,11 +157,11 @@ Taxon_ID,MartDatasets,Scientific_name,OrgDb,Common_name,kegg
 1328070,psimus_gene_ensembl,Prolemur simus,,,
 379532,pcoquereli_gene_ensembl,Propithecus coquereli,,,
 8673,ptextilis_gene_ensembl,Pseudonaja textilis,,,
-132908,pvampyrus_gene_ensembl,Pteropus vampyrus,,,
+132908,pvampyrus_gene_ensembl,Pteropus vampyrus,org.Pteropus.vampyrus.eg.db,Large flying fox,pva
 303518,pnyererei_gene_ensembl,Pundamilia nyererei,,,
 42514,pnattereri_gene_ensembl,Pygocentrus nattereri,,,
 10116,rnorvegicus_gene_ensembl,Rattus norvegicus,org.Rn.eg.db,Rat,rno
-59479,rferrumequinum_gene_ensembl,Rhinolophus ferrumequinum,,,
+59479,rferrumequinum_gene_ensembl,Rhinolophus ferrumequinum,org.Rn.eg.db,Rat,rno
 61621,rbieti_gene_ensembl,Rhinopithecus bieti,,,
 61622,rroxellana_gene_ensembl,Rhinopithecus roxellana,,,
 559292,scerevisiae_gene_ensembl,Saccharomyces cerevisiae,org.Sc.sgd.db,Yeast,sce
