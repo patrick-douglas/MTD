@@ -118,10 +118,45 @@ if [ -z "$species_name" ]; then
 fi
 
 echo ''
+echo "============================================"
 echo -e "Selected host species:\e[3m $species_name\e[0m"
-#echo "Selected host species:$species_name"
 echo "Taxon ID: $hostid"
 echo ''
+echo "============================================"
+echo "Main study design:"
+awk -F',' 'NR>1 {groups[$2]++; if ($5=="vs") comparisons[$2" vs "$6]++} END { 
+  for (g in groups) printf "Group: %s - Number of samples: %d\n", g, groups[g]; 
+}' $inputdr/samplesheet.csv
+echo "============================================"
+echo ""
+
+# Assuming $metadata is the path to the metadata file passed via -m flag
+if [ ! -z "$metadata" ]; then
+    echo "============================================"
+
+    # Reading the header to dynamically identify columns
+    header=$(head -n 1 "$metadata")
+    IFS=',' read -ra columns <<< "$header"
+
+    # Ignoring the first two columns
+    for ((i=3; i<=${#columns[@]}; i++)); do
+        col="${columns[$i-1]}"
+        echo "Metadata column: $col,"
+        echo "Meta-groups:"
+        awk -v col_index="$i" -F',' '
+        NR > 1 {
+            values[$col_index]++;
+        }
+        END {
+            for (value in values) {
+                printf "  %s: %d\n", value, values[value];
+            }
+        }' "$metadata"
+    done
+
+    echo "============================================"
+    echo ''
+fi
 
 echo "MTD running  progress:"
 echo ">>                  [10%]"
@@ -180,13 +215,12 @@ if [ -n "$no_trimm" ]; then
 fi
     ;;
   skip)
-    echo "WARNING: USING UNTRIMMED DATA FROM /media/me/4TB_BACKUP_LBN/temp/bat/
+    echo "WARNING: USING UNTRIMMED DATA FROM /media/me/4TB_BACKUP_LBN/temp/bird/
 Skipping trimming with fastp step..."
-    cp /media/me/4TB_BACKUP_LBN/temp/bird/* .
+    cp /media/me/4TB_BACKUP_LBN/temp/bat/* .
     ;;
 esac
 
-#cp /media/me/4TB_BACKUP_LBN/temp/bat/* .
 #$MTDIR/MTD_scripts/data_trimming.sh 
 
 echo 'MTD running  progress:'
@@ -341,7 +375,8 @@ mv annot.txt annot_original.txt
 mv corrected_annot.txt annot.txt
 
 python $MTDIR/Tools/graphlan/graphlan_annotate.py --annot annot.txt tree.txt outtree.txt # attach annotation to the tree
-python $MTDIR/Tools/graphlan/graphlan.py --dpi 300 --size 7.0 outtree.txt outimg.png # generate the graphlan image
+python $MTDIR/Tools/graphlan/graphlan.py --dpi 300 --size 7.0 outtree.txt outimg.png # generate the graphlan png
+python $MTDIR/Tools/graphlan/graphlan.py outtree.txt outimg.pdf # generate the graphlan pdf
 
 cd ../temp
 
@@ -413,34 +448,26 @@ humann_split_stratified_table --input humann_genefamilies_relab.tsv --output ./
     humann_split_stratified_table --input humann_genefamilies.tsv --output ./
 
 echo "Regroup gene familites table into KEGG orthologs and GO terms"
-humann_regroup_table --input humann_genefamilies_relab_stratified.tsv --groups uniref90_ko \
-    --output humann_genefamilies_relAbundance_kegg.tsv
-humann_regroup_table --input humann_genefamilies_relab_stratified.tsv --groups uniref90_go \
-    --output humann_genefamilies_relAbundance_go.tsv
+humann_regroup_table --input humann_genefamilies_relab_stratified.tsv --groups uniref90_ko --output humann_genefamilies_relAbundance_kegg.tsv
+humann_regroup_table --input humann_genefamilies_relab_stratified.tsv --groups uniref90_go --output humann_genefamilies_relAbundance_go.tsv
     echo "Regroup unnormalized table (for Deseq2)"
-    humann_regroup_table --input humann_genefamilies_stratified.tsv --groups uniref90_ko \
-        --output humann_genefamilies_Abundance_kegg.tsv
-    humann_regroup_table --input humann_genefamilies_stratified.tsv --groups uniref90_go \
-        --output humann_genefamilies_Abundance_go.tsv
+    humann_regroup_table --input humann_genefamilies_stratified.tsv --groups uniref90_ko --output humann_genefamilies_Abundance_kegg.tsv
+    humann_regroup_table --input humann_genefamilies_stratified.tsv --groups uniref90_go --output humann_genefamilies_Abundance_go.tsv
 
 echo "Translate KEGG and GO ID to human readable terms"
 conda deactivate
 conda activate R412
-Rscript $MTDIR/humann_ID_translation.R \
-    $outputdr/temp/HUMAnN_output/humann_genefamilies_relAbundance_kegg.tsv \
-    $outputdr/temp/HUMAnN_output/humann_genefamilies_relAbundance_go.tsv \
-    $MTDIR
+#Rscript $MTDIR/humann_ID_translation.R \
+Rscript $MTDIR/humann_ID_translation_adjusted.R $outputdr/temp/HUMAnN_output/humann_genefamilies_relAbundance_kegg.tsv $outputdr/temp/HUMAnN_output/humann_genefamilies_relAbundance_go.tsv $MTDIR
     # Tranlate unnormalized table (for Deseq2)
-    Rscript $MTDIR/humann_ID_translation.R \
-        $outputdr/temp/HUMAnN_output/humann_genefamilies_Abundance_kegg.tsv \
-        $outputdr/temp/HUMAnN_output/humann_genefamilies_Abundance_go.tsv \
-        $MTDIR
+#    Rscript $MTDIR/humann_ID_translation.R \
+Rscript $MTDIR/humann_ID_translation_adjusted.R $outputdr/temp/HUMAnN_output/humann_genefamilies_Abundance_kegg.tsv $outputdr/temp/HUMAnN_output/humann_genefamilies_Abundance_go.tsv $MTDIR
 conda deactivate
 conda activate MTD
 
 #Cleaning up file structure
-mkdir $outputdr/hmn_pathway_abundance_files
-mkdir $outputdr/hmn_genefamily_abundance_files
+mkdir -p $outputdr/hmn_pathway_abundance_files
+mkdir -p $outputdr/hmn_genefamily_abundance_files
 mv *pathabundance* $outputdr/hmn_pathway_abundance_files/
 mv *genefamilies* $outputdr/hmn_genefamily_abundance_files/
 
@@ -478,8 +505,9 @@ if [[ $blast == blast ]]; then
         -db $DB_blast \
         -infmt fastq \
         -out $i.sam \
-        -num_threads $threads
+        -num_threads 8 #$threads
     done
+#for i in $lsn; do magicblast -query ${i}_host.fq -db $DB_blast -infmt fastq -out $i.sam -num_threads $threads; done
 else
     echo "HISAT2 alignment"
     for i in $lsn; do # store input sample name in i; eg. DJ01
@@ -493,18 +521,16 @@ fi
 
 
 echo "featureCounts"
-featureCounts -T $threads \
-   -a $gtf \
-   -o $outputdr/host_counts.txt \
-   *.sam
+featureCounts -T $threads -a $gtf -o $outputdr/host_counts.txt *.sam
 
-#for i in $lsn; do samtools view -bS $i.sam -@ $threads > $i.bam && samtools sort $i.bam -o $i.sorted.bam -@ $threads && samtools index $i.sorted.bam -@ $threads; done
 
 for i in $lsn; do
     samtools view -bS $i.sam > $i.bam -@ $threads
     samtools sort $i.bam -o $i.sorted.bam -@ $threads
     samtools index $i.sorted.bam -@ $threads
 done
+#Comando abaixo [e o mesmo acima, mas em uma unica linha
+#for i in $lsn; do samtools view -bS $i.sam > $i.bam -@ $threads && samtools sort $i.bam -o $i.sorted.bam -@ $threads && samtools index $i.sorted.bam -@ $threads; done
 
 mkdir -p BAM
 mv *.sorted.bam *.sorted.bam.bai BAM/
@@ -514,17 +540,17 @@ cd $outputdr
 echo "Delete the first line/row of a file then trim the sample name"
 sed '1d; 2 s/\.sam//g' host_counts.txt > tmpfile; mv tmpfile host_counts.txt
 
-#Adicionar a coluna TaxonID no arquivo hostcounts
-#Rscript $MTDIR/add_taxon_id.R --input $outputdr/host_counts.txt --output $outputdr/Host_counts_tax_id.txt --taxonid $hostid
-#mv $outputdr/host_counts.txt $outputdr/host_counts.txt.original.MTD
-#mv $outputdr/Host_counts_tax_id.txt $outputdr/host_counts.txt
-
 echo "DEG & Annotation & Plots & preprocess for host"
 conda deactivate
 conda activate R412
+
+echo "before DEG_Anno_Plot.R "
+read -p "PRESS ENTER"
+echo ""
+
 Rscript $MTDIR/DEG_Anno_Plot.R $outputdr/host_counts.txt $inputdr/samplesheet.csv $hostid $MTDIR/HostSpecies.csv $metadata
 #Aqui o arquivo definido pela variavel $metadata pode causar erros na analise DE, principalemnte se tiver grupos com apenas 1 fator, melhor rodar sem o $metadata e usar apenas do samplessheet.csv
-echo ""
+echo "After DEG_Anno_Plot.R "
 read -p "PRESS ENTER"
 echo 'MTD running  progress:'
 echo '>>>>>>>>>>>>>>>     [75%]'
@@ -532,14 +558,9 @@ echo '>>>>>>>>>>>>>>>     [75%]'
 echo "ssGSEA"
 Rscript $MTDIR/gct_making.R $outputdr/Host_DEG/host_counts_TPM.csv $inputdr/samplesheet.csv
 
-Rscript $MTDIR/Tools/ssGSEA2.0/ssgsea-cli.R \
-    -i $outputdr/ssGSEA/host.gct \
-    -o $outputdr/ssGSEA/ssgsea-results \
-    -d $MTDIR/Tools/ssGSEA2.0/db/msigdb/c2.all.v7.5.1.symbols.gmt \
-    -y $MTDIR/Tools/ssGSEA2.0/config.yaml \
-    -u $threads
+Rscript $MTDIR/Tools/ssGSEA2.0/ssgsea-cli.R -i $outputdr/ssGSEA/host.gct -o $outputdr/ssGSEA/ssgsea-results -d $MTDIR/Tools/ssGSEA2.0/db/msigdb/c2.all.v7.5.1.symbols.gmt -y $MTDIR/Tools/ssGSEA2.0/config.yaml -u $threads
 
-Rscript $MTDIR/for_halla.R $outputdr/ssGSEA/ssgsea-results-scores.gct $inputdr/samplesheet.csv #$metadata
+Rscript $MTDIR/for_halla.R $outputdr/ssGSEA/ssgsea-results-scores.gct $inputdr/samplesheet.csv $metadata
 
 echo 'MTD running  progress:'
 echo '>>>>>>>>>>>>>>>>    [80%]'
@@ -551,14 +572,22 @@ conda deactivate
 conda activate halla0820
 echo 'Analyzing microbiome x host_genes associations...'
 #mkdir -p $outputdr/halla/host_gene # need to create a new directory for output to avoid "exists; deleting..." issue by halla
-halla -x $outputdr/halla/Microbiomes.txt \
-    -y $outputdr/halla/Host_gene.txt \
-    -o $outputdr/halla/host_gene \
-    --x_dataset_label Microbiomes \
-    --y_dataset_label Host_gene \
-    --diagnostic_plot -m ${pdm}
+halla -x $outputdr/halla/Microbiomes.txt -y $outputdr/halla/Host_gene.txt -o $outputdr/halla/host_gene --x_dataset_label Microbiomes --y_dataset_label Host_gene --diagnostic_plot -m ${pdm}
 
-    # show all clusters
+#O script abaixo parece ser inutil, pois so gera um heatmap com as medias do hostgene e micromiomas, esse script nao e original foi em quem fiz
+#python $MTDIR/generate_halla_heatmap.py -m $outputdr/halla/Microbiomes.txt -g $outputdr/halla/Host_gene.txt  -o $outputdr/halla/host_gene/hallagram_all.pdf
+
+#Abaixo uma abordagem diferente para verificar as associaçoes entre host gene vs microbiomas
+python $MTDIR/pls_da_analysis.py -x $outputdr/halla/Microbiomes.txt -y $outputdr/halla/Host_gene.txt -o $outputdr/halla/pls_da_results.pdf
+
+#usando k-means
+python $MTDIR/kmeans_clustering.py -x $outputdr/halla/Microbiomes.txt -y $outputdr/halla/Host_gene.txt -o $outputdr/halla/kmeans_results.pdf -k 3
+
+#Abaixo as tres opcoes de correlacoes para ver se alguma da um valor significativo pois a default de pearson nao deu nada
+halla -x $outputdr/halla/Microbiomes.txt -y $outputdr/halla/Host_gene.txt -o $outputdr/halla/pearson --x_dataset_label Microbiomes --y_dataset_label Host_gene --diagnostic_plot -m pearson --num_threads 12
+halla -x $outputdr/halla/Microbiomes.txt -y $outputdr/halla/Host_gene.txt -o $outputdr/halla/spearman --x_dataset_label Microbiomes --y_dataset_label Host_gene --diagnostic_plot -m spearman --num_threads 12
+ 
+   # show all clusters
     if [[ $pdm == "spearman" ]]; then
         pdm_name='Pairwise Spearman'
     elif [[ $pdm == "pearson" ]]; then
@@ -573,23 +602,11 @@ halla -x $outputdr/halla/Microbiomes.txt \
         pdm_name='dcor'
     fi
 
-    hallagram \
-        -i $outputdr/halla/host_gene \
-        --cbar_label "${pdm_name[@]}" \
-        --x_dataset_label Microbiomes \
-        --y_dataset_label Host_gene \
-        --output $outputdr/halla/host_gene/hallagram_all.png \
-        --block_num -1
-
+#    hallagram -i $outputdr/halla/host_gene --cbar_label "${pdm_name[@]}" --x_dataset_label Microbiomes --y_dataset_label Host_gene --output $outputdr/halla/host_gene/hallagram_all.png --block_num -1
+    hallagram -i $outputdr/halla/host_gene --cbar_label "${pdm_name[@]}" --x_dataset_label Microbiomes --y_dataset_label Host_gene --output $outputdr/halla/host_gene/hallagram_all.pdf --block_num -1
         # if hallagram_all.png not exist, show top 300 blocks
         if [[ ! -f $outputdr/halla/host_gene/hallagram_all.png ]]; then
-            hallagram \
-                -i $outputdr/halla/host_gene \
-                --cbar_label "${pdm_name[@]}" \
-                --x_dataset_label Microbiomes \
-                --y_dataset_label Host_gene \
-                --output $outputdr/halla/host_gene/hallagram_Top300.png \
-                --block_num 300
+            hallagram -i $outputdr/halla/host_gene --cbar_label "${pdm_name[@]}" --x_dataset_label Microbiomes --y_dataset_label Host_gene --output $outputdr/halla/host_gene/hallagram_Top5.pdf --block_num 5
         fi
 
 echo 'MTD running  progress:'
@@ -598,21 +615,10 @@ echo '>>>>>>>>>>>>>>>>>>  [90%]'
 echo 'Analyzing microbiome x host_pathways associations...'
 # for microbiome x host_pathways(ssGSEA)
 #mkdir -p $outputdr/halla/pathway
-halla -x $outputdr/halla/Microbiomes.txt \
-    -y $outputdr/halla/Host_score.txt \
-    -o $outputdr/halla/pathway \
-    --x_dataset_label Microbiomes \
-    --y_dataset_label Host_pathway \
-    --diagnostic_plot -m ${pdm}
+halla -x $outputdr/halla/Microbiomes.txt -y $outputdr/halla/Host_score.txt -o $outputdr/halla/pathway --x_dataset_label Microbiomes --y_dataset_label Host_pathway --diagnostic_plot -m ${pdm}
 
-    # show all clusters
-    hallagram \
-        -i $outputdr/halla/pathway \
-        --cbar_label "${pdm_name[@]}" \
-        --x_dataset_label Microbiomes \
-        --y_dataset_label Host_pathway \
-        --output $outputdr/halla/pathway_hallagram_all.png \
-        --block_num -1
+# show all clusters
+hallagram -i $outputdr/halla/pathway --cbar_label "${pdm_name[@]}" --x_dataset_label Microbiomes --y_dataset_label Host_pathway --output $outputdr/halla/pathway_hallagram_all.pdf --block_num -1
 
 echo 'MTD running  progress:'
 echo '>>>>>>>>>>>>>>>>>>>>[100%]'

@@ -68,8 +68,24 @@ echo -e "Selected host species:\e[3m $species_name\e[0m"
 #echo "Selected host species:$species_name"
 echo "Taxon ID: $customized"
 echo ''
-# Modifique o cabeçalho do arquivo FASTA usando sed
-sed -i "s/^>\(.*\) dna:primary_assembly \(.*\):\(.*\) REF$/>kraken:taxid|${customized}|\\3 ${species_name} chromosome \\3, ${assembly_name} Primary Assembly/" genome_${customized}.fa
+
+# Check the header format of the FASTA file
+header=$(head -n 1 genome_${customized}.fa)
+
+if [[ "$header" == *"dna:primary_assembly"* || "$header" == *"dna:genescaffold"* ]]; then
+    # Ensembl format detected
+    echo "Detected Ensembl format. Modifying headers for Ensembl..."
+    sed -i "s/^>\(.*\) dna:.* \(.*\):\(.*\):\(.*\):\(.*\) REF$/>kraken:taxid|${customized}|\\3 ${species_name} chromosome \\3, ${assembly_name} Primary Assembly/" genome_${customized}.fa
+else
+    # NCBI format detected
+    echo "Detected NCBI format. Modifying headers for NCBI..."
+    sed -i "s/^>\(.*\) \(.*\)/>kraken:taxid|${customized}|\\1 ${species_name} \\2/" genome_${customized}.fa
+fi
+
+echo "Header modification complete."
+rm -rf $MTDIR/blastdb_$customized
+mkdir -p $MTDIR/blastdb_$customized
+#cp genome_${customized}.fa $MTDIR/blastdb_$customized 
 
 cd ..
 kraken2-build --download-taxonomy --threads $threads --db $DBNAME
@@ -101,15 +117,15 @@ hisat2-build -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
 cd ..
 
 echo "Creating blast databases for custom reference $customized"
-rm -rf $MTDIR/blastdb_$customized
 mkdir -p $MTDIR/blastdb_$customized
 cd $MTDIR/blastdb_$customized
+#cp $DBNAME/genome_${customized}.fa .
 cp $download . 
 gunzip *.fa.gz 
 mv *.fa blastdb_$customized
 
 makeblastdb -in $MTDIR/blastdb_$customized/blastdb_$customized -dbtype nucl -out $MTDIR/blastdb_$customized/blastdb_$customized -parse_seqids
-
+exit 1
 echo "Creating the annotation package for R412"
 echo -e "Selected host species:\e[3m $species_name\e[0m"
 echo "Taxon ID: $customized"
@@ -117,7 +133,7 @@ echo ''
 conda activate R412
 cd $dir
 Rscript $dir/create_annotation_package.R -t $customized -d $dir
-R-e "install.packages('Pteropus.vampyrus.eg.db', repos = NULL, type = 'source')"
+R -e "install.packages('org.Pvampyrus.eg.db', repos = NULL, type = 'source')"
 
 conda deactivate
 

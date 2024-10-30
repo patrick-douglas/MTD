@@ -1,6 +1,6 @@
 #!/usr/bin/Rscript
 #options(echo = TRUE)
-
+httr::set_config(httr::config(ssl_verifypeer = FALSE))
 args = commandArgs(trailingOnly=TRUE) # Passing arguments to an R script from bash/shell command lines
 # make folder DEG to store outputs
 setwd(dirname(args[1]))
@@ -35,6 +35,16 @@ if (filename %in% c("bracken_species_all","bracken_phylum_all","bracken_genus_al
   # Extract columns with count numbers
   cts<-cts[,grepl("*_num", names(cts))]
   # match column name to sample name
+
+
+#cts <- cts[, grepl("*_num", names(cts))]  # Filtra as colunas de cts
+features <- cts  # Aqui, features pode ser definido como cts ou um subconjunto específico de cts
+
+
+
+
+print(dim(cts))
+print(dim(features))
   colnames(cts)<-gsub("^Report_|\\.species.bracken_num$|\\.phylum.bracken_num$|.genus.bracken_num$","",colnames(cts))
   # decontamination step
   # read a list of contamination organisms
@@ -266,7 +276,9 @@ for (r in 1:length(unique(coldata_vs[,2]))){
                        fixed_effects = cat(covar, "\n"),
                        reference = paste0("group,",unique(coldata_vs[,2])[r]),
                        plot_heatmap = T, plot_scatter = T,
-                       cores=4)
+                       min_abundance = 0.01,  # Valor mais baixo para evitar remoção de features
+                       min_prevalence = 0.1,   # Prevalência mínima baixa para reter mais features
+                       cores=10)
 }
 if (filename == "host_counts.txt"){ #prepare for gene symbol
   system("mkdir -p MaAsLin2_results/gene_symbol")
@@ -279,7 +291,9 @@ if (filename == "host_counts.txt"){ #prepare for gene symbol
                          fixed_effects = cat(covar, "\n"),
                          reference = paste0("group,",unique(coldata_vs[,2])[r]),
                          plot_heatmap = T, plot_scatter = T,
-                         cores=4)
+                         min_abundance = 0.01,  # Valor mais baixo para features simbólicas
+                         min_prevalence = 0.1,   # Prevalência mínima baixa para reter mais
+                         cores=10)
   }
   write("The number of genes may be less due to the duplicated gene symbols being removed.","MaAsLin2_results/gene_symbol/Readme.txt")
 }
@@ -1522,3 +1536,5 @@ treeplot(datax2, showCategory = nrow(data@result), nCluster = nCluster)
     }
   }
 }
+
+

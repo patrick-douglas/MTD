@@ -110,7 +110,7 @@ Taxon_ID,MartDatasets,Scientific_name,OrgDb,Common_name,kegg
 10103,mspicilegus_gene_ensembl,Mus spicilegus,,,
 10096,mspretus_gene_ensembl,Mus spretus,,,
 9669,mpfuro_gene_ensembl,Mustela putorius furo,,,
-59463,mlucifugus_gene_ensembl,Myotis lucifugus,org.Rn.eg.db,Rat,rno
+59463,mlucifugus_gene_ensembl,Myotis lucifugus,org.Mlucifugus.eg.db,Myotis,mlf
 586833,mmurdjan_gene_ensembl,Myripristis murdjan,,,
 35670,nnaja_gene_ensembl,Naja naja,,,
 1026970,ngalili_gene_ensembl,Nannospalax galili,,,
@@ -157,11 +157,11 @@ Taxon_ID,MartDatasets,Scientific_name,OrgDb,Common_name,kegg
 1328070,psimus_gene_ensembl,Prolemur simus,,,
 379532,pcoquereli_gene_ensembl,Propithecus coquereli,,,
 8673,ptextilis_gene_ensembl,Pseudonaja textilis,,,
-132908,pvampyrus_gene_ensembl,Pteropus vampyrus,org.Pteropus.vampyrus.eg.db,Large flying fox,pva
+132908,pvampyrus_gene_ensembl,Pteropus vampyrus,org.Pvampyrus.eg.db,Large_flying_fox,pva
 303518,pnyererei_gene_ensembl,Pundamilia nyererei,,,
 42514,pnattereri_gene_ensembl,Pygocentrus nattereri,,,
 10116,rnorvegicus_gene_ensembl,Rattus norvegicus,org.Rn.eg.db,Rat,rno
-59479,rferrumequinum_gene_ensembl,Rhinolophus ferrumequinum,org.Rn.eg.db,Rat,rno
+59479,rferrumequinum_gene_ensembl,Rhinolophus ferrumequinum,,,
 61621,rbieti_gene_ensembl,Rhinopithecus bieti,,,
 61622,rroxellana_gene_ensembl,Rhinopithecus roxellana,,,
 559292,scerevisiae_gene_ensembl,Saccharomyces cerevisiae,org.Sc.sgd.db,Yeast,sce
