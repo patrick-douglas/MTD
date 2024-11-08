@@ -126,6 +126,7 @@ mv *.fa blastdb_$customized
 
 makeblastdb -in $MTDIR/blastdb_$customized/blastdb_$customized -dbtype nucl -out $MTDIR/blastdb_$customized/blastdb_$customized -parse_seqids
 exit 1
+
 echo "Creating the annotation package for R412"
 echo -e "Selected host species:\e[3m $species_name\e[0m"
 echo "Taxon ID: $customized"
@@ -133,7 +134,7 @@ echo ''
 conda activate R412
 cd $dir
 Rscript $dir/create_annotation_package.R -t $customized -d $dir
-R -e "install.packages('org.Pvampyrus.eg.db', repos = NULL, type = 'source')"
+R -e "install.packages('org.Aplatyrhynchos.eg.sqlite', repos = NULL, type = 'source')"
 
 conda deactivate
 

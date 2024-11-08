@@ -217,7 +217,7 @@ fi
   skip)
     echo "WARNING: USING UNTRIMMED DATA FROM /media/me/4TB_BACKUP_LBN/temp/bird/
 Skipping trimming with fastp step..."
-    cp /media/me/4TB_BACKUP_LBN/temp/bat/* .
+    cp /media/me/4TB_BACKUP_LBN/temp/bird/* .
     ;;
 esac
 
@@ -424,9 +424,9 @@ for i in *.fq; do
         --threads $threads \
         --verbose
 done
-
-echo 'MTD running  progress:'
 echo '>>>>>>>>>>>>        [60%]'
+read -p "PRESS ENTER to continue or go manually"
+echo 'MTD running  progress:'
 
 echo "Join all gene family and pathway abudance files"
 humann_join_tables -i hmn_output/ -o humann_pathabundance.tsv --file_name pathabundance
@@ -481,8 +481,7 @@ conda deactivate
 conda activate R412
 Rscript $MTDIR/DEG_Anno_Plot.R $outputdr/hmn_genefamily_abundance_files/humann_genefamilies_Abundance_kegg_translated.tsv $inputdr/samplesheet.csv
 Rscript $MTDIR/DEG_Anno_Plot.R $outputdr/hmn_genefamily_abundance_files/humann_genefamilies_Abundance_go_translated.tsv $inputdr/samplesheet.csv
-conda deactivate
-conda activate MTD
+conda deactivate && conda activate MTD
 
 #humann_barplot
 # humann_barplot --input $outputdr/hmn_pathway_abundance_files/humann_pathabundance_cpm_stratified.tsv \
@@ -550,8 +549,7 @@ echo ""
 
 Rscript $MTDIR/DEG_Anno_Plot.R $outputdr/host_counts.txt $inputdr/samplesheet.csv $hostid $MTDIR/HostSpecies.csv $metadata
 #Aqui o arquivo definido pela variavel $metadata pode causar erros na analise DE, principalemnte se tiver grupos com apenas 1 fator, melhor rodar sem o $metadata e usar apenas do samplessheet.csv
-echo "After DEG_Anno_Plot.R "
-read -p "PRESS ENTER"
+
 echo 'MTD running  progress:'
 echo '>>>>>>>>>>>>>>>     [75%]'
 

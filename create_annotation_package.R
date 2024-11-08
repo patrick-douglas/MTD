@@ -1,3 +1,4 @@
+
 # Load necessary packages
 if (!requireNamespace("AnnotationForge", quietly = TRUE)) {
     BiocManager::install('AnnotationForge', force = TRUE, update = FALSE)
@@ -11,7 +12,8 @@ if (!requireNamespace("readr", quietly = TRUE)) {
 library(AnnotationForge)
 library(optparse)
 library(readr)
-
+library(biomaRt)
+biomartCacheClear()
 # Set a CRAN mirror to ensure package installation
 options(repos = c(CRAN = "https://cran.r-project.org"))
 

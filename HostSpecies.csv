@@ -5,7 +5,7 @@ Taxon_ID,MartDatasets,Scientific_name,OrgDb,Common_name,kegg
 80972,aocellaris_gene_ensembl,Amphiprion ocellaris,,,
 161767,apercula_gene_ensembl,Amphiprion percula,,,
 64144,atestudineus_gene_ensembl,Anabas testudineus,,,
-8839,aplatyrhynchos_gene_ensembl,Anas platyrhynchos,,,
+8839,aplatyrhynchos_gene_ensembl,Anas platyrhynchos,org.Aplatyrhynchos.eg.db,Mallard,apla
 8840,applatyrhynchos_gene_ensembl,Anas platyrhynchos platyrhynchos,,,
 28377,acarolinensis_gene_ensembl,Anolis carolinensis,,,
 132585,abrachyrhynchus_gene_ensembl,Anser brachyrhynchus,,,
