@@ -217,7 +217,7 @@ fi
   skip)
     echo "WARNING: USING UNTRIMMED DATA FROM /media/me/4TB_BACKUP_LBN/temp/bird/
 Skipping trimming with fastp step..."
-    cp /media/me/4TB_BACKUP_LBN/temp/bird/* .
+    cp /media/me/4TB_BACKUP_LBN/temp/C.pusilla_RA_vs_PM/* .
     ;;
 esac
 
@@ -425,8 +425,6 @@ for i in *.fq; do
         --verbose
 done
 echo '>>>>>>>>>>>>        [60%]'
-read -p "PRESS ENTER to continue or go manually"
-echo 'MTD running  progress:'
 
 echo "Join all gene family and pathway abudance files"
 humann_join_tables -i hmn_output/ -o humann_pathabundance.tsv --file_name pathabundance
@@ -506,7 +504,7 @@ if [[ $blast == blast ]]; then
         -out $i.sam \
         -num_threads 8 #$threads
     done
-#for i in $lsn; do magicblast -query ${i}_host.fq -db $DB_blast -infmt fastq -out $i.sam -num_threads $threads; done
+#for i in $lsn; do magicblast -query ${i}_host.fq -db $DB_blast -infmt fastq -out $i.sam -num_threads 8; done
 else
     echo "HISAT2 alignment"
     for i in $lsn; do # store input sample name in i; eg. DJ01
@@ -542,10 +540,15 @@ sed '1d; 2 s/\.sam//g' host_counts.txt > tmpfile; mv tmpfile host_counts.txt
 echo "DEG & Annotation & Plots & preprocess for host"
 conda deactivate
 conda activate R412
-
+cd $outputdr
 echo "before DEG_Anno_Plot.R "
 read -p "PRESS ENTER"
 echo ""
+echo $MTDIR
+echo $outputdr
+echo $inputdr
+echo $hostid 
+echo $metadata
 
 Rscript $MTDIR/DEG_Anno_Plot.R $outputdr/host_counts.txt $inputdr/samplesheet.csv $hostid $MTDIR/HostSpecies.csv $metadata
 #Aqui o arquivo definido pela variavel $metadata pode causar erros na analise DE, principalemnte se tiver grupos com apenas 1 fator, melhor rodar sem o $metadata e usar apenas do samplessheet.csv
