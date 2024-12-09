@@ -162,7 +162,7 @@ echo "MTD running  progress:"
 echo ">>                  [10%]"
 
 echo "Raw reads trimming"
-choice="skip"
+choice="execute"
 #choice="skip" Just copy pre compressed files path is required
 #choice="execute" Perform the filtering or not based if the parameter -t is declared or not
 case $choice in
@@ -195,6 +195,7 @@ done
 # Compressão paralela e cópia se no_trimm for definido
 if [ -n "$no_trimm" ]; then
     echo 'Compressing fastq files to .gz'
+    echo 'WARNNING: As the parameter -t was declared the data will not be trimmed/filtered with fastp'
     find $inputdr -name "*.fq" -o -name "*.fastq" -o -name "*.fq.gz" -o -name "*.fastq.gz" | xargs -I {} -P $max_jobs sh -c '
         input_file="$1"
         base_name=$(basename "${input_file%.*}")
@@ -215,9 +216,10 @@ if [ -n "$no_trimm" ]; then
 fi
     ;;
   skip)
-    echo "WARNING: USING UNTRIMMED DATA FROM /media/me/4TB_BACKUP_LBN/temp/bird/
+CUSTOM_PATH=/media/me/4TB_BACKUP_LBN/temp/A.macularius
+    echo "WARNING: USING UNTRIMMED DATA FROM $CUSTOM_PATH
 Skipping trimming with fastp step..."
-    cp /media/me/4TB_BACKUP_LBN/temp/C.pusilla_RA_vs_PM/* .
+    cp $CUSTOM_PATH/* .
     ;;
 esac
 
@@ -606,8 +608,12 @@ halla -x $outputdr/halla/Microbiomes.txt -y $outputdr/halla/Host_gene.txt -o $ou
 #    hallagram -i $outputdr/halla/host_gene --cbar_label "${pdm_name[@]}" --x_dataset_label Microbiomes --y_dataset_label Host_gene --output $outputdr/halla/host_gene/hallagram_all.png --block_num -1
     hallagram -i $outputdr/halla/host_gene --cbar_label "${pdm_name[@]}" --x_dataset_label Microbiomes --y_dataset_label Host_gene --output $outputdr/halla/host_gene/hallagram_all.pdf --block_num -1
         # if hallagram_all.png not exist, show top 300 blocks
-        if [[ ! -f $outputdr/halla/host_gene/hallagram_all.png ]]; then
-            hallagram -i $outputdr/halla/host_gene --cbar_label "${pdm_name[@]}" --x_dataset_label Microbiomes --y_dataset_label Host_gene --output $outputdr/halla/host_gene/hallagram_Top5.pdf --block_num 5
+        if [[ ! -f $outputdr/halla/host_gene/hallagram_all.pdf ]]; then
+hallagram -i $outputdr/halla/host_gene --cbar_label "${pdm_name[@]}" --x_dataset_label Microbiomes --y_dataset_label Host_gene --output $outputdr/halla/host_gene/hallagram_Top5.pdf --block_num 5
+hallagram -i $outputdr/halla/host_gene --cbar_label "${pdm_name[@]}" --x_dataset_label Microbiomes --y_dataset_label Host_gene --output $outputdr/halla/host_gene/hallagram_Top10.pdf --block_num 10
+hallagram -i $outputdr/halla/host_gene --cbar_label "${pdm_name[@]}" --x_dataset_label Microbiomes --y_dataset_label Host_gene --output $outputdr/halla/host_gene/hallagram_Top25.pdf --block_num 25
+hallagram -i $outputdr/halla/host_gene --cbar_label "${pdm_name[@]}" --x_dataset_label Microbiomes --y_dataset_label Host_gene --output $outputdr/halla/host_gene/hallagram_Top50.pdf --block_num 50
+hallagram -i $outputdr/halla/host_gene --cbar_label "${pdm_name[@]}" --x_dataset_label Microbiomes --y_dataset_label Host_gene --output $outputdr/halla/host_gene/hallagram_Top300.pdf --block_num 300
         fi
 
 echo 'MTD running  progress:'
