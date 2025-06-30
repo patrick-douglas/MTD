@@ -36,7 +36,7 @@ Conda then will be installed in your home directory, such as path: ~/miniconda3
 * MTD conda environments occupies ~24GB in your conda folder.
 * Tips: file management software such as FileZilla (https://filezilla-project.org/download.php?show_all=1) can help you to manage your files on HPC/server.
 
-# Teste MTD before run
+# Test MTD before run
 MTD pipeline is a very complex approche which requires a lot of diffrent apckages, so a good pratice would be run test
  using the NCBI database as bellow:
 * Test run: For user who does not have the bulk RNA-seq raw data on hand could have a test run by command:
