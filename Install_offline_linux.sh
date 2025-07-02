@@ -142,7 +142,13 @@ cp -f $dir/Installation/download_genomic_library.sh $condapath/envs/MTD/libexec/
 echo 'MTD installation progress:'
 echo '>>>>                [20%]'
 echo 'Preparing microbiome (virus, bacteria, archaea, protozoa, fungi, plasmid, UniVec_Core) database...'
+
 # Kraken2 database building - Microbiome
+#Fix manifest.sh 
+cp $dir/manifest.sh $offline_files_folder/Kraken2DB_micro/library/manifest.sh
+
+# Substitui o path da pasta offline de instalacao no manifest.sh
+sed -i "s|^offline_files_folder=.*|offline_files_folder=$offline_files_folder|" $offline_files_folder/Kraken2DB_micro/library/manifest.sh
 
 DBNAME=kraken2DB_micro
 kraken2-build --download-taxonomy --threads $threads --db $DBNAME $kmer $min_l $min_s
