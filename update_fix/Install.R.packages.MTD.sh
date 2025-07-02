@@ -1,12 +1,14 @@
 #!/bin/bash -x
 threads=`nproc`
+
+source ~/miniconda3/etc/profile.d/conda.sh
+
 #conda init
 conda activate MTD
 conda install -y -n MTD conda-forge::r-textshaping
 conda install -y -n MTD conda-forge::r-ragg
 conda install -y -n MTD -c conda-forge freetype
 conda install -y -n MTD -c conda-forge pkg-config
-conda install -y -n MTD -c conda-forge freetype pkg-config
 conda install -y -n MTD -c conda-forge r-tidyverse
 conda install -y -n MTD -c conda-forge r-car
 conda install -y -n MTD -c conda-forge r-rstatix
