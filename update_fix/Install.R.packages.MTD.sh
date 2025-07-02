@@ -1,6 +1,6 @@
 #!/bin/bash -x
 threads=`nproc`
-conda init
+#conda init
 conda activate MTD
 conda install -y -n MTD conda-forge::r-textshaping
 conda install -y -n MTD conda-forge::r-ragg
