@@ -1,5 +1,13 @@
 #!/bin/bash -x
-threads=`nproc`
+
+# Número de threads disponíveis
+threads=$(nproc)
+
+# Inicializa o Conda no ambiente shell (obrigatório fora de shell interativo)
+source ~/miniconda3/etc/profile.d/conda.sh
+
+# Ativa o ambiente Conda
+conda activate R412
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/lattice_0.22-5.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('httr',repos = 'http://cran.us.r-project.org', Ncpus=$threads)"
 R -e "install.packages(c('BiocManager'), repos='http://cran.us.r-project.org', Ncpus=$threads)"
@@ -75,7 +83,6 @@ R -e "install.packages('Seurat',repos = 'http://cran.us.r-project.org', Ncpus=$t
 R -e "BiocManager::install('tximeta', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "install.packages(c('BiocManager'), repos='http://cran.us.r-project.org', Ncpus=$threads)"
 R -e "install.packages(c('plyr'), repos='http://cran.us.r-project.org', Ncpus=$threads)"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/rlang_1.1.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/vctrs_0.5.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/BiocGenerics_0.50.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/S4Vectors_0.42.1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
@@ -84,6 +91,13 @@ R -e "install.packages('~/MTD/update_fix/pvr_pkg/UCSC.utils_1.0.0.tar.gz', repos
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/GenomeInfoDbData_1.2.12.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/GenomeInfoDb_1.40.1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/matrixStats_1.3.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+lambda.r
+futile.options
+
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/lambda.r_1.2.4.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/futile.options_1.0.1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+
+
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/futile.logger_1.4.3.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/RColorBrewer_1.1-3.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/DO.db_2.9.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
