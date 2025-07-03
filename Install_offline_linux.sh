@@ -152,16 +152,21 @@ sed -i "s|^offline_files_folder=.*|offline_files_folder=$offline_files_folder|" 
 
 DBNAME=kraken2DB_micro
 kraken2-build --download-taxonomy --threads $threads --db $DBNAME $kmer $min_l $min_s
-#Use local files for bacteria
+
 kraken2-build --download-library archaea --threads $threads --db $DBNAME $kmer $min_l $min_s
+
+#Use local files for bacteria
 cp -f $dir/Installation/rsync_from_ncbi_bacteria.pl $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
+sed -i "21s|^.*|my \$local_download_dir = \"$offline_files_folder/Kraken2DB_micro/library/bacteria/all/\";|" $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
 kraken2-build --download-library bacteria --threads $threads --db $DBNAME $kmer $min_l $min_s
 cp -f $dir/Installation/rsync_from_ncbi.pl $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
+
 kraken2-build --download-library protozoa --threads $threads --db $DBNAME $kmer $min_l $min_s
 kraken2-build --download-library fungi --threads $threads --db $DBNAME $kmer $min_l $min_s
 
 #Use local files for plasmid
-cp -f $dir/Installation/download_genomic_library_plasmid.sh $condapath/pkgs/kraken2-2.1.2-pl5262h7d875b9_0/libexec/download_genomic_library.sh
+sed -i "67s|^.*|    local_download_dir=\"$offline_files_folder/Kraken2DB_micro/library/plasmid/\"|" $dir/Installation/download_genomic_library_plasmid.sh
+cp -f $dir/Installation/download_genomic_library_plasmid.sh $condapath/pkgs/kraken2-2.1.2-pl5262h7d875b9_0/libexec/download_genomic_library.sh    
 cp -f $dir/Installation/download_genomic_library_plasmid.sh $condapath/envs/MTD/libexec/download_genomic_library.sh
 kraken2-build --download-library plasmid --threads $threads --db $DBNAME $kmer $min_l $min_s
 cp -f $dir/Installation/download_genomic_library.sh $condapath/pkgs/kraken2-2.1.2-pl5262h7d875b9_0/libexec/download_genomic_library.sh

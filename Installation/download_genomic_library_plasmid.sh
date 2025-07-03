@@ -64,7 +64,7 @@ case $library_name in
 
     # Use local files instead of downloading via FTP
     echo -n "Using local files for plasmid library..."
-    local_download_dir="/media/me/4TB_BACKUP_LBN/Compressed/MTD/Kraken2DB_micro/library/plasmid/"
+    local_download_dir="/media/me/18TB_BACKUP_LBN/lbn_workspace/RNA-Seq-LBN/viral-rna-seq/MTD/Compressed/MTD//Kraken2DB_micro/library/plasmid/"
 
     if [ -d "$local_download_dir" ]; then
       echo "Local directory found: $local_download_dir"
