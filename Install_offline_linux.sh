@@ -78,7 +78,6 @@ conda run -n MTD bash $dir/update_fix/Install.R.packages.MTD.sh
 
 sed -i 's/^rpy2[>=<]/# &/' $dir/Installation/pip.requirements
 conda env create -f Installation/py2.yml
-sed -i '/^# *rpy2/s/^# *//' $dir/Installation/pip.requirements
 conda env create -f Installation/halla0820.yml
 conda activate halla0820
 #pip install --upgrade setuptools pip
@@ -87,6 +86,7 @@ conda activate halla0820
 #pip install --no-deps halla==0.8.20
 conda deactivate
 conda env create -f Installation/R412.yml
+sed -i '/^# *rpy2/s/^# *//' $dir/Installation/pip.requirements
 echo 'MTD installation progress:'
 echo '>>                  [10%]'
 
