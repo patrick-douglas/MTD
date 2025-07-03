@@ -75,7 +75,10 @@ conda env create -f Installation/MTD.yml
 conda run -n MTD bash $dir/update_fix/Install.R.packages.MTD.sh
 
 #$dir/update_fix/Install.R.packages.MTD.sh
+
+sed -i 's/^rpy2[>=<]/# &/' $dir/Installation/pip.requirements
 conda env create -f Installation/py2.yml
+sed -i '/^# *rpy2/s/^# *//' $dir/Installation/pip.requirements
 conda env create -f Installation/halla0820.yml
 conda activate halla0820
 #pip install --upgrade setuptools pip
