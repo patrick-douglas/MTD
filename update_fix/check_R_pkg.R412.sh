@@ -47,7 +47,6 @@ echo -n "${g}httpuv: 	                       	${w}" ; R --no-restore -e 'package
 echo -n "${g}miniUI: 	                       	${w}" ; R --no-restore -e 'packageVersion("miniUI")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
 echo -n "${g}shiny: 	                       	        ${w}" ; R --no-restore -e 'packageVersion("shiny")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
 echo -n "${g}biomaRt: 	                       	${w}" ; R --no-restore -e 'packageVersion("biomaRt")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
-echo -n "${g}DESeq2: 	                       	${w}" ; R --no-restore -e 'packageVersion("DESeq2")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
 echo -n "${g}tximeta: 	                       	${w}" ; R --no-restore -e 'packageVersion("tximeta")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
 echo -n "${g}limma: 	                       	        ${w}" ; R --no-restore -e 'packageVersion("limma")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
 echo -n "${g}phyloseq: 	                       	${w}" ; R --no-restore -e 'packageVersion("phyloseq")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'

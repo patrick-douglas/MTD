@@ -7,7 +7,7 @@ threads=$(nproc)
 source ~/miniconda3/etc/profile.d/conda.sh
 
 # Ativa o ambiente Conda
-conda activate R412
+#conda activate R412
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/lattice_0.22-5.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('httr',repos = 'http://cran.us.r-project.org', Ncpus=$threads)"
 R -e "install.packages(c('BiocManager'), repos='http://cran.us.r-project.org', Ncpus=$threads)"
@@ -25,29 +25,55 @@ R -e "install.packages('~/MTD/update_fix/pvr_pkg/RProtoBufLib_2.14.1.tar.gz', re
 R -e "install.packages('remotes',repos = 'http://cran.us.r-project.org', Ncpus=$threads)"
 R -e "remotes::install_github('RGLab/cytolib',repos = 'http://cran.us.r-project.org', Ncpus=$threads)"
 R -e "remotes::install_github('RGLab/flowcore',repos = 'http://cran.us.r-project.org', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/DBI_1.2.3.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "BiocManager::install('AnnotationDbi', force = TRUE, update = FALSE, Ncpus=$threads)"
-R -e "BiocManager::install('ggfun', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "BiocManager::install('SingleCellExperiment', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "BiocManager::install('phyloseq', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "BiocManager::install('curl', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "BiocManager::install('annotate', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "BiocManager::install('BiocFileCache', force = TRUE, update = FALSE, Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/yulab.utils_0.1.5.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/ggfun_0.1.5.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/yulab.utils_0.1.9.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/gtable_0.3.6.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "BiocManager::install('aplot', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "BiocManager::install('lme4', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "BiocManager::install('TMB', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "BiocManager::install('GenomicFeatures', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "BiocManager::install('metagenomeSeq', force = TRUE, update = FALSE, Ncpus=$threads)"
 
-R -e 'remotes::install_github("YuLab-SMU/yulab.utils")'
+#R -e 'remotes::install_github("YuLab-SMU/yulab.utils")'
 conda install -y -n R412 -c conda-forge r-systemfonts
 conda install -y -n R412 -c conda-forge r-textshaping
 conda install -y -n R412 -c conda-forge r-ragg
 R -e 'remotes::install_bioc("biomaRt")'
 
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/yulab.utils_0.1.9.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/ggfun_0.1.7.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "remotes::install_github('YuLab-SMU/ggtree',repos = 'http://cran.us.r-project.org', Ncpus=$threads)"
-conda install -y -n R412 bioconda::bioconductor-enrichplot
+
+
+
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/fgsea_1.34.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/R.methodsS3_1.8.2.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/R.oo_1.27.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/R.utils_2.13.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/GOSemSim_2.30.2.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/GO.db_3.19.1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/AnnotationDbi_1.66.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/DOSE_3.30.4.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/ggtangle_0.0.7.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/scatterpie_0.2.5.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/GOSemSim_2.30.2.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+
+#R -e "install.packages('~/MTD/update_fix/pvr_pkg/enrichplot_1.28.1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+
+#conda install -y -n R412 bioconda::bioconductor-enrichplot
 conda install -y -n R412 conda-forge::r-tidyverse
-R -e "BiocManager::install('ragg', force = TRUE, update = FALSE, Ncpus=$threads)"
+#R -e "BiocManager::install('ragg', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "BiocManager::install('sctransform', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "BiocManager::install('cmapR', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "BiocManager::install('clusterProfiler', force = TRUE, update = FALSE, Ncpus=$threads)"
@@ -96,12 +122,10 @@ R -e "install.packages('~/MTD/update_fix/pvr_pkg/futile.options_1.0.1.tar.gz', r
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/futile.logger_1.4.3.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/RColorBrewer_1.1-3.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/DO.db_2.9.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/AnnotationDbi_1.66.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/forcats_1.0.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/tidyverse_2.0.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/tidytree_0.4.2.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/AnnotationDbi_1.70.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/org.Hs.eg.db_3.21.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/pathview_1.44.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/GO.db_3.19.1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('prettydoc',repos = 'http://cran.us.r-project.org', Ncpus=$threads)"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/GOSemSim_2.30.2.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/DOSE_3.30.4.tar.gz', repos=NULL, type='source', Ncpus=$threads)"

@@ -394,7 +394,6 @@ fi
 R CMD INSTALL --configure-vars='LIB_DIR='"$locate_lib" curl_4.3.2.tar.gz
 
 Rscript $dir/Installation/R_packages_installation.R
-~/MTD/update_fix/check_R_pkg.R412.sh
 #~/miniconda3/envs/MTD/opt/krona/updateTaxonomy.sh
 conda deactivate
 conda activate MTD

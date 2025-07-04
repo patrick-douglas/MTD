@@ -4,7 +4,7 @@ threads=`nproc`
 source ~/miniconda3/etc/profile.d/conda.sh
 
 #conda init
-conda activate MTD
+#conda activate MTD
 conda install -y -n MTD conda-forge::r-textshaping
 conda install -y -n MTD conda-forge::r-ragg
 conda install -y -n MTD -c conda-forge freetype
