@@ -400,9 +400,14 @@ conda activate MTD
 #~/miniconda3/envs/MTD/opt/krona/updateTaxonomy.sh
 chmod +x MTD.sh
 cp $dir/update_fix/hclust2.py ~/miniconda3/envs/py2/lib/python2.7/site-packages/hclust2.py
+conda deactivate
+conda activate R412
+conda run -n R412 bash $dir/update_fix/Install.R.packages.R412.sh
+conda deactivate
 echo "*********************************"
 echo "R packages version for conda envs"
 echo "*********************************"
+conda run -n MTD /home/me/MTD/update_fix/check_R_pkg.MTD.sh
 conda run -n R412 ~/MTD/update_fix/check_R_pkg.R412.sh
 conda run -n halla0820 ~/MTD/update_fix/check_R_pkg.halla0820.sh
 echo "*********************************"

@@ -5,6 +5,12 @@ r=$(tput setaf 1)
 g=$(tput setaf 2) 
 y=$(tput setaf 3) 
 p=$(tput setaf 5) 
+
+source ~/miniconda3/etc/profile.d/conda.sh
+
+# Ativa o ambiente Conda
+conda activate R412
+
 R_ver=`R --version | grep version | grep R | awk '{print $3}'`
 echo "${g}***********************************************"
 echo "${w}R $R_ver packages versions"

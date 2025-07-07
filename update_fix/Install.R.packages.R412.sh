@@ -7,7 +7,7 @@ threads=$(nproc)
 source ~/miniconda3/etc/profile.d/conda.sh
 
 # Ativa o ambiente Conda
-#conda activate R412
+conda activate R412
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/lattice_0.22-5.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('httr',repos = 'http://cran.us.r-project.org', Ncpus=$threads)"
 R -e "install.packages(c('BiocManager'), repos='http://cran.us.r-project.org', Ncpus=$threads)"
