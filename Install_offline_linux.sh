@@ -317,7 +317,7 @@ python $dir/Installation/hisat2_extract_exons.py genome.gtf > genome.exon
 cp $offline_files_folder/Macaca_mulatta.Mmul_10.dna.toplevel.fa.gz .
 gzip -d Macaca_mulatta.Mmul_10.dna.toplevel.fa.gz
 mv Macaca_mulatta.Mmul_10.dna.toplevel.fa genome.fa
-hisat2-build -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
+hisat2-build --large-index -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
 cd ..
 
 echo 'MTD installation progress:'
@@ -336,7 +336,7 @@ python $dir/Installation/hisat2_extract_exons.py genome.gtf > genome.exon
 cp $offline_files_folder/Mus_musculus.GRCm39.dna.primary_assembly.fa.gz .
 gzip -d Mus_musculus.GRCm39.dna.primary_assembly.fa.gz
 mv Mus_musculus.GRCm39.dna.primary_assembly.fa genome.fa
-hisat2-build -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
+hisat2-build --large-index -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
 cd ..
 
 echo 'MTD installation progress:'
@@ -355,7 +355,7 @@ python $dir/Installation/hisat2_extract_exons.py genome.gtf > genome.exon
 cp $offline_files_folder/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz .
 gzip -d Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz
 mv Homo_sapiens.GRCh38.dna.primary_assembly.fa genome.fa
-hisat2-build -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
+hisat2-build --large-index -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
 cd ..
 
 # # download preduild index for hisat2 # prebuild is from NCBI, may be not compatiable with featureCount
