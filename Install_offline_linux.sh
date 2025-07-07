@@ -98,21 +98,21 @@ conda activate halla0820 # install dependencies of halla
 #halla0820
 conda install -n halla0820 -y -c conda-forge pkg-config
 R -e "install.packages('lattice',repos = 'http://cran.us.r-project.org', Ncpus=$threads)"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/Matrix_1.6-5.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/MASS_7.3-60.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/mnormt_2.1.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/nlme_3.1-167.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/GPArotation_2024.3-1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/psych_2.5.3.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/foreign_0.8-89.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/R.methodsS3_1.8.2.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/R.oo_1.27.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/rtf_0.4-14.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/psychTools_2.4.3.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('$dir/update_fix/pvr_pkg/Matrix_1.6-5.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('$dir/update_fix/pvr_pkg/MASS_7.3-60.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('$dir/update_fix/pvr_pkg/mnormt_2.1.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('$dir/update_fix/pvr_pkg/nlme_3.1-167.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('$dir/update_fix/pvr_pkg/GPArotation_2024.3-1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('$dir/update_fix/pvr_pkg/psych_2.5.3.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('$dir/update_fix/pvr_pkg/foreign_0.8-89.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('$dir/update_fix/pvr_pkg/R.methodsS3_1.8.2.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('$dir/update_fix/pvr_pkg/R.oo_1.27.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('$dir/update_fix/pvr_pkg/rtf_0.4-14.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('$dir/update_fix/pvr_pkg/psychTools_2.4.3.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages(c('XICOR','mclust','BiocManager'), repos='http://cran.us.r-project.org', Ncpus=$threads)"
 R -e 'BiocManager::install("preprocessCore", ask = FALSE)'
 R -e "install.packages('eva', INSTALL_opts = '--no-lock', repos='http://cran.us.r-project.org', Ncpus=$threads)"
-conda run -n halla0820 ~/MTD/update_fix/check_R_pkg.halla0820.sh
+conda run -n halla0820 $dir/update_fix/check_R_pkg.halla0820.sh
 conda deactivate
 
 echo 'conda environments installed'
@@ -408,8 +408,8 @@ echo "*********************************"
 echo "R packages version for conda envs"
 echo "*********************************"
 conda run -n MTD /home/me/MTD/update_fix/check_R_pkg.MTD.sh
-conda run -n R412 ~/MTD/update_fix/check_R_pkg.R412.sh
-conda run -n halla0820 ~/MTD/update_fix/check_R_pkg.halla0820.sh
+conda run -n R412 $dir/update_fix/check_R_pkg.R412.sh
+conda run -n halla0820 $dir/update_fix/check_R_pkg.halla0820.sh
 echo "*********************************"
 echo ""
 echo 'MTD installation progress:'
