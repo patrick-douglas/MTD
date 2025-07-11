@@ -154,29 +154,38 @@ cp $dir/manifest.sh $offline_files_folder/Kraken2DB_micro/library/manifest.sh
 sed -i "s|^offline_files_folder=.*|offline_files_folder=$offline_files_folder|" $offline_files_folder/Kraken2DB_micro/library/manifest.sh
 
 DBNAME=kraken2DB_micro
+echo "Downloading NCBI taxonomy database with Kraken2—please wait..."
 kraken2-build --download-taxonomy --threads $threads --db $DBNAME $kmer $min_l $min_s
 
+echo "Downloading RefSeq Archaea library with Kraken2—please wait..."
 kraken2-build --download-library archaea --threads $threads --db $DBNAME $kmer $min_l $min_s
 
 #Use local files for bacteria
 cp -f $dir/Installation/rsync_from_ncbi_bacteria.pl $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
 sed -i "21s|^.*|my \$local_download_dir = \"$offline_files_folder/Kraken2DB_micro/library/bacteria/all/\";|" $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
+echo "Adding local bacterial sequences to Kraken2 database..."
 kraken2-build --download-library bacteria --threads $threads --db $DBNAME $kmer $min_l $min_s
 cp -f $dir/Installation/rsync_from_ncbi.pl $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
-
+echo "Downloading RefSeq Protozoa library with Kraken2—please wait..."
 kraken2-build --download-library protozoa --threads $threads --db $DBNAME $kmer $min_l $min_s
+echo "Downloading RefSeq Fungi library with Kraken2—please wait..."
 kraken2-build --download-library fungi --threads $threads --db $DBNAME $kmer $min_l $min_s
 
 #Use local files for plasmid
 sed -i "67s|^.*|    local_download_dir=\"$offline_files_folder/Kraken2DB_micro/library/plasmid/\"|" $dir/Installation/download_genomic_library_plasmid.sh
 cp -f $dir/Installation/download_genomic_library_plasmid.sh $condapath/pkgs/kraken2-2.1.2-pl5262h7d875b9_0/libexec/download_genomic_library.sh    
 cp -f $dir/Installation/download_genomic_library_plasmid.sh $condapath/envs/MTD/libexec/download_genomic_library.sh
+echo "Adding local plasmid sequences to Kraken2 database..."
 kraken2-build --download-library plasmid --threads $threads --db $DBNAME $kmer $min_l $min_s
 cp -f $dir/Installation/download_genomic_library.sh $condapath/pkgs/kraken2-2.1.2-pl5262h7d875b9_0/libexec/download_genomic_library.sh
 cp -f $dir/Installation/download_genomic_library.sh $condapath/envs/MTD/libexec/download_genomic_library.sh
 
+echo "Downloading UniVec_Core library with Kraken2—please wait..."
 kraken2-build --download-library UniVec_Core --threads $threads --db $DBNAME $kmer $min_l $min_s
+
+echo "Adding custom viral sequences (viruses4kraken.fa) to Kraken2 database..."
 kraken2-build --add-to-library viruses4kraken.fa --threads $threads --db $DBNAME $kmer $min_l $min_s
+echo "Building final Kraken2 database—this may take a while..."
 kraken2-build --build --threads $threads --db $DBNAME $kmer $min_l $min_s
 
 echo 'MTD installation progress:'
