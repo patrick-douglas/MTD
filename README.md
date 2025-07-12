@@ -32,6 +32,10 @@ bash miniconda-installer.sh -b</code></pre>
 <addr><pre><code>sudo apt-get install rsync -y
 sudo apt-get update</code></pre>
 
+* For faster downloads and improved performance you can install GNU parallel
+<addr><pre><code>sudo apt-get install -y parallel</code></pre>
+
+
 Conda then will be installed in your home directory, such as path: ~/miniconda3
 * MTD conda environments occupies ~24GB in your conda folder.
 * Tips: file management software such as FileZilla (https://filezilla-project.org/download.php?show_all=1) can help you to manage your files on HPC/server.
