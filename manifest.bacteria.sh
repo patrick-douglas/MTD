@@ -35,7 +35,7 @@ awk -F '\t' '
 echo "✅ $(wc -l < "$manifest_list") genomes available at NCBI servers"
 
 ###############################################################################
-# 3. Verificar arquivos já existentes
+# 2. Verificar arquivos já existentes
 ###############################################################################
 echo "🔄 Checking for new available bacterial genomes, this may take a while, please wait..."
 mapfile -t all_urls < "$manifest_list"
