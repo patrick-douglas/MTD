@@ -147,6 +147,11 @@ echo '>>>>                [20%]'
 echo 'Preparing microbiome (virus, bacteria, archaea, protozoa, fungi, plasmid, UniVec_Core) database...'
 
 # Kraken2 database building - Microbiome
+#update for bacterial genomes
+cp $dir/manifest.bacteria.sh $offline_files_folder/Kraken2DB_micro/library/manifest.sh 
+sed -i "s|^offline_files_folder=.*|offline_files_folder=$offline_files_folder|" $offline_files_folder/Kraken2DB_micro/library/manifest.sh 
+$offline_files_folder/Kraken2DB_micro/library/manifest.sh
+
 #Fix manifest.sh 
 cp $dir/manifest.sh $offline_files_folder/Kraken2DB_micro/library/manifest.sh
 
