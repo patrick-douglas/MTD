@@ -12,7 +12,6 @@ manifest_list="$offline_files_folder/Kraken2DB_micro/library/bacteria/manifest.l
 failed_downloads="$offline_files_folder/failed_downloads.txt"
 rm -rf $assembly_summary_file $manifest_list
 
-
 ###############################################################################
 # 1. Baixar assembly_summary.txt e gerar manifest.list.txt
 ###############################################################################
@@ -34,6 +33,11 @@ awk -F '\t' '
 
 echo "✅ $(wc -l < "$manifest_list") genomes available at NCBI servers"
 
+
+#For debug only
+#head -n 250 manifest.list.txt > manifest.tst
+#manifest_list=$offline_files_folder/Kraken2DB_micro/library/bacteria/manifest.test
+
 ###############################################################################
 # 2. Verificar arquivos já existentes
 ###############################################################################
@@ -52,26 +56,19 @@ for url in "${all_urls[@]}"; do
 done
 
 missing_count=${#missing_urls[@]}
-
-echo "Files to download: $missing_count / $total_files"
+available_local=`ls $offline_files_folder/Kraken2DB_micro/library/bacteria/all | wc -l`
+echo "
+Total on servers: $total_files
+Available locally: $available_local
+Files to download: $missing_count
+"
 
 ###############################################################################
-# 4. Download missing files with adaptive = progress bar
+# 4. Download missing files with adaptive progress bar
 ###############################################################################
 cd "$new_download_dir"
 > "$failed_downloads"
 download_count=0
-
-# Define a frequência adaptativa de atualização da barra
-if (( missing_count <= 100 )); then
-    update_freq=1
-elif (( missing_count <= 1000 )); then
-    update_freq=$(( missing_count / 100 ))  # 1%
-elif (( missing_count <= 10000 )); then
-    update_freq=$(( missing_count / 200 ))  # 0.5%
-else
-    update_freq=500  # fixo
-fi
 
 draw_progress_bar() {
     local current=$1
@@ -82,52 +79,52 @@ draw_progress_bar() {
     local empty=$(( bar_width - filled ))
     local bar=$(printf "%0.s=" $(seq 1 $filled))
     local space=$(printf "%0.s " $(seq 1 $empty))
-    printf "\rProgress: [${bar}${space}] %d/%d (%d%%)" "$current" "$total" "$percent"
+    printf "\rProgress: [${bar}${space}] %d/%d (%d%%)" \
+           "$current" "$total" "$percent"
 }
 
-download_one () {
-  local url="$1"
-  local file
-  file="$(basename "$url")"
-
-  aria2c --continue --auto-file-renaming=false -x16 -s16 -o "$file" "$url" \
-    > /dev/null 2>&1
-
-  local exit_code=$?
-
-  if [[ $exit_code -ne 0 ]]; then
-      echo "❌ Failed: $file" >> "$failed_downloads"
-      rm -f "$file"
-  else
-      [[ -f "$home_download_dir/$file" ]] || cp -p "$file" "$home_download_dir/"
-  fi
-
-  ((download_count++))
-
-  if (( download_count % update_freq == 0 || download_count == missing_count )); then
+download_one() {
+    local url="$1"
+    local file; file="$(basename "$url")"
+aria2c --continue --auto-file-renaming=false -x16 -s16 -o "$file" "$url" \
+        > /dev/null 2>&1
+    local exit_code=$?
+    if (( exit_code )); then
+        echo "❌ Failed: $file" >> "$failed_downloads"
+        rm -f "$file"
+    else
+        [[ -f "$home_download_dir/$file" ]] || cp -p "$file" "$home_download_dir/"
+    fi
+    ((download_count++))
     draw_progress_bar "$download_count" "$missing_count"
-  fi
 }
 
 export -f download_one
 export -f draw_progress_bar
 export failed_downloads home_download_dir missing_count download_count update_freq
 
-if [[ $missing_count -gt 0 ]]; then
-  echo ""
-  if command -v parallel &>/dev/null; then
-    printf "%s\n" "${missing_urls[@]}" | parallel --halt now,fail=1 -j 4 download_one
-  else
+echo
+if (( missing_count == 0 )); then
+    echo "No files to download."
+elif (( missing_count <= 1 )); then
+    # Poucos arquivos → baixa em série com barra “=”
     for url in "${missing_urls[@]}"; do
-      download_one "$url"
+        download_one "$url"
     done
-  fi
-  draw_progress_bar "$missing_count" "$missing_count"
-  echo -e "\n✅ All downloads completed!"
+    echo -e "\n✅ All downloads completed!"
 else
-  echo "No files to download."
+    # Muitos arquivos → usa barra do GNU parallel
+    if command -v parallel &>/dev/null; then
+        printf "%s\n" "${missing_urls[@]}" \
+            | parallel --bar --halt now,fail=1 -j 4 download_one
+    else
+        # fallback sequencial (pode ficar lento, mas funciona)
+        for url in "${missing_urls[@]}"; do
+            download_one "$url"
+        done
+    fi
+    echo -e "\n✅ All downloads completed!"
 fi
-echo -e "\n"
 
 ###############################################################################
 # 4. Relatório final
@@ -138,3 +135,5 @@ if [[ -s "$failed_downloads" ]]; then
 else
   echo "🎉 All downloads completed successfully!"
 fi
+#remove temp files
+rm -rf $assembly_summary_file $manifest_list 
