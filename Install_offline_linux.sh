@@ -144,7 +144,7 @@ cp -f $dir/Installation/download_genomic_library.sh $condapath/envs/MTD/libexec/
 
 echo 'MTD installation progress:'
 echo '>>>>                [20%]'
-echo 'Preparing microbiome (virus, bacteria, archaea, protozoa, fungi, plasmid, UniVec_Core) database...'
+echo 'Preparing microbiome (virus, bacteria, archaea, protozoa, fungi, plasmid, UniVec_Core) database...'git 
 
 # Kraken2 database building - Microbiome
 #update for bacterial genomes
