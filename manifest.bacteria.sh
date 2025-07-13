@@ -135,5 +135,3 @@ if [[ -s "$failed_downloads" ]]; then
 else
   echo "🎉 All downloads completed successfully!"
 fi
-#remove temp files
-rm -rf $assembly_summary_file $manifest_list 
