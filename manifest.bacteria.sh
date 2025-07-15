@@ -127,7 +127,56 @@ else
 fi
 
 ###############################################################################
-# 4. Relatório final
+# 4. Integrity check of .gz files + conditional re-download (up to 3 attempts)
+###############################################################################
+echo -e "\n🔎 Verifying integrity of downloaded .gz files..."
+
+corrupted_list="$offline_files_folder/corrupted_files.txt"
+> "$corrupted_list"
+
+# 5.1 Detect corrupted .gz files
+for file in "$new_download_dir"/*.gz; do
+  # gzip -t returns non-zero if the archive is invalid
+  gzip -t "$file" 2>/dev/null || echo "$(basename "$file")" >> "$corrupted_list"
+done
+
+corrupted_count=$(wc -l < "$corrupted_list")
+if [[ $corrupted_count -gt 0 ]]; then
+  echo -e "⚠️  Found $corrupted_count corrupted files. Re-downloading with wget (up to 3 attempts each)…\n"
+  
+  while read -r fname; do
+    echo "🔁 Re-downloading $fname"
+    for attempt in {1..3}; do
+      echo "  └─ attempt $attempt…"
+      # download directly into the target folder
+      wget -q -O "$new_download_dir/$fname" \
+           "ftp://ftp.ncbi.nlm.nih.gov/genomes/refseq/bacteria/all/$fname"
+      
+      # test integrity
+      if gzip -t "$new_download_dir/$fname" 2>/dev/null; then
+        echo "    ✅ Integrity OK on attempt $attempt"
+        # keep a synced copy in $home_download_dir
+        [[ -f "$home_download_dir/$fname" ]] || cp -p "$new_download_dir/$fname" "$home_download_dir/"
+        break
+      else
+        echo "    ❌ Integrity FAILED on attempt $attempt"
+        if [[ $attempt -eq 3 ]]; then
+          echo "    ⚠️  Giving up on $fname – file removed and logged"
+          echo "❌ Failed after 3 attempts: $fname" >> "$failed_downloads"
+          rm -f "$new_download_dir/$fname"
+        fi
+      fi
+    done
+  done < "$corrupted_list"
+  
+else
+  echo "✅ All .gz files passed integrity check."
+fi
+
+rm -f "$corrupted_list"
+
+###############################################################################
+# 5. Relatório final
 ###############################################################################
 if [[ -s "$failed_downloads" ]]; then
   echo "⚠️ Some downloads failed:"
