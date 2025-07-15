@@ -104,6 +104,46 @@ else
   done
   echo
 fi
+###############################################################################
+# VERIFICAÇÃO DE INTEGRIDADE E RE-DOWNLOAD DE ARQUIVOS CORROMPIDOS
+###############################################################################
+echo -e "\n🔎 Verifying integrity of downloaded .gz files..."
+
+CORRUPTED_LIST="$TMP_DIR/corrupted_files.txt"
+> "$CORRUPTED_LIST"
+
+for file in "$LOCAL_DIR"/*.gz; do
+  gzip -t "$file" 2>/dev/null || echo "$(basename "$file")" >> "$CORRUPTED_LIST"
+done
+
+CORRUPTED_COUNT=$(wc -l < "$CORRUPTED_LIST")
+if [[ $CORRUPTED_COUNT -gt 0 ]]; then
+  echo -e "⚠️  Found $CORRUPTED_COUNT corrupted files. Attempting re-download with wget (3 attempts max)...\n"
+  while read -r file; do
+    echo "🔁 Re-downloading $file..."
+
+    for attempt in {1..3}; do
+      echo "  Attempt $attempt..."
+      wget -q -O "$LOCAL_DIR/$file" "ftp://$FTP_SERVER/$FTP_DIR/$file"
+      if gzip -t "$LOCAL_DIR/$file" 2>/dev/null; then
+        echo "  ✅ Integrity check passed on attempt $attempt"
+        break
+      else
+        echo "  ❌ Integrity check failed on attempt $attempt"
+        (( attempt == 3 )) && {
+          echo "  ⚠️  Final attempt failed — removing $file and logging as failed."
+          echo "$file" >> "$FAILED_DL"
+          rm -f "$LOCAL_DIR/$file"
+        }
+      fi
+    done
+
+  done < "$CORRUPTED_LIST"
+else
+  echo "✅ All .gz files passed integrity check."
+fi
+
+rm -f "$CORRUPTED_LIST"
 
 ###############################################################################
 # FINAL REPORT
