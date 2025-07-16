@@ -140,11 +140,13 @@ rm -f "$corrupted_list"
 # 5. Descompactar e concatenar em um único FASTA
 ###############################################################################
 combined_fasta="$new_download_dir/all_viral_genomes.fna"
+rm $combined_fasta
 echo -e "\n🧬 Building combined FASTA → $(basename "$combined_fasta")"
 > "$combined_fasta"
 for gz in "$new_download_dir"/*.gz; do
   zcat "$gz" >> "$combined_fasta"
 done
+mv $combined_fasta $offline_files_folder/Kraken2DB_micro/library/viral/
 echo "✅ Combined FASTA created: $combined_fasta"
 
 ###############################################################################
