@@ -16,10 +16,27 @@ threads=`nproc`
 #threads=$(($(nproc) - 2))
 condapath=~/miniconda3
 offline_files_folder=""
+sudo_password=""
+
+# Função auxiliar para rodar comandos com sudo usando expect
+sudo_with_pass() {
+    local cmd=$1
+    expect <<EOF
+        set timeout -1
+        spawn bash -c "$cmd"
+        expect {
+            "*password*" {
+                send "$sudo_password\r"
+                exp_continue
+            }
+            eof
+        }
+EOF
+}
 
 # Function to display usage message
 usage() {
-    echo "Usage: $0 -p <condapath> -o <offline_files_folder> [-k <kmer>] [-m <minimizer_length>] [-s <minimizer_spaces>] [-r <read_length>]"
+    echo "Usage: $0 -p <condapath> -o <offline_files_folder> [-k <kmer>] [-m <minimizer_length>] [-s <minimizer_spaces>] [-r <read_length>] [-w <sudo_password>]"
     exit 1
 }
 
@@ -29,7 +46,7 @@ if [ $# -lt 4 ]; then
 fi
 
 # Processing arguments
-while getopts ":p:o:k:m:s:r:" option; do
+while getopts ":p:o:k:m:s:r:w:" option; do
     case "${option}" in
         p)
             condapath=${OPTARG}
@@ -49,6 +66,9 @@ while getopts ":p:o:k:m:s:r:" option; do
         r)
             read_len=${OPTARG}
             ;;
+        w)
+            sudo_password=${OPTARG}
+            ;;
         *)
             usage
             ;;
@@ -67,7 +87,7 @@ touch condaPath
 echo "$condapath" > $dir/condaPath
 
 source $condapath/etc/profile.d/conda.sh
-sudo apt-get update
+sudo_with_pass "sudo apt-get update"
 conda deactivate
 echo 'installing conda environments...'
 conda env create -f Installation/MTD.yml
@@ -121,8 +141,8 @@ echo '>>>                 [15%]'
 echo 'downloading virome database...'
 echo "${w}"
 conda activate MTD
-sudo apt-get update
-sudo apt-get install rsync -y
+sudo_with_pass "sudo apt-get update"
+sudo_with_pass "sudo apt-get install rsync -y"
 conda deactivate
 ##conda install -y python=3.10 
 #conda install -n MTD -y -c bioconda metaphlan=4.0.6=pyhca03a8a_0 #Instalar no env MTD
