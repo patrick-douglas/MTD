@@ -133,10 +133,16 @@ conda install -n MTD -y -c conda-forge pkg-config
 #wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/virushostdb.genomic.fna.gz
 cp -f $offline_files_folder/virushostdb.genomic.fna.gz .
 #wget -c https://www.genome.jp/ftp/db/virushostdb/virushostdb.genomic.fna.gz
+
 unpigz -f virushostdb.genomic.fna.gz
 cat Installation/M33262_SIVMM239.fa virushostdb.genomic.fna > viruses4kraken.fa
 
-# debug rsync error of kraken2-build
+echo "Adding additional viruses from NCBI Ref-Seq Viral to viruses4kraken.fa..."
+cp $dir/manifest.virus.sh $offline_files_folder/Kraken2DB_micro/library/manifest.virus.sh
+
+sed -i "s|^offline_files_folder=.*|offline_files_folder=$offline_files_folder|" $offline_files_folder/Kraken2DB_micro/library/manifest.virus.sh
+$offline_files_folder/Kraken2DB_micro/library/manifest.sh
+cat $offline_files_folder/Kraken2DB_micro/library/viral/all_viral_genomes.fna >> $dir/viruses4kraken.fa
 # debug rsync error of kraken2-build
 cp -f $dir/Installation/rsync_from_ncbi.pl $condapath/pkgs/kraken2-2.1.2-pl5262h7d875b9_0/libexec/rsync_from_ncbi.pl
 cp -f $dir/Installation/rsync_from_ncbi.pl $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
