@@ -87,8 +87,8 @@ conda activate halla0820
 conda deactivate
 conda env create -f Installation/R412.yml
 sed -i '/^# *rpy2/s/^# *//' $dir/Installation/pip.requirements
-echo 'MTD installation progress:'
-echo '>>                  [10%]'
+echo "${g}MTD installation progress:"
+echo ">>                  [10%]${w}"
 
 # conda activate py2 # install dependencies of py2 in case pip does work in conda yml
 # pip install backports-functools-lru-cache==1.6.1 biom-format==2.0.1 cycler==0.10.0 h5py==2.10.0 hclust2==1.0.0 kiwisolver==1.1.0 matplotlib==2.2.5 numpy==1.16.6 pandas==0.24.2 pyparsing==2.4.7 pyqi==0.3.2 python-dateutil==2.8.1 pytz==2021.1 scipy==1.2.3 six==1.15.0 subprocess32==3.5.4
@@ -114,11 +114,12 @@ R -e 'BiocManager::install("preprocessCore", ask = FALSE)'
 R -e "install.packages('eva', INSTALL_opts = '--no-lock', repos='http://cran.us.r-project.org', Ncpus=$threads)"
 conda run -n halla0820 $dir/update_fix/check_R_pkg.halla0820.sh
 conda deactivate
-
+echo "${g}"
 echo 'conda environments installed'
 echo 'MTD installation progress:'
 echo '>>>                 [15%]'
 echo 'downloading virome database...'
+echo "${w}"
 conda activate MTD
 sudo apt-get update
 sudo apt-get install rsync -y
@@ -141,11 +142,11 @@ cp -f $dir/Installation/rsync_from_ncbi.pl $condapath/pkgs/kraken2-2.1.2-pl5262h
 cp -f $dir/Installation/rsync_from_ncbi.pl $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
 cp -f $dir/Installation/download_genomic_library.sh $condapath/pkgs/kraken2-2.1.2-pl5262h7d875b9_0/libexec/download_genomic_library.sh
 cp -f $dir/Installation/download_genomic_library.sh $condapath/envs/MTD/libexec/download_genomic_library.sh
-
+echo "${g}"
 echo 'MTD installation progress:'
 echo '>>>>                [20%]'
 echo 'Preparing microbiome (virus, bacteria, archaea, protozoa, fungi, plasmid, UniVec_Core) database...'git 
-
+echo "${w}"
 # Kraken2 database building - Microbiome
 #update for bacterial genomes
 cp $dir/manifest.bacteria.sh $offline_files_folder/Kraken2DB_micro/library/manifest.sh 
@@ -198,19 +199,22 @@ echo "Adding custom viral sequences (viruses4kraken.fa) to Kraken2 database..."
 kraken2-build --add-to-library viruses4kraken.fa --threads $threads --db $DBNAME $kmer $min_l $min_s
 echo "Building final Kraken2 database—this may take a while..."
 kraken2-build --build --threads $threads --db $DBNAME $kmer $min_l $min_s
-
+echo "${g}"
 echo 'MTD installation progress:'
 echo '>>>>>>              [30%]'
 echo 'Preparing host (human) database...'
+echo "${w}"
 # Kraken2 database building - Human
 DBNAME=kraken2DB_human
 kraken2-build --download-taxonomy --threads $threads --db $DBNAME $kmer $min_l $min_s
 kraken2-build --download-library human --threads $threads --db $DBNAME $kmer $min_l $min_s
 kraken2-build --build --threads $threads --db $DBNAME $kmer $min_l $min_s
 
+echo "${g}"
 echo 'MTD installation progress:'
 echo '>>>>>>>             [35%]'
 echo 'Preparing host (mouse) database...'
+echo "${w}"
 # Kraken2 database building - Mouse
 DBNAME=kraken2DB_mice
 mkdir -p $DBNAME
@@ -225,9 +229,11 @@ kraken2-build --download-taxonomy --threads $threads --db $DBNAME $kmer $min_l $
 kraken2-build --add-to-library $DBNAME/GCF_000001635.27_GRCm39_genomic.fa --threads $threads --db $DBNAME $kmer $min_l $min_s
 kraken2-build --build --threads $threads --db $DBNAME $kmer $min_l $min_s
 
+echo "${g}"
 echo 'MTD installation progress:'
 echo '>>>>>>>>            [40%]'
 echo 'Preparing host (rhesus monkey) database...'
+echo "${w}"
 # Kraken2 database building - Rhesus macaque
 DBNAME=kraken2DB_rhesus
 mkdir -p $DBNAME
@@ -242,9 +248,11 @@ kraken2-build --download-taxonomy --threads $threads --db $DBNAME $kmer $min_l $
 kraken2-build --add-to-library $DBNAME/GCF_003339765.1_Mmul_10_genomic.fa --threads $threads --db $DBNAME $kmer $min_l $min_s
 kraken2-build --build --threads $threads --db $DBNAME $kmer $min_l $min_s
 
+echo "${g}"
 echo 'MTD installation progress:'
 echo '>>>>>>>>>           [45%]'
 echo 'Bracken database building...'
+echo "${w}"
 # Bracken database building
 if [[ $kmer == "" ]]; then
     bracken-build -d $dir/kraken2DB_micro -t $threads -l $read_len
@@ -252,9 +260,11 @@ else
     bracken-build -d $dir/kraken2DB_micro -t $threads -l $read_len -k $kmer
 fi
 
+echo "${g}"
 echo 'MTD installation progress:'
 echo '>>>>>>>>>>>         [55%]'
 echo 'installing HUMAnN3 databases...'
+echo "${w}"
 # install HUMAnN3 databases
 mkdir -p $dir/HUMAnN/ref_database/
 cd $dir/HUMAnN/ref_database/
@@ -300,9 +310,12 @@ humann_config --update database_folders nucleotide $dir/HUMAnN/ref_database/choc
 humann_config --update database_folders protein $dir/HUMAnN/ref_database/uniref
 humann_config --update database_folders utility_mapping $dir/HUMAnN/ref_database/utility_mapping
 
+echo "${g}"
 echo 'MTD installation progress:'
 echo '>>>>>>>>>>>>>>      [70%]'
-echo 'Downloading host (default: rhesus, human, mouse) references...'
+echo 'Fetching host (default: rhesus, human, mouse) references from local storage...'
+echo "Local folder: $offline_files_folder"
+echo "${w}"
 # install host references
 # download host GTF
     # download rhesus macaque GTF
@@ -321,9 +334,11 @@ mkdir -p ref_human && cp $offline_files_folder/Homo_sapiens.GRCh38.104.gtf.gz re
 mkdir -p ref_mouse && cp $offline_files_folder/Mus_musculus.GRCm39.104.gtf.gz ref_mouse
 
 # Building indexes for hisat2
+echo "${g}"
 echo 'MTD installation progress:'
 echo '>>>>>>>>>>>>>>>     [75%]'
 echo 'Building host indexes (rhesus monkey) for hisat2...'
+echo "${w}"
 # rhesus macaques
 mkdir -p hisat2_index_rhesus
 cd hisat2_index_rhesus
@@ -340,9 +355,11 @@ mv Macaca_mulatta.Mmul_10.dna.toplevel.fa genome.fa
 hisat2-build --large-index -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
 cd ..
 
+echo "${g}"
 echo 'MTD installation progress:'
 echo '>>>>>>>>>>>>>>>>    [80%]'
 echo 'Building host indexes (mouse) for hisat2...'
+echo "${w}"
 # mouse
 mkdir -p hisat2_index_mouse
 cd hisat2_index_mouse
@@ -359,9 +376,11 @@ mv Mus_musculus.GRCm39.dna.primary_assembly.fa genome.fa
 hisat2-build --large-index -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
 cd ..
 
+echo "${g}"
 echo 'MTD installation progress:'
 echo '>>>>>>>>>>>>>>>>>   [85%]'
 echo 'Building host indexes (human) for hisat2...'
+echo "${w}"
 # human
 mkdir -p hisat2_index_human
 cd hisat2_index_human
@@ -386,14 +405,18 @@ cd ..
 #     pigz -dc grch38_tran.tar.gz | tar xf -
 #     cd ..
 
+echo "${g}"
 echo "Create a BLAST database for Magic-BLAST"
+echo "${w}"
 makeblastdb -in $dir/hisat2_index_human/genome.fa -dbtype nucl -parse_seqids -out $dir/human_blastdb/human_blastdb
 makeblastdb -in $dir/hisat2_index_mouse/genome.fa -dbtype nucl -parse_seqids -out $dir/mouse_blastdb/mouse_blastdb
 makeblastdb -in $dir/hisat2_index_rhesus/genome.fa -dbtype nucl -parse_seqids -out $dir/rhesus_blastdb/rhesus_blastdb
 
+echo "${g}"
 echo 'MTD installation progress:'
 echo '>>>>>>>>>>>>>>>>>>  [90%]'
 echo 'installing R packages...'
+echo "${w}"
 # install R packages
 conda deactivate
 conda install -n py2 -y -c conda-forge pkg-config
@@ -424,14 +447,18 @@ conda deactivate
 conda activate R412
 conda run -n R412 bash $dir/update_fix/Install.R.packages.R412.sh
 conda deactivate
+echo "${g}"
 echo "*********************************"
 echo "R packages version for conda envs"
 echo "*********************************"
+echo "${g}"
 conda run -n MTD /home/me/MTD/update_fix/check_R_pkg.MTD.sh
 conda run -n R412 $dir/update_fix/check_R_pkg.R412.sh
 conda run -n halla0820 $dir/update_fix/check_R_pkg.halla0820.sh
+echo "${g}"
 echo "*********************************"
 echo ""
 echo 'MTD installation progress:'
 echo '>>>>>>>>>>>>>>>>>>>>[100%]'
 echo "MTD installation is finished"
+echo "${w}"
