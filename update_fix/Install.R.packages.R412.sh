@@ -80,6 +80,7 @@ R -e "install.packages('~/MTD/update_fix/pvr_pkg/GO.db_3.19.1.tar.gz', repos=NUL
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/GOSemSim_2.30.2.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/DOSE_3.30.4.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/tidytree_0.4.2.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/tidytree_0.4.5.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "BiocManager::install('clusterProfiler', force = TRUE, update = FALSE, Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/gson_0.1.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/clusterProfiler_4.12.2.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
