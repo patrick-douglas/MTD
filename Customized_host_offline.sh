@@ -3,18 +3,78 @@ MTDIR=~/MTD
 condapath=~/miniconda3
 threads=`nproc`
 
-while getopts c:d:g: option
-do
-    case "${option}" in
- #       t) threads=${OPTARG};;
-        d) download=${OPTARG};; # download address of host genome from Ensembl (e.g, http://ftp.ensembl.org/pub/release-104/fasta/callithrix_jacchus/dna/Callithrix_jacchus.ASM275486v1.dna.toplevel.fa.gz)
-        c) customized=${OPTARG};; # taxid for the host species
-        g) gtf=${OPTARG};; # download address of host gtf from Emsenbl (e.g, http://ftp.ensembl.org/pub/release-104/gtf/callithrix_jacchus/Callithrix_jacchus.ASM275486v1.104.gtf.gz)
+# Função para mostrar instruções de uso
+usage() {
+    echo ""
+    echo "Usage:"
+    echo "  bash $0 --genome <genome.fa.gz> --gtf-file <annotations.gtf.gz> --customized <TaxonID> --offline-folder <path>"
+    echo ""
+    echo "Required options:"
+    echo "  -d, --genome           Path to host genome FASTA (.fa.gz)"
+    echo "  -g, --gtf-file         Path to GTF annotation file (.gtf.gz)"
+    echo "  -c, --ncbi-taxon-id    NCBI Taxon ID of the host species"
+    echo "  -o, --offline-folder   Folder where offline files will be stored"
+    echo "      --help             Show this help message"
+    echo ""
+    echo "Example:"
+    echo "  bash $0 --genome ~/genomes/Anas_platyrhynchos.ASM874695v1.dna.toplevel.fa.gz --gtf-file ~/annotations/Anas_platyrhynchos.ASM874695v1.dna.toplevel.fa.gz --ncbi-taxon-id 8839 --offline-folder ~/makeOrgPackageFromNCBI/"
+    echo ""
+    exit 1
+}
+
+# Define as opções curtas e longas
+OPTIONS=c:d:g:o:
+LONGOPTIONS=ncbi-taxon-id:,genome:,gtf-file:,offline-folder:,help
+
+# Processa os argumentos
+PARSED=$(getopt --options=$OPTIONS --longoptions=$LONGOPTIONS --name "$0" -- "$@")
+if [[ $? -ne 0 ]]; then
+    usage
+fi
+
+eval set -- "$PARSED"
+
+# Variáveis
+while true; do
+    case "$1" in
+        -c|--ncbi-taxon-id)
+            customized="$2"
+            shift 2
+            ;;
+        -d|--genome)
+            download="$2"
+            shift 2
+            ;;
+        -g|--gtf-file)
+            gtf="$2"
+            shift 2
+            ;;
+        -o|--offline-folder)
+            offline_files_folder="$2"
+            shift 2
+            ;;
+        --help)
+            usage
+            ;;
+        --)
+            shift
+            break
+            ;;
+        *)
+            echo "Error: invalid arguments: $1"
+            usage
+            ;;
     esac
 done
+
+# Verificação básica de argumentos obrigatórios
+if [[ -z "$download" || -z "$gtf" || -z "$customized" || -z "$offline_files_folder" ]]; then
+    echo "Error: Missing arguments"
+    usage
+fi
+
 # Remove any previously created directories or files from previous runs
 rm -rf $MTDIR/kraken2DB_${customized} $MTDIR/ref_${customized} $MTDIR/hisat2_index_${customized} $MTDIR/blastdb_${customized}
-
 
 # get MTD folder place; same as Install.sh script file path (in the MTD folder)
 dir=$(dirname $(readlink -f $0))
@@ -24,6 +84,7 @@ cd $dir # MTD folder place
 condapath=$(head -n 1 $MTDIR/condaPath)
 # activate MTD conda environment
 source $condapath/etc/profile.d/conda.sh
+
 
 conda activate MTD
 
@@ -132,8 +193,39 @@ echo -e "Selected host species:\e[3m $species_name\e[0m"
 echo "Taxon ID: $customized"
 echo ''
 conda activate R412
-cd $dir
-Rscript $dir/create_annotation_package.R -t $customized -d $dir
+cd $MTDIR
+rm -rf NCBI org.*eg*
+################################################################################################
+
+# Run the R script and capture stdout/stderr
+
+RSCRIPT_OUTPUT=$(conda run -n R412 Rscript create_annotation_package.R -t $customized -o $offline_files_folder -c 2>&1)
+
+# Optional: show output
+echo "$RSCRIPT_OUTPUT"
+
+# Extract the last line with the .sqlite file name
+SQLITE_NAME=$(echo "$RSCRIPT_OUTPUT" | grep -oE 'org\.[A-Za-z]+\.eg\.sqlite' | tail -n1)
+
+# Convert the .sqlite to .db (as expected by install.packages)
+PKG_NAME="${SQLITE_NAME/sqlite/db}"
+
+if [ -n "$PKG_NAME" ]; then
+    echo "Installing R package: $PKG_NAME"
+    R -e "install.packages('$PKG_NAME', repos = NULL, type = 'source')"
+    rm -rf NCBI org.*eg*
+else
+    echo "Error: Could not extract the package name from the R script output."
+    exit 1
+fi
+
+################################################################################################
+
+exit 1
+#the parameter -o 
+#/media/me/18TB_BACKUP_LBN/lbn_workspace/RNA-Seq-LBN/viral-rna-seq/MTD/Compressed/MTD/makeOrgPackageFromNCBI/
+
+#Rscript $dir/create_annotation_package.R -t $customized -d $dir
 R -e "install.packages('org.Aplatyrhynchos.eg.sqlite', repos = NULL, type = 'source')"
 
 conda deactivate
