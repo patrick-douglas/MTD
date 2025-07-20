@@ -186,7 +186,7 @@ gunzip *.fa.gz
 mv *.fa blastdb_$customized
 
 makeblastdb -in $MTDIR/blastdb_$customized/blastdb_$customized -dbtype nucl -out $MTDIR/blastdb_$customized/blastdb_$customized -parse_seqids
-exit 1
+
 
 echo "Creating the annotation package for R412"
 echo -e "Selected host species:\e[3m $species_name\e[0m"
