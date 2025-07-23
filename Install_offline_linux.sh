@@ -480,7 +480,7 @@ echo "*********************************"
 echo "R packages version for conda envs"
 echo "*********************************"
 echo "${g}"
-conda run -n MTD $dir/MTD/update_fix/check_R_pkg.MTD.sh
+conda run -n MTD $dir/update_fix/check_R_pkg.MTD.sh
 conda run -n R412 $dir/update_fix/check_R_pkg.R412.sh
 conda run -n halla0820 $dir/update_fix/check_R_pkg.halla0820.sh
 echo "${g}"
