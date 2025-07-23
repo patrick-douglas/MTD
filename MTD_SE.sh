@@ -6,7 +6,7 @@ length=35 # read length trimming by fastp
 read_len=75 # the read length in bracken
 threads=`nproc`
 blast="hisat"  # Define "hisat" como padrão
-while getopts i:o:h:m:p:l:r:b:t option
+while getopts i:o:h:m:p:l:r:bt option
 do
     case "${option}" in
         i) inputdr=${OPTARG};;
@@ -21,12 +21,15 @@ do
     esac
 done
 
+#Example of the latest cmd
+#bash ~/MTD/MTD_SE.sh -i $input_dir/samplesheet.csv -o ~/MTD/C.pusilla_3_grp -h 8839 -b blast -t
+
 # inputdr=~/RNAseq_raw_data/samplesheet.csv # select input directory; must store singe-end .fq.gz (eg. DJ01.fq.gz) of each sample in the same folder as the samplesheet.csv
 # outputdr=~/MTD_Results/test1 # select outputdr directory
 # hostid=9544 # Enter host species taxonomy ID; initally supporting 9544 (rhesus monkey), 9606 (human), and 10090 (mouse).
 # threads=20 # CPU threads; suggest >=16, eg. 20
 # pdm= spearman or pearson or mi or nmi or xicor or dcor # pairwise distance metrics refer to HALLA mannual
-
+rm -rf $outputdr
 # get MTD.sh script file path (in the MTD folder)
 MTDIR=$(dirname $(readlink -f $0))
 #parentname="$(dirname "$MTDIR")"
