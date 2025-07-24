@@ -84,4 +84,7 @@ echo -n "${g}ggridges: 	                       	${w}" ; R --no-restore -e 'packa
 echo -n "${g}ggnewscale: 	                        ${w}" ; R --no-restore -e 'packageVersion("ggnewscale")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
 echo -n "${g}ggupset: 	                       	${w}" ; R --no-restore -e 'packageVersion("ggupset")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
 echo -n "${g}Seurat: 	                       	${w}" ; R --no-restore -e 'packageVersion("Seurat")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
+echo -n "${g}BiocGenerics: 	                       	${w}" ; R --no-restore -e 'packageVersion("BiocGenerics")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
+echo -n "${g}genefilter: 	                       	${w}" ; R --no-restore -e 'packageVersion("genefilter")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
+echo -n "${g}DESeq2: 	                       	${w}" ; R --no-restore -e 'packageVersion("DESeq2")' | grep packageVersion -A 1 | grep '[1]' | awk {'print $2'} | sed -r 's/^.{1}//' | sed 's/.$//'
 echo "${g}***********************************************${w}"
