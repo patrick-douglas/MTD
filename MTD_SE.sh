@@ -29,7 +29,17 @@ done
 # hostid=9544 # Enter host species taxonomy ID; initally supporting 9544 (rhesus monkey), 9606 (human), and 10090 (mouse).
 # threads=20 # CPU threads; suggest >=16, eg. 20
 # pdm= spearman or pearson or mi or nmi or xicor or dcor # pairwise distance metrics refer to HALLA mannual
-rm -rf $outputdr
+if [ -d "$outputdr" ]; then
+    echo "The output directory '$outputdr' already exists."
+    read -p "Do you want to delete it and overwrite the files? (y/n): " answer
+    if [[ "$answer" =~ ^[Yy]$ ]]; then
+        rm -rf "$outputdr"
+        echo "Directory deleted."
+    else
+        echo "Operation cancelled by the user. Exiting."
+        exit 1
+    fi
+fi
 # get MTD.sh script file path (in the MTD folder)
 MTDIR=$(dirname $(readlink -f $0))
 #parentname="$(dirname "$MTDIR")"
