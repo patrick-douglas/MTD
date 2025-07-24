@@ -133,3 +133,13 @@ R -e "install.packages('~/MTD/update_fix/pvr_pkg/AnnotationDbi_1.70.0.tar.gz', r
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/org.Hs.eg.db_3.21.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/pathview_1.44.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('prettydoc',repos = 'http://cran.us.r-project.org', Ncpus=$threads)"
+#Fix for DESeq
+R -e "BiocManager::install('BiocGenerics', force = TRUE, Ncpus=$threads)"
+R -e "BiocManager::install('genefilter', force = TRUE, Ncpus=$threads)"
+R -e "BiocManager::install('DESeq2', force = TRUE, update = FALSE, Ncpus=$threads)"
+
+
+
+
+
+

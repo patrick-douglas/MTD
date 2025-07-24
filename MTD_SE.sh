@@ -198,7 +198,8 @@ done
 # Compressão paralela e cópia se no_trimm for definido
 if [ -n "$no_trimm" ]; then
     echo 'Compressing fastq files to .gz'
-    echo 'WARNNING: As the parameter -t was declared the data will not be trimmed/filtered with fastp'
+    echo 'WARNNING: As the parameter -t was declared the data will not be trimmed/filtered with fastp
+'
     find $inputdr -name "*.fq" -o -name "*.fastq" -o -name "*.fq.gz" -o -name "*.fastq.gz" | xargs -I {} -P $max_jobs sh -c '
         input_file="$1"
         base_name=$(basename "${input_file%.*}")
