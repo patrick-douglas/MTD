@@ -1,5 +1,11 @@
 #!/bin/bash
-#Colors
+# Defining colors
+w=$(tput sgr0) 
+r=$(tput setaf 1)
+g=$(tput setaf 2) 
+y=$(tput setaf 3) 
+p=$(tput setaf 5) 
+echo "${w}"
 # default settings
 pdm="spearman" # method in HALLA
 length=35 # read length trimming by fastp
@@ -130,18 +136,18 @@ if [ -z "$species_name" ]; then
   exit 1
 fi
 
+echo "${g}"
+echo "============================================"
+echo -e "Selected host species:${w}\e[3m $species_name\e[0m${g}"
+echo "Taxon ID:${w} $hostid ${g}"
 echo ''
 echo "============================================"
-echo -e "Selected host species:\e[3m $species_name\e[0m"
-echo "Taxon ID: $hostid"
-echo ''
-echo "============================================"
-echo "Main study design:"
+echo "Main study design:${w}"
 awk -F',' 'NR>1 {groups[$2]++; if ($5=="vs") comparisons[$2" vs "$6]++} END { 
   for (g in groups) printf "Group: %s - Number of samples: %d\n", g, groups[g]; 
 }' $inputdr/samplesheet.csv
-echo "============================================"
-echo ""
+echo "${g}============================================"
+echo "${w}"
 
 # Assuming $metadata is the path to the metadata file passed via -m flag
 if [ ! -z "$metadata" ]; then
@@ -171,10 +177,10 @@ if [ ! -z "$metadata" ]; then
     echo ''
 fi
 
-echo "MTD running  progress:"
+echo "${g}MTD running  progress:"
 echo ">>                  [10%]"
 
-echo "Raw reads trimming"
+echo "Raw reads trimming${w}"
 choice="execute"
 #choice="skip" Just copy pre compressed files path is required
 #choice="execute" Perform the filtering or not based if the parameter -t is declared or not
@@ -207,9 +213,9 @@ done
 
 # Compressão paralela e cópia se no_trimm for definido
 if [ -n "$no_trimm" ]; then
-    echo 'Compressing fastq files to .gz'
-    echo 'WARNNING: As the parameter -t was declared the data will not be trimmed/filtered with fastp
-'
+    echo "${g}Compressing fastq files to .gz"
+    echo "${y}WARNING: As the parameter -t was declared the data will not be trimmed/filtered with fastp${g}"
+    echo 'Skipping trimming step...'
     find $inputdr -name "*.fq" -o -name "*.fastq" -o -name "*.fq.gz" -o -name "*.fastq.gz" | xargs -I {} -P $max_jobs sh -c '
         input_file="$1"
         base_name=$(basename "${input_file%.*}")
@@ -239,10 +245,10 @@ esac
 
 #$MTDIR/MTD_scripts/data_trimming.sh 
 
-echo 'MTD running  progress:'
+echo "${g}MTD running  progress:"
 echo '>>>>                [20%]'
 
-echo "Reads classification by kraken2; 1st step for host"
+echo "Reads classification by kraken2; 1st step for host ${w}"
 for i in $lsn; do # store input sample name in i; eg. DJ01
     kraken2 --db $DB_host --use-names \
         --report Report_host_$i.txt \
@@ -254,10 +260,10 @@ for i in $lsn; do # store input sample name in i; eg. DJ01
         > Report_host_$i.kraken
 done
 
-echo 'MTD running  progress:'
+echo "${g}MTD running  progress:"
 echo '>>>>>               [25%]'
 
-echo "Reads classification by kraken2; 2nd step for non-host reads"
+echo "Reads classification by kraken2; 2nd step for non-host reads ${w}"
 for i in $lsn; do # store input sample name in i; eg. DJ01
     kraken2 --db $DB_micro --use-names \
         --report Report_non-host.raw_$i.txt \
@@ -268,10 +274,10 @@ for i in $lsn; do # store input sample name in i; eg. DJ01
         > Report_non-host_raw_$i.kraken
 done
 
-echo 'MTD running  progress:'
+echo "${g}MTD running  progress:"
 echo '>>>>>>              [30%]'
 
-echo "Decontamination step"
+echo "Decontamination step${w}"
 conta_file=$MTDIR/conta_ls.txt
 if test -f "$conta_file"; then
     tls=$(awk -F '\t' '{print $2}' $conta_file)
@@ -285,10 +291,10 @@ if test -f "$conta_file"; then
             --taxid $conta_ls --exclude --include-children
     done
 
-    echo 'MTD running  progress:'
+    echo "${g}MTD running  progress:"
     echo '>>>>>>>             [35%]'
 
-echo "Reads classification by kraken2; 3rd step for decontaminated non-host reads to get reports"
+echo "Reads classification by kraken2; 3rd step for decontaminated non-host reads to get reports ${w}"
     for i in $lsn; do
         kraken2 --db $DB_micro --use-names \
             --report Report_non-host_$i.txt \
@@ -300,37 +306,37 @@ echo "Reads classification by kraken2; 3rd step for decontaminated non-host read
     done
 fi
 
-echo 'MTD running  progress:'
+echo "${g}MTD running  progress:"
 echo '>>>>>>>>            [40%]'
 
-echo "Bracken analysis"
+echo "Bracken analysis ${w}"
 for i in $lsn; do # store input sample name in i; eg. DJ01
     bracken -d $DB_micro -i Report_non-host_${i}.txt -o Report_$i.phylum.bracken -r $read_len -l P -t $threads
     bracken -d $DB_micro -i Report_non-host_${i}.txt -o Report_$i.genus.bracken -r $read_len -l G -t $threads
     bracken -d $DB_micro -i Report_non-host_${i}.txt -o Report_$i.species.bracken -r $read_len -l S -t $threads
 done
 
-echo 'MTD running  progress:'
+echo "${g}MTD running  progress:"
 echo '>>>>>>>>>           [45%]'
-echo "combined .bracken files (table like) into a single outputdr for Deseq2"
+echo "combined .bracken files (table like) into a single outputdr for Deseq2 ${w}"
 python $MTDIR/Tools/combine_bracken_outputs.py --files *.phylum.bracken -o $outputdr/bracken_phylum_all
 python $MTDIR/Tools/combine_bracken_outputs.py --files *.genus.bracken -o $outputdr/bracken_genus_all
 python $MTDIR/Tools/combine_bracken_outputs.py --files *.species.bracken -o $outputdr/bracken_species_all
 
-echo "Move _bracken report files (tree like) to a separate folder"
+echo "${g}Move _bracken report files (tree like) to a separate folder${w}"
 mkdir -p Report_non-host_bracken_species_normalized
 mv *_bracken_species.txt Report_non-host_bracken_species_normalized
 cd Report_non-host_bracken_species_normalized
 
-echo "Trim the name of _bracken report files (tree like) to the sample name (eg. DJ01)"
+echo "${g}Trim the name of _bracken report files (tree like) to the sample name (eg. DJ01) ${w}"
 for i in $lsn; do
     mv *${i}_* $i
 done
 
-echo "Converted original _bracken report files (tree like) into .biom file for ANCOMBC and diversity analysis in phyloseq (R) etc. in DEG_Anno_Plot.R"
+echo "${g}Converted original _bracken report files (tree like) into .biom file for ANCOMBC and diversity analysis in phyloseq (R) etc. in DEG_Anno_Plot.R ${w}"
 kraken-biom * -o $outputdr/temp/bracken_species_all0.biom --fmt json
 
-echo "Adjust bracken file (tree like) by normalizated reads counts; for additional visualization (.biom, .mpa, .krona)"
+echo "${g}Adjust bracken file (tree like) by normalizated reads counts; for additional visualization (.biom, .mpa, .krona) ${w}"
 conda deactivate
 conda activate R412
 Rscript $MTDIR/Normalization_afbr.R $outputdr/bracken_species_all $inputdr/samplesheet.csv $outputdr/temp/Report_non-host_bracken_species_normalized $metadata
@@ -338,20 +344,20 @@ Rscript $MTDIR/Normalization_afbr.R $outputdr/bracken_species_all $inputdr/sampl
 conda deactivate
 conda activate MTD
 
-echo 'MTD running  progress:'
+echo "${g}MTD running  progress:"
 echo '>>>>>>>>>>          [50%]'
 
-echo "Converted adjusted _bracken report files (tree like) into .biom file for graph visualization: graphlan, MPA, krona"
+echo "Converted adjusted _bracken report files (tree like) into .biom file for graph visualization: graphlan, MPA, krona ${w}"
 kraken-biom * -o $outputdr/bracken_species_all.biom --fmt json
 #Converted original _bracken report files (tree like) into .biom file
 #kraken-biom * -o $outputdr/temp/bracken_species_all0.biom --fmt json
 #kraken-biom *_bracken_phylum -o bracken_phylum_all.biom --fmt json
 #kraken-biom *_bracken_genus -o bracken_genus_all.biom --fmt json
 
-echo "Remove "sp. " in the .biom file; correct improper format before run export2graphlan.py"
+echo "${g}Remove "sp. " in the .biom file; correct improper format before run export2graphlan.py"
 sed -i 's/sp. //g' $outputdr/bracken_species_all.biom
 
-echo "Go to temp folder"
+echo "Go to temp folder${w}"
 cd ../
 
 mkdir -p ../graphlan
@@ -373,7 +379,7 @@ conda activate MTD
 
 cd ../temp
 
-echo "DEG & Annotation & Plots & Diversity & Preprocess for Microbiome"
+echo "${g}DEG & Annotation & Plots & Diversity & Preprocess for Microbiome ${w}"
 conda deactivate
 conda activate R412
 Rscript $MTDIR/DEG_Anno_Plot.R $outputdr/bracken_species_all $inputdr/samplesheet.csv $hostid $MTDIR/HostSpecies.csv $metadata
@@ -385,7 +391,7 @@ mkdir -p bracken_raw_results # save the raw output from bracken (table like)
 mv ../bracken_*_all bracken_raw_results
 
 cd ../graphlan
-echo "Applying a fix for both tree.txt and Annot.txt"
+echo "${g}Applying a fix for both tree.txt and Annot.txt${w}"
 python $MTDIR/Tools/graphlan/verify_and_correct_annotations.py tree.txt annot.txt corrected_annot.txt
 mv annot.txt annot_original.txt
 mv corrected_annot.txt annot.txt
@@ -396,8 +402,8 @@ python $MTDIR/Tools/graphlan/graphlan.py outtree.txt outimg.pdf # generate the g
 
 cd ../temp
 
-echo "Visualization preprocess"
-echo "For krona"
+echo "${g}Visualization preprocess"
+echo "For krona${w}"
 mkdir -p ../krona
 for i in $lsn; do # store input sample name in i; eg. DJ01
     python $MTDIR/Tools/KrakenTools/kreport2krona.py \
@@ -405,22 +411,22 @@ for i in $lsn; do # store input sample name in i; eg. DJ01
         -o ../krona/${i}-bracken.krona
 done
 
-echo "To make MPA style file"
+echo "${g}To make MPA style file${w}"
 for i in $lsn; do # store input sample name in i; eg. DJ01
     python $MTDIR/Tools/KrakenTools/kreport2mpa.py \
         --display-header \
         -r Report_non-host_bracken_species_normalized/${i} \
         -o ${i}-bracken.mpa.txt
 done
-echo "Combine MPA files"
+echo "${g}Combine MPA files${w}"
 python $MTDIR/Tools/KrakenTools/combine_mpa.py \
     -i *.mpa.txt \
     -o ../Combined.mpa
 
-echo 'MTD running  progress:'
+echo "${g}MTD running  progress:"
 echo '>>>>>>>>>>>         [55%]'
 
-echo "HUMAnN3"
+echo "HUMAnN3${w}"
 mkdir -p HUMAnN_output
 
 for n1 in *\_non-host.fq; do
@@ -433,16 +439,16 @@ for file in *; do #trim the file name
     mv $file ${file/_non-host/}
 done
 
-echo "Run HUMAnN3"
+echo "${g}Run HUMAnN3${w}"
 for i in *.fq; do
     humann --input $i \
         --output hmn_output \
         --threads $threads \
         --verbose
 done
-echo '>>>>>>>>>>>>        [60%]'
+echo "${g}>>>>>>>>>>>>        [60%]"
 
-echo "Join all gene family and pathway abudance files"
+echo "Join all gene family and pathway abudance files${w}"
 humann_join_tables -i hmn_output/ -o humann_pathabundance.tsv --file_name pathabundance
 humann_join_tables -i hmn_output/ -o humann_genefamilies.tsv --file_name genefamilies
 
@@ -450,25 +456,25 @@ humann_join_tables -i hmn_output/ -o humann_genefamilies.tsv --file_name genefam
 # humann_renorm_table --input humann_pathabundance.tsv --output humann_pathabundance_cpm.tsv --units cpm --update-snames
 # humann_renorm_table --input humann_genefamilies.tsv --output humann_genefamilies_cpm.tsv --units cpm --update-snames
 
-echo "Normalizing RPKs to "relab" (relative abundance)"
+echo "${g}Normalizing RPKs to "relab" (relative abundance)${w}"
 humann_renorm_table --input humann_pathabundance.tsv --output humann_pathabundance_relab.tsv --units relab --update-snames
 humann_renorm_table --input humann_genefamilies.tsv --output humann_genefamilies_relab.tsv --units relab --update-snames
 
-echo "Generate stratified tables; This utility will split a table into two files (one stratified and one unstratified)."
+echo "${g}Generate stratified tables; This utility will split a table into two files (one stratified and one unstratified). ${w}"
 humann_split_stratified_table --input humann_pathabundance_relab.tsv --output ./
 humann_split_stratified_table --input humann_genefamilies_relab.tsv --output ./
-    echo "Stratify unnormalized table (for Deseq2)"
+    echo "${g}Stratify unnormalized table (for Deseq2)${w}"
     humann_split_stratified_table --input humann_pathabundance.tsv --output ./
     humann_split_stratified_table --input humann_genefamilies.tsv --output ./
 
-echo "Regroup gene familites table into KEGG orthologs and GO terms"
+echo "${g}Regroup gene familites table into KEGG orthologs and GO terms${w}"
 humann_regroup_table --input humann_genefamilies_relab_stratified.tsv --groups uniref90_ko --output humann_genefamilies_relAbundance_kegg.tsv
 humann_regroup_table --input humann_genefamilies_relab_stratified.tsv --groups uniref90_go --output humann_genefamilies_relAbundance_go.tsv
-    echo "Regroup unnormalized table (for Deseq2)"
+    echo "${g}Regroup unnormalized table (for Deseq2${w}"
     humann_regroup_table --input humann_genefamilies_stratified.tsv --groups uniref90_ko --output humann_genefamilies_Abundance_kegg.tsv
     humann_regroup_table --input humann_genefamilies_stratified.tsv --groups uniref90_go --output humann_genefamilies_Abundance_go.tsv
 
-echo "Translate KEGG and GO ID to human readable terms"
+echo "${g}Translate KEGG and GO ID to human readable terms${w}"
 conda deactivate
 conda activate R412
 #Rscript $MTDIR/humann_ID_translation.R \
@@ -489,7 +495,7 @@ mv *genefamilies* $outputdr/hmn_genefamily_abundance_files/
 # Rscript $MTDIR/humann_ID_translation.R $outputdr/hmn_genefamily_abundance_files/humann_genefamilies_Abundance_kegg.tsv \
 #     $outputdr/hmn_genefamily_abundance_files/humann_genefamilies_Abundance_go.tsv
 
-echo "DEG & Annotation & Plots & Diversity & Preprocess"
+echo "${g}DEG & Annotation & Plots & Diversity & Preprocess${w}"
 cd $outputdr/hmn_genefamily_abundance_files
 conda deactivate
 conda activate R412
@@ -505,14 +511,14 @@ conda deactivate && conda activate MTD
 # humann_barplot --input $outputdr/hmn_genefamily_abundance_files/humann_genefamilies_cpm_stratified.tsv \
 #     --output $outputdr/hmn_genefamily_abundance_files/humann_genefamilies_barplot.png
 
-echo 'MTD running  progress:'
+echo "${g}MTD running  progress:"
 echo '>>>>>>>>>>>>>       [65%]'
 
-echo 'Starting to process the host reads...'
+echo "Starting to process the host reads...${w}"
 ## continue to process the host reads
 cd $outputdr/temp
 if [[ $blast == blast ]]; then
-    echo "Magic-BLAST"
+    echo "${g}Magic-BLAST${w}"
     for i in $lsn; do # store input sample name in i; eg. DJ01
         magicblast -query ${i}_host.fq \
         -db $DB_blast \
@@ -522,7 +528,7 @@ if [[ $blast == blast ]]; then
     done
 #for i in $lsn; do magicblast -query ${i}_host.fq -db $DB_blast -infmt fastq -out $i.sam -num_threads 8; done
 else
-    echo "HISAT2 alignment"
+    echo "${g}HISAT2 alignment${w}"
     for i in $lsn; do # store input sample name in i; eg. DJ01
         hisat2 -p $threads -q \
             -x $DB_hisat2 \
@@ -533,7 +539,7 @@ else
 fi
 
 
-echo "featureCounts"
+echo "${g}featureCounts${w}"
 featureCounts -T $threads -a $gtf -o $outputdr/host_counts.txt *.sam
 
 
@@ -550,16 +556,17 @@ mv *.sorted.bam *.sorted.bam.bai BAM/
 
 cd $outputdr
 # trim the featureCounts output(host_counts.txt) for downstream analysis
-echo "Delete the first line/row of a file then trim the sample name"
+echo "${g}Delete the first line/row of a file then trim the sample name${w}"
 sed '1d; 2 s/\.sam//g' host_counts.txt > tmpfile; mv tmpfile host_counts.txt
 
-echo "DEG & Annotation & Plots & preprocess for host"
+echo "${g}DEG & Annotation & Plots & preprocess for host${w}"
 conda deactivate
 conda activate R412
 cd $outputdr
+echo "${r}"
 echo "before DEG_Anno_Plot.R "
 read -p "PRESS ENTER"
-echo ""
+echo "${w}"
 echo $MTDIR
 echo $outputdr
 echo $inputdr
@@ -569,25 +576,25 @@ echo $metadata
 Rscript $MTDIR/DEG_Anno_Plot.R $outputdr/host_counts.txt $inputdr/samplesheet.csv $hostid $MTDIR/HostSpecies.csv $metadata
 #Aqui o arquivo definido pela variavel $metadata pode causar erros na analise DE, principalemnte se tiver grupos com apenas 1 fator, melhor rodar sem o $metadata e usar apenas do samplessheet.csv
 
-echo 'MTD running  progress:'
+echo "${g}MTD running  progress:"
 echo '>>>>>>>>>>>>>>>     [75%]'
 
-echo "ssGSEA"
+echo "ssGSEA${w}"
 Rscript $MTDIR/gct_making.R $outputdr/Host_DEG/host_counts_TPM.csv $inputdr/samplesheet.csv
 
 Rscript $MTDIR/Tools/ssGSEA2.0/ssgsea-cli.R -i $outputdr/ssGSEA/host.gct -o $outputdr/ssGSEA/ssgsea-results -d $MTDIR/Tools/ssGSEA2.0/db/msigdb/c2.all.v7.5.1.symbols.gmt -y $MTDIR/Tools/ssGSEA2.0/config.yaml -u $threads
 
 Rscript $MTDIR/for_halla.R $outputdr/ssGSEA/ssgsea-results-scores.gct $inputdr/samplesheet.csv $metadata
 
-echo 'MTD running  progress:'
+echo "${g}MTD running  progress:"
 echo '>>>>>>>>>>>>>>>>    [80%]'
 echo "MTD DEG analyses are done. Starting microbiome x host association analyses..."
 
-echo "halla: association analysis"
+echo "halla: association analysis${w}"
 #mkdir -p $outputdr/Associations
 conda deactivate
 conda activate halla0820
-echo 'Analyzing microbiome x host_genes associations...'
+echo "${g}Analyzing microbiome x host_genes associations...${w}"
 #mkdir -p $outputdr/halla/host_gene # need to create a new directory for output to avoid "exists; deleting..." issue by halla
 halla -x $outputdr/halla/Microbiomes.txt -y $outputdr/halla/Host_gene.txt -o $outputdr/halla/host_gene --x_dataset_label Microbiomes --y_dataset_label Host_gene --diagnostic_plot -m ${pdm}
 
@@ -629,18 +636,20 @@ hallagram -i $outputdr/halla/host_gene --cbar_label "${pdm_name[@]}" --x_dataset
 hallagram -i $outputdr/halla/host_gene --cbar_label "${pdm_name[@]}" --x_dataset_label Microbiomes --y_dataset_label Host_gene --output $outputdr/halla/host_gene/hallagram_Top50.pdf --block_num 50
 hallagram -i $outputdr/halla/host_gene --cbar_label "${pdm_name[@]}" --x_dataset_label Microbiomes --y_dataset_label Host_gene --output $outputdr/halla/host_gene/hallagram_Top300.pdf --block_num 300
         fi
-
+echo "${g}"
 echo 'MTD running  progress:'
 echo '>>>>>>>>>>>>>>>>>>  [90%]'
 
 echo 'Analyzing microbiome x host_pathways associations...'
+echo "${w}"
 # for microbiome x host_pathways(ssGSEA)
 #mkdir -p $outputdr/halla/pathway
 halla -x $outputdr/halla/Microbiomes.txt -y $outputdr/halla/Host_score.txt -o $outputdr/halla/pathway --x_dataset_label Microbiomes --y_dataset_label Host_pathway --diagnostic_plot -m ${pdm}
 
 # show all clusters
 hallagram -i $outputdr/halla/pathway --cbar_label "${pdm_name[@]}" --x_dataset_label Microbiomes --y_dataset_label Host_pathway --output $outputdr/halla/pathway_hallagram_all.pdf --block_num -1
-
+echo "${g}"
 echo 'MTD running  progress:'
 echo '>>>>>>>>>>>>>>>>>>>>[100%]'
 echo "MTD running is finished"
+echo -e "${w}"
