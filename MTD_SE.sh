@@ -186,7 +186,7 @@ choice="execute"
 #choice="execute" Perform the filtering or not based if the parameter -t is declared or not
 case $choice in
   execute)
-max_jobs=$(nproc)
+max_jobs=$(( $(nproc) / 2 ))
 max_fastp_cores=16
 
 if [ "$threads" -gt "$max_fastp_cores" ]; then
