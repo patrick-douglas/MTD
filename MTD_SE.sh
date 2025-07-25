@@ -28,7 +28,7 @@ do
 done
 
 #Example of the latest cmd
-#bash ~/MTD/MTD_SE.sh -i $input_dir/samplesheet.csv -o ~/MTD/C.pusilla_3_grp -h 8839 -b blast -t
+#bash ~/MTD/MTD_SE.sh -i $input_dir/samplesheet.csv -o ~/MTD/A.macularius_vs_C.pusilla/ -h 8839 -b -t
 
 # inputdr=~/RNAseq_raw_data/samplesheet.csv # select input directory; must store singe-end .fq.gz (eg. DJ01.fq.gz) of each sample in the same folder as the samplesheet.csv
 # outputdr=~/MTD_Results/test1 # select outputdr directory
