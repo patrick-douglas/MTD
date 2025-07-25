@@ -186,7 +186,7 @@ choice="execute"
 #choice="execute" Perform the filtering or not based if the parameter -t is declared or not
 case $choice in
   execute)
-max_jobs=$(( $(nproc) / 2 ))
+#max_jobs=$(( $(nproc) / 2 ))
 max_fastp_cores=16
 
 if [ "$threads" -gt "$max_fastp_cores" ]; then
@@ -211,28 +211,48 @@ for i in $lsn; do
     fi
 done
 
+# Defina threads por job e calcule max_jobs baseado nisso
+total_cores=$(nproc)
+
+# Defina threads por job proporcional ao total de núcleos
+if [ "$total_cores" -le 4 ]; then
+    threads_per_job=1
+elif [ "$total_cores" -le 8 ]; then
+    threads_per_job=2
+elif [ "$total_cores" -le 16 ]; then
+    threads_per_job=4
+else
+    threads_per_job=10
+fi
+
+# Calcula max_jobs, garantindo no mínimo 1
+max_jobs=$(( total_cores / threads_per_job ))
+if [ "$max_jobs" -lt 1 ]; then
+    max_jobs=1
+fi
 # Compressão paralela e cópia se no_trimm for definido
 if [ -n "$no_trimm" ]; then
     echo "${g}Compressing fastq files to .gz"
     echo "${y}WARNING: As the parameter -t was declared the data will not be trimmed/filtered with fastp${g}"
     echo 'Skipping trimming step...'
-    find $inputdr -name "*.fq" -o -name "*.fastq" -o -name "*.fq.gz" -o -name "*.fastq.gz" | xargs -I {} -P $max_jobs sh -c '
+    
+    find "$inputdr" -type f \( -name "*.fq" -o -name "*.fastq" -o -name "*.fq.gz" -o -name "*.fastq.gz" \) \
+    | xargs -I {} -P "$max_jobs" sh -c '
         input_file="$1"
+        output_dir="$2"
+        threads="$3"
         base_name=$(basename "${input_file%.*}")
+        base_name_no_suffix=$(echo "$base_name" | sed "s/_R[0-9]$//")
+        output_file="$output_dir/Trimmed_${base_name_no_suffix}.fq.gz"
         
         if [ "${input_file##*.}" = "gz" ]; then
-            # Se o arquivo já estiver comprimido, apenas processe o nome
-            base_name_no_suffix=$(echo "$base_name" | sed "s/_R[0-9]$//")
-            output_file="$2/Trimmed_${base_name_no_suffix}.fq.gz"
-            # Copie o arquivo comprimido para o diretório de saída com o novo nome
+            # Arquivo já comprimido — só copia
             cp "$input_file" "$output_file"
         else
-            # Se o arquivo não estiver comprimido, remova o sufixo e comprima
-            base_name_no_suffix=$(echo "$base_name" | sed "s/_R[0-9]$//")
-            output_file="$2/Trimmed_${base_name_no_suffix}.fq.gz"
-            gzip --fast -c "$input_file" > "$output_file"
+            # Arquivo não comprimido — comprime com pigz usando múltiplas threads
+            pigz -p "$threads" -c "$input_file" > "$output_file"
         fi
-    ' _ {} "$outputdr/temp"
+    ' _ {} "$outputdr/temp" "$threads_per_job"
 fi
     ;;
   skip)
