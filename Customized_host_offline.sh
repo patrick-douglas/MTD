@@ -199,7 +199,7 @@ rm -rf NCBI org.*eg*
 
 # Run the R script and capture stdout/stderr
 
-RSCRIPT_OUTPUT=$(conda run -n R412 Rscript create_annotation_package.R -t $customized -o $offline_files_folder -c 2>&1)
+RSCRIPT_OUTPUT=$(conda run -n R412 Rscript create_annotation_package.R --taxid $customized --offline $offline_files_folder --copy 2>&1)
 
 # Optional: show output
 echo "$RSCRIPT_OUTPUT"

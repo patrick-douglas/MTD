@@ -22,7 +22,6 @@ library(optparse)
 library(readr)
 library(biomaRt)
 library(httr)
-biomartCacheClear()
 
 # Definir mirror CRAN
 options(repos = c(CRAN = "https://cran.r-project.org"))
