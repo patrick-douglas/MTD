@@ -476,6 +476,9 @@ conda deactivate
 conda activate R412
 conda run -n R412 bash $dir/update_fix/Install.R.packages.R412.sh
 conda deactivate
+
+#Install Annotation tools for base enviroment
+bash $dir/update_fix/Install.R.AnnotPackages.base.sh
 echo "${g}"
 echo "*********************************"
 echo "R packages version for conda envs"

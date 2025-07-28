@@ -1,5 +1,13 @@
 #!/usr/bin/env Rscript
 
+# Definir mirror CRAN
+options(repos = c(CRAN = "https://cran.r-project.org"))
+
+#Apagar $offline
+if (dir.exists("NCBI")) {
+  unlink("NCBI", recursive = TRUE)
+}
+
 # Carregar pacotes necessários (instala se precisar)
 if (!requireNamespace("AnnotationForge", quietly = TRUE)) {
     BiocManager::install('AnnotationForge', force = TRUE, update = FALSE)
@@ -23,8 +31,6 @@ library(readr)
 library(biomaRt)
 library(httr)
 
-# Definir mirror CRAN
-options(repos = c(CRAN = "https://cran.r-project.org"))
 
 # Definir opções de linha de comando
 option_list <- list(
@@ -109,6 +115,55 @@ if (!is.null(opt$offline)) {
     }
 }
 
+
+#Verificar se os arquivos de cache offline estao iguais ao NCBI 
+# Function to compare file sizes and suggest updating if mismatch is found
+check_ncbi_file_consistency <- function(local_path, remote_url) {
+    if (!file.exists(local_path)) {
+        warning("Local file not found: ", local_path)
+        return(FALSE)
+    }
+
+    # Local file size
+    local_size <- file.info(local_path)$size
+
+    # Remote file size via HEAD request
+    r <- httr::HEAD(remote_url)
+    remote_size <- as.numeric(httr::headers(r)[["content-length"]])
+
+    if (is.na(remote_size)) {
+        warning("Could not retrieve remote file size for: ", remote_url)
+        return(FALSE)
+    }
+
+    if (local_size != remote_size) {
+        warning(paste0(
+            "File mismatch detected: ", basename(local_path), "\n",
+            "  - Local size: ", local_size, " bytes\n",
+            "  - Remote size: ", remote_size, " bytes\n",
+            "Suggestion: Your local file may be outdated or corrupted.\n",
+            "Consider re-downloading it from: ", remote_url
+        ))
+        return(FALSE)
+    }
+
+    message("File is up to date: ", basename(local_path), " (OK)")
+    return(TRUE)
+}
+
+# List of files and base path
+ncbi_files <- c("gene2pubmed.gz", "gene2accession.gz", "gene2refseq.gz",
+                "gene_info.gz", "gene2go.gz")
+
+ncbi_base_url <- "https://ftp.ncbi.nlm.nih.gov/gene/DATA/"
+local_dir <- file.path(getwd(), "NCBI")
+
+# Check each file
+for (f in ncbi_files) {
+    local_file <- file.path(local_dir, f)
+    remote_file <- paste0(ncbi_base_url, f)
+    check_ncbi_file_consistency(local_file, remote_file)
+}
 # Rodar a criação do pacote
 message("Creating annotation package...")
 

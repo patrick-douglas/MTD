@@ -192,7 +192,8 @@ echo "Creating the annotation package for R412"
 echo -e "Selected host species:\e[3m $species_name\e[0m"
 echo "Taxon ID: $customized"
 echo ''
-conda activate R412
+conda deactivate
+#conda activate R412
 cd $MTDIR
 rm -rf NCBI org.*eg*
 ################################################################################################
