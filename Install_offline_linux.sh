@@ -34,7 +34,7 @@ sudo_with_pass() {
 EOF
 }
 
-sudo_with_pass "sudo chown -R me:me /usr/local/lib/R/library"
+#sudo_with_pass "sudo chown -R me:me /usr/local/lib/R/library"
 # Function to display usage message
 usage() {
     echo "Usage: $0 -p <condapath> -o <offline_files_folder> [-k <kmer>] [-m <minimizer_length>] [-s <minimizer_spaces>] [-r <read_length>] [-w <sudo_password>]"
