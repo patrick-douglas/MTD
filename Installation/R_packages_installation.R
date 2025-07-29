@@ -6,7 +6,7 @@ BiocManager::install(version = "3.14")
 BiocManager::install('BiocGenerics', force = TRUE)
 BiocManager::install('genefilter', force = TRUE)
 #Above fixes the DESeq2 incompatibility issue that causes the pkg fails to install
-
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/Matrix_1.6-5.tar.gz', repos=NULL, type='source')"
 BiocManager::install(c("biomaRt","DESeq2","tximeta","limma","phyloseq","glmGamPoi","cmapR","MAST","microbiome","ANCOMBC","Maaslin2","DO.db","clusterProfiler","enrichplot","pathview"))
 #R -e 'install.packages("~/MTD/update_fix/pvr_pkg/pacman_0.5.1.tar.gz", repos=NULL, type="source")'
 if (!require("pacman")) install.packages("pacman",repos = "http://cran.us.r-project.org")
