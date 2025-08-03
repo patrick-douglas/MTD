@@ -446,6 +446,10 @@ echo 'MTD installation progress:'
 echo '>>>>>>>>>>>>>>>>>>  [90%]'
 echo 'installing R packages...'
 echo "${w}"
+
+read -p "Pressione Enter para continuar..."
+
+
 # install R packages
 conda deactivate
 conda install -n py2 -y -c conda-forge pkg-config
