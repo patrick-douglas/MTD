@@ -187,7 +187,6 @@ mv *.fa blastdb_$customized
 
 makeblastdb -in $MTDIR/blastdb_$customized/blastdb_$customized -dbtype nucl -out $MTDIR/blastdb_$customized/blastdb_$customized -parse_seqids
 
-
 echo "Creating the annotation package for R412"
 echo -e "Selected host species:\e[3m $species_name\e[0m"
 echo "Taxon ID: $customized"
@@ -197,6 +196,12 @@ conda deactivate
 cd $MTDIR
 rm -rf NCBI org.*eg*
 ################################################################################################
+#Instalar o AnnotationDBI 1.68
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/AnnotationDbi_1.66.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R --no-restore -e 'packageVersion("AnnotationDbi")'
+
+# Verificar se a pasta NBCI do makeOrgPackageFRomNCBI
+bash $MTDIR/update_fix/verify_NCBI_makeOrgPackageFromNCBI.sh --MakeOrgpkgDir $offline_files_folder
 
 # Run the R script and capture stdout/stderr
 
@@ -221,14 +226,5 @@ else
 fi
 
 ################################################################################################
-
-exit 1
-#the parameter -o 
-#/media/me/18TB_BACKUP_LBN/lbn_workspace/RNA-Seq-LBN/viral-rna-seq/MTD/Compressed/MTD/makeOrgPackageFromNCBI/
-
-#Rscript $dir/create_annotation_package.R -t $customized -d $dir
-R -e "install.packages('org.Aplatyrhynchos.eg.sqlite', repos = NULL, type = 'source')"
-
-conda deactivate
 
 echo "Customized host reference building is done"
