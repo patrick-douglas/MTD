@@ -447,9 +447,6 @@ echo '>>>>>>>>>>>>>>>>>>  [90%]'
 echo 'installing R packages...'
 echo "${w}"
 
-read -p "Pressione Enter para continuar..."
-
-
 # install R packages
 conda deactivate
 conda install -n py2 -y -c conda-forge pkg-config
@@ -468,7 +465,7 @@ if [ -f /usr/lib/x86_64-linux-gnu/pkgconfig/libcurl.pc ]; then
     locate_lib=$(dirname $(locate libcurl | grep '\.pc'))
 fi
 R CMD INSTALL --configure-vars='LIB_DIR='"$locate_lib" curl_4.3.2.tar.gz
-
+R -e 'install.packages("~/MTD/update_fix/pvr_pkg/Matrix_1.6-5.tar.gz", repos=NULL, type="source")'
 Rscript $dir/Installation/R_packages_installation.R
 #~/miniconda3/envs/MTD/opt/krona/updateTaxonomy.sh
 conda deactivate
