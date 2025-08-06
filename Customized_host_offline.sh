@@ -198,14 +198,16 @@ rm -rf NCBI org.*eg*
 ################################################################################################
 #Instalar o AnnotationDBI 1.68
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/AnnotationDbi_1.66.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/GO.db_3.19.1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R --no-restore -e 'packageVersion("AnnotationDbi")'
+R --no-restore -e 'packageVersion("GO.db")'
 
 # Verificar se a pasta NBCI do makeOrgPackageFRomNCBI
 bash $MTDIR/update_fix/verify_NCBI_makeOrgPackageFromNCBI.sh --MakeOrgpkgDir $offline_files_folder
 
 # Run the R script and capture stdout/stderr
 
-RSCRIPT_OUTPUT=$(conda run -n R412 Rscript create_annotation_package.R --taxid $customized --offline $offline_files_folder --copy 2>&1)
+RSCRIPT_OUTPUT=$(Rscript $MTDIR/create_annotation_package.R --taxid $customized --offline $offline_files_folder --copy 2>&1)
 
 # Optional: show output
 echo "$RSCRIPT_OUTPUT"
