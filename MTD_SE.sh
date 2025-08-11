@@ -15,15 +15,15 @@ blast="hisat"  # Define "hisat" como padrão
 while getopts i:o:h:m:p:l:r:bt option
 do
     case "${option}" in
-        i) inputdr=${OPTARG};;
-        o) outputdr=${OPTARG};;
-        h) hostid=${OPTARG};;
-        m) metadata=${OPTARG};;
-        p) pdm=${OPTARG};;
-        l) length=${OPTARG};;
-        r) read_len=${OPTARG};;
-        b) blast="blast";;  # Se -b for usado, define blast como "blast"
-        t) no_trimm=1;;
+        i) inputdr=${OPTARG};; #Path to samplessheet.csv
+        o) outputdr=${OPTARG};; 
+        h) hostid=${OPTARG};; #taxon ID from HostSpecies.csv
+        m) metadata=${OPTARG};; #Optional
+        p) pdm=${OPTARG};; #Optional
+        l) length=${OPTARG};; #Optional
+        r) read_len=${OPTARG};; #Optional
+        b) blast="blast";;  # Argumento liga/desliga, usa magicblast em vez de hisat, se usado, define blast como "blast"
+        t) no_trimm=1;; #Usa os fastq brutos e nao faz o trimming usando fastp
     esac
 done
 
