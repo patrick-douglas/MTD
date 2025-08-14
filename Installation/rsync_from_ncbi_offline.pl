@@ -72,8 +72,8 @@ close MANIFEST;
 
 print STDERR "Manifest verification complete:\n";
 print STDERR "  Found: " . scalar(keys %manifest) . "\n";
-print STDERR "  Not found: " . (46333 - scalar(keys %manifest)) . "\n";
-print STDERR "  Replaced: 0\n";
+#print STDERR "  Not found: " . (46333 - scalar(keys %manifest)) . "\n";
+#print STDERR "  Replaced: 0\n";
 
 print STDERR "Step 1/2: Processing locally downloaded files\n";
 my $output_file = "library.fna";
