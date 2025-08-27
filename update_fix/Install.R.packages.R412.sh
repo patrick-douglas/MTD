@@ -10,7 +10,7 @@ source ~/miniconda3/etc/profile.d/conda.sh
 conda activate R412
 R -e "remove.packages('lattice'); install.packages('~/MTD/update_fix/pvr_pkg/lattice_0.22-5.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('httr',repos = 'http://cran.us.r-project.org', Ncpus=$threads)"
-R -e "install.packages(c('BiocManager'), repos='http://cran.us.r-project.org', Ncpus=$threads)"
+R -e 'install.packages("BiocManager", repos = "https://cloud.r-project.org")'
 R -e "install.packages('lattice',repos = 'http://cran.us.r-project.org', Ncpus=$threads)"
 echo $threads
 R -e "BiocManager::install('SummarizedExperiment', Ncpus=$threads)"

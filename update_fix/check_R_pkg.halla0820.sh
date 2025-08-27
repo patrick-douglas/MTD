@@ -14,8 +14,8 @@ pkgs=( lattice MASS mnormt nlme GPArotation psych foreign R.methodsS3 R.oo rtf p
 
 # Cabeçalho da tabela
 echo "${g}╔═════════════════╦═══════════════╗"
-echo "║ R               ║ ${w}$R_ver${g}         ║"
-echo "║ Conda Env       ║ ${w}halla0820${g}     ║"
+echo "║R                ║ ${w}$R_ver${g}         ║"
+echo "║Conda Environment║ ${w}halla0820${g}     ║"
 echo "╠═════════════════╬═══════════════╣"
 
 # Loop pelos pacotes

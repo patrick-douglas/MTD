@@ -15,7 +15,7 @@ pkgs=( tidyverse car rstatix ggpubr plyr textshaping ragg BiocManager rlang vctr
 # Cabeçalho
 echo "${g}╔═══════════════════╦════════════════╗"
 printf "║ R                 ║ ${w}%-14s${g} ║\n" "$R_ver"
-printf "║ Conda Env         ║ ${w}%-14s${g} ║\n" "MTD"
+printf "║ Conda Environment ║ ${w}%-14s${g} ║\n" "MTD"
 echo "╠═══════════════════╬════════════════╣"
 
 # Loop pelos pacotes

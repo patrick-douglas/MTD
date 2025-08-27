@@ -14,7 +14,7 @@ conda activate R412
 R_ver=$(R --version | grep version | grep R | awk '{print $3}')
 
 # Lista de pacotes a checar
-pkgs=(lattice MASS Matrix BiocManager httr SummarizedExperiment ggplot2 ade4 biomformat igraph multtest 
+pkgs=(yulab.utils DBI lattice MASS Matrix BiocManager httr SummarizedExperiment ggplot2 remotes ade4 biomformat igraph multtest 
       RProtoBufLib cytolib flowCore AnnotationDbi ggfun SingleCellExperiment phyloseq curl annotate 
       BiocFileCache aplot lme4 TMB GenomicFeatures metagenomeSeq ggtree ragg sctransform cmapR 
       httpuv miniUI shiny biomaRt tximeta limma glmGamPoi MAST microbiome ANCOMBC Maaslin2 DO.db 
@@ -26,7 +26,7 @@ pkgs=(lattice MASS Matrix BiocManager httr SummarizedExperiment ggplot2 ade4 bio
 echo "${g}"
 echo "╔══════════════════════╦═══════════════╗"
 echo "║ R                    ║ ${w}$R_ver${g}         ║"
-echo "║ Conda Env            ║ ${w}R412${g}          ║"
+echo "║ Conda Environment    ║ ${w}R412${g}          ║"
 echo "╠══════════════════════╬═══════════════╣"
 
 # Loop pelos pacotes
