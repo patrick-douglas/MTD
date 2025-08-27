@@ -18,7 +18,6 @@ R -e 'install.packages("lattice",repos = "https://cloud.r-project.org")'
 # instalar Matrix compatível com R 4.1.2
 R -e 'install.packages("https://cran.r-project.org/src/contrib/Archive/Matrix/Matrix_1.5-4.tar.gz", repos = NULL, type = "source")'
 R -e 'remotes::install_bioc("SummarizedExperiment", version = "3.14")'
-R -e 'BiocManager::install(c("S4Arrays", "DelayedArray", "SummarizedExperiment"), version = "3.14", ask = FALSE)'
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/MASS_7.3-60.tar.gz', repos=NULL, type='source')"
 R -e "BiocManager::install('ggplot2')"
 conda install -n R412 -c conda-forge -y r-ade4
@@ -29,7 +28,6 @@ R -e "BiocManager::install('multtest', force = TRUE, update = FALSE)"
 R -e "install.packages('vegan',repos = 'https://cloud.r-project.org')"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/RProtoBufLib_2.14.1.tar.gz', repos=NULL, type='source')"
 R -e "remotes::install_github('RGLab/cytolib',repos = 'https://cloud.r-project.org')"
-R -e "remotes::install_github('RGLab/flowcore',repos = 'https://cloud.r-project.org', force = TRUE)"
 R -e 'BiocManager::install("flowCore", ask = FALSE, update = TRUE)'
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/DBI_1.2.3.tar.gz', repos=NULL, type='source')"
 R -e "BiocManager::install('AnnotationDbi', force = TRUE, update = FALSE)"
@@ -115,9 +113,8 @@ R -e "install.packages('~/MTD/update_fix/pvr_pkg/fastmap_1.2.0.tar.gz', repos=NU
 R -e 'remotes::install_version("Matrix", version="1.5-0", dependencies=TRUE, repos="https://cloud.r-project.org")'
 sudo apt-get update
 sudo apt-get install libgeos-dev -y
-R -e 'install.packages("sf", repos="https://cloud.r-project.org")'
 conda install -y -c conda-forge r-rgeos
-R -e 'remotes::install_version("SeuratObject", version="4.1.2", repos="https://cloud.r-project.org")'
+R -e 'remotes::install_version("SeuratObject", version="4.1.3", repos="https://cloud.r-project.org")'
 R -e 'remotes::install_version("Seurat", version="4.3.0", repos="https://cloud.r-project.org")'
 R -e "BiocManager::install('tximeta', force = TRUE, update = FALSE)"
 R -e "install.packages(c('BiocManager'), repos='https://cloud.r-project.org')"
@@ -150,3 +147,14 @@ R -e "BiocManager::install('BiocGenerics', force = TRUE)"
 R -e "BiocManager::install('genefilter', force = TRUE)"
 R -e "BiocManager::install('DESeq2', force = TRUE, update = FALSE)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/AnnotationForge_1.4.4.tar.gz', repos=NULL, type='source')"
+
+#Extra
+R -e 'BiocManager::install("glmGamPoi", version="3.14", ask=FALSE, update=FALSE)'
+R -e 'BiocManager::install("MAST", version="3.14", ask=FALSE, update=FALSE)'
+R -e 'BiocManager::install("microbiome", version="3.14", ask=FALSE, update=FALSE)'
+R -e 'install.packages("pacman", repos="https://cloud.r-project.org")'
+R -e 'install.packages("VennDiagram", repos="https://cloud.r-project.org")'
+R -e 'install.packages("hdf5r", repos="https://cloud.r-project.org")'
+R -e 'install.packages("ggupset", repos="https://cloud.r-project.org")'
+R -e 'install.packages("doParallel", repos="https://cloud.r-project.org", ask=FALSE)'
+R -e 'BiocManager::install("ANCOMBC", ask = FALSE, update = FALSE)'
