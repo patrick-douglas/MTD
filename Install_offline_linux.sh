@@ -89,6 +89,8 @@ echo "$condapath" > $dir/condaPath
 
 source $condapath/etc/profile.d/conda.sh
 sudo_with_pass "sudo apt-get update"
+sudo_with_pass "sudo apt-get install libgeos-dev -y"
+
 conda deactivate
 echo 'installing conda environments...'
 conda env create -f Installation/MTD.yml
@@ -120,7 +122,6 @@ conda activate halla0820 # install dependencies of halla
 conda install -n halla0820 -y -c conda-forge pkg-config
 R -e "install.packages('https://cran.r-project.org/src/contrib/lattice_0.22-7.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('$dir/update_fix/pvr_pkg/Matrix_1.6-5.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
-R -e "install.packages('$dir/update_fix/pvr_pkg/MASS_7.3-60.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('$dir/update_fix/pvr_pkg/mnormt_2.1.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('$dir/update_fix/pvr_pkg/nlme_3.1-167.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('$dir/update_fix/pvr_pkg/GPArotation_2024.3-1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"

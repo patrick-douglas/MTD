@@ -8,25 +8,28 @@ source ~/miniconda3/etc/profile.d/conda.sh
 
 # Ativa o ambiente Conda
 conda activate R412
+R -e 'install.packages("remotes", repos="https://cloud.r-project.org")'
 R -e 'install.packages("BiocManager", repos = "https://cloud.r-project.org")'
 R -e 'BiocManager::install(version = "3.14", ask = FALSE)'
-R -e "remove.packages('lattice'); install.packages('~/MTD/update_fix/pvr_pkg/lattice_0.22-5.tar.gz', repos=NULL, type='source')"
-R -e "install.packages('httr',repos = 'http://cran.us.r-project.org')"
-R -e "install.packages('lattice',repos = 'http://cran.us.r-project.org')"
-echo $threads
-R -e "BiocManager::install('SummarizedExperiment')"
+conda install -y -n R412 -c conda-forge r-httr
+R -e 'install.packages("httr", repos = "https://cloud.r-project.org", dependencies = TRUE)'
+R -e 'install.packages("lattice",repos = "https://cloud.r-project.org")'
+
+# instalar Matrix compatível com R 4.1.2
+R -e 'install.packages("https://cran.r-project.org/src/contrib/Archive/Matrix/Matrix_1.5-4.tar.gz", repos = NULL, type = "source")'
+R -e 'remotes::install_bioc("SummarizedExperiment", version = "3.14")'
+R -e 'BiocManager::install(c("S4Arrays", "DelayedArray", "SummarizedExperiment"), version = "3.14", ask = FALSE)'
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/MASS_7.3-60.tar.gz', repos=NULL, type='source')"
 R -e "BiocManager::install('ggplot2')"
-R -e "install.packages('ade4',repos = 'http://cran.us.r-project.org')"
+conda install -n R412 -c conda-forge -y r-ade4
+R -e "install.packages('ade4',repos = 'https://cloud.r-project.org')"
 R -e "BiocManager::install('biomformat')"
-R -e "BiocManager::install('igraph', force = TRUE, update = FALSE)"
+conda install -n R412 -c conda-forge -y r-igraph
 R -e "BiocManager::install('multtest', force = TRUE, update = FALSE)"
-R -e "install.packages('vegan',repos = 'http://cran.us.r-project.org')"
+R -e "install.packages('vegan',repos = 'https://cloud.r-project.org')"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/RProtoBufLib_2.14.1.tar.gz', repos=NULL, type='source')"
-R -e 'install.packages("remotes", repos="https://cloud.r-project.org")'
-R -e "remotes::install_github('RGLab/cytolib',repos = 'http://cran.us.r-project.org')"
-conda install -y -n R412 -c bioconda bioconductor-flowcore
-R -e "remotes::install_github('RGLab/flowcore',repos = 'http://cran.us.r-project.org', force = TRUE)"
+R -e "remotes::install_github('RGLab/cytolib',repos = 'https://cloud.r-project.org')"
+R -e "remotes::install_github('RGLab/flowcore',repos = 'https://cloud.r-project.org', force = TRUE)"
 R -e 'BiocManager::install("flowCore", ask = FALSE, update = TRUE)'
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/DBI_1.2.3.tar.gz', repos=NULL, type='source')"
 R -e "BiocManager::install('AnnotationDbi', force = TRUE, update = FALSE)"
@@ -52,9 +55,11 @@ R -e 'remotes::install_bioc("biomaRt")'
 
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/yulab.utils_0.1.9.tar.gz', repos=NULL, type='source')"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/ggfun_0.1.7.tar.gz', repos=NULL, type='source')"
-R -e 'BiocManager::install("ggtree", ask = FALSE)'
-R -e "remotes::install_github('YuLab-SMU/ggtree',repos = 'http://cran.us.r-project.org')"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/fgsea_1.34.0.tar.gz', repos=NULL, type='source')"
+
+conda install -y -n R412 -c conda-forge libcurl freetype libpng jpeg libtiff pkg-config
+conda install -y -n R412 -c conda-forge r-curl r-ragg
+R -e "remotes::install_github('YuLab-SMU/ggtree',repos = 'https://cloud.r-project.org')"
+R -e 'remotes::install_github("ctlab/fgsea")'
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/R.methodsS3_1.8.2.tar.gz', repos=NULL, type='source')"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/R.oo_1.27.0.tar.gz', repos=NULL, type='source')"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/R.utils_2.13.0.tar.gz', repos=NULL, type='source')"
@@ -62,9 +67,9 @@ R -e "install.packages('~/MTD/update_fix/pvr_pkg/AnnotationDbi_1.66.0.tar.gz', r
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/GO.db_3.19.1.tar.gz', repos=NULL, type='source')"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/GOSemSim_2.30.2.tar.gz', repos=NULL, type='source')"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/AnnotationDbi_1.66.0.tar.gz', repos=NULL, type='source')"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/DOSE_3.30.4.tar.gz', repos=NULL, type='source')"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/ggtangle_0.0.7.tar.gz', repos=NULL, type='source')"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/scatterpie_0.2.5.tar.gz', repos=NULL, type='source')"
+R -e 'BiocManager::install("DOSE", version="3.14", ask=FALSE, update=FALSE)'
+R -e 'install.packages("ggtangle", repos = c("https://guangchuangyu.r-universe.dev", "https://cloud.r-project.org"))'
+R -e 'install.packages("scatterpie", repos="https://cloud.r-project.org")'
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/GOSemSim_2.30.2.tar.gz', repos=NULL, type='source')"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/ggnewscale_0.5.2.tar.gz', repos=NULL, type='source')"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/GOSemSim_2.34.0.tar.gz', repos=NULL, type='source')"
@@ -81,7 +86,8 @@ R -e "install.packages('~/MTD/update_fix/pvr_pkg/tidytree_0.4.2.tar.gz', repos=N
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/tidytree_0.4.5.tar.gz', repos=NULL, type='source')"
 R -e "BiocManager::install('clusterProfiler', force = TRUE, update = FALSE)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/gson_0.1.0.tar.gz', repos=NULL, type='source')"
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/clusterProfiler_4.12.2.tar.gz', repos=NULL, type='source')"
+R -e 'install.packages("processx", repos="https://cloud.r-project.org")'
+R -e 'BiocManager::install("clusterProfiler", version="3.14", ask=FALSE, update=FALSE)'
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/lifecycle_1.0.3.tar.gz', repos=NULL, type='source')"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/tidyselect_1.2.1.tar.gz', repos=NULL, type='source')"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/rlang_1.1.2.tar.gz', repos=NULL, type='source')"
@@ -95,23 +101,27 @@ R -e "install.packages('~/MTD/update_fix/pvr_pkg/dbplyr_2.3.4.tar.gz', repos=NUL
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/biomaRt_2.60.1.tar.gz', repos=NULL, type='source')"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/tidyr_1.3.0.tar.gz', repos=NULL, type='source')"
 conda install -y -n R412 -c conda-forge r-ggpubr
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/ggpubr_0.6.0.tar.gz', repos=NULL, type='source')"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/pbkrtest_0.5.2.tar.gz', repos=NULL, type='source')"
-R -e "install.packages('car',repos = 'http://cran.us.r-project.org')"
+R -e "install.packages('car',repos = 'https://cloud.r-project.org')"
 R -e "BiocManager::install('Maaslin2', force = TRUE, update = FALSE)"
 #fix httpd installations
 rm -rf /home/me/miniconda3/envs/R412/lib/R/library/*LOCK-httpuv/
-R -e "install.packages('promises',repos = 'http://cran.us.r-project.org')"
+R -e "install.packages('promises',repos = 'https://cloud.r-project.org')"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/httpuv_1.6.0.tar.gz', repos=NULL, type='source')"
 R -e "BiocManager::install('miniUI', force = TRUE, update = FALSE)"
 R -e "BiocManager::install('shiny', force = TRUE, update = FALSE)"
 conda install -y -n R412 conda-forge::r-htmltools
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/htmltools_0.5.8.1.tar.gz', repos=NULL, type='source')"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/fastmap_1.2.0.tar.gz', repos=NULL, type='source')"
-R -e "install.packages('Seurat',repos = 'http://cran.us.r-project.org')"
+R -e 'remotes::install_version("Matrix", version="1.5-0", dependencies=TRUE, repos="https://cloud.r-project.org")'
+sudo apt-get update
+sudo apt-get install libgeos-dev -y
+R -e 'install.packages("sf", repos="https://cloud.r-project.org")'
+conda install -y -c conda-forge r-rgeos
+R -e 'remotes::install_version("SeuratObject", version="4.1.2", repos="https://cloud.r-project.org")'
+R -e 'remotes::install_version("Seurat", version="4.3.0", repos="https://cloud.r-project.org")'
 R -e "BiocManager::install('tximeta', force = TRUE, update = FALSE)"
-R -e "install.packages(c('BiocManager'), repos='http://cran.us.r-project.org')"
-R -e "install.packages(c('plyr'), repos='http://cran.us.r-project.org')"
+R -e "install.packages(c('BiocManager'), repos='https://cloud.r-project.org')"
+R -e "install.packages(c('plyr'), repos='https://cloud.r-project.org')"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/BiocGenerics_0.50.0.tar.gz', repos=NULL, type='source')"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/S4Vectors_0.42.1.tar.gz', repos=NULL, type='source')"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/IRanges_2.38.1.tar.gz', repos=NULL, type='source')"
@@ -134,7 +144,7 @@ R -e "install.packages('~/MTD/update_fix/pvr_pkg/graph_1.86.0.tar.gz', repos=NUL
 R -e 'BiocManager::install("Rgraphviz")'
 R -e 'BiocManager::install("KEGGgraph")'
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/pathview_1.44.0.tar.gz', repos=NULL, type='source')"
-R -e "install.packages('prettydoc',repos = 'http://cran.us.r-project.org')"
+R -e "install.packages('prettydoc',repos = 'https://cloud.r-project.org')"
 #Fix for DESeq
 R -e "BiocManager::install('BiocGenerics', force = TRUE)"
 R -e "BiocManager::install('genefilter', force = TRUE)"
