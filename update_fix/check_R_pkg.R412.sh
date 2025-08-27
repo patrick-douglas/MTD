@@ -14,13 +14,7 @@ conda activate R412
 R_ver=$(R --version | grep version | grep R | awk '{print $3}')
 
 # Lista de pacotes a checar
-pkgs=(yulab.utils DBI lattice MASS Matrix BiocManager httr SummarizedExperiment ggplot2 remotes ade4 biomformat igraph multtest 
-      RProtoBufLib cytolib flowCore AnnotationDbi ggfun SingleCellExperiment phyloseq curl annotate 
-      BiocFileCache aplot lme4 TMB GenomicFeatures metagenomeSeq ggtree ragg sctransform cmapR 
-      httpuv miniUI shiny biomaRt tximeta limma glmGamPoi MAST microbiome ANCOMBC Maaslin2 DO.db 
-      clusterProfiler enrichplot pathview pacman tidyverse ggrepel colorspace RColorBrewer pheatmap 
-      VennDiagram doParallel foreach stringi vegan ggpubr reshape2 hdf5r ggridges ggnewscale ggupset Seurat 
-      genefilter DESeq2)
+pkgs=(lattice httr BiocManager SummarizedExperiment MASS ggplot2 ade4 biomformat igraph multtest vegan RProtoBufLib remotes cytolib flowcore DBI AnnotationDbi SingleCellExperiment phyloseq curl annotate BiocFileCache yulab.utils ggfun gtable aplot lme4 TMB GenomicFeatures metagenomeSeq biomaRt ggtree fgsea R.methodsS3 R.oo R.utils GO.db GOSemSim DOSE ggtangle scatterpie ggnewscale tidytree clusterProfiler gson lifecycle tidyselect rlang vctrs cli purrr tibble cmapR dplyr dbplyr tidyr ggpubr pbkrtest car Maaslin2 promises httpuv miniUI shiny htmltools fastmap Seurat tximeta plyr BiocGenerics S4Vectors IRanges UCSC.utils GenomeInfoDbData GenomeInfoDb matrixStats lambda.r futile.options futile.logger RColorBrewer DO.db forcats tidyverse conflicted org.Hs.eg.db graph Rgraphviz KEGGgraph pathview prettydoc AnnotationForge DESeq2 glmGamPoi MAST microbiome ANCOMBC pacman ggrepel colorspace pheatmap VennDiagram doParallel foreach stringi reshape2 hdf5r ggridges ggupset)
 
 # Cabeçalho da tabela
 echo "${g}"
