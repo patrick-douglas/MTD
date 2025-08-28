@@ -134,11 +134,12 @@ R -e "install.packages('$dir/update_fix/pvr_pkg/psychTools_2.4.3.tar.gz', repos=
 R -e "install.packages('https://cran.r-project.org/src/contrib/XICOR_0.4.1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('https://cran.r-project.org/src/contrib/mclust_6.1.1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e 'install.packages("BiocManager", repos = "https://cloud.r-project.org")'
+R -e "install.packages('~/MTD/update_fix/pvr_pkg/MASS_7.3-60.tar.gz', repos=NULL, type='source')"
 R -e "install.packages('https://www.bioconductor.org/packages/release/bioc/src/contrib/preprocessCore_1.70.0.tar.gz', repos=NULL, type='source')"
 R -e 'install.packages("remotes", repos="https://cloud.r-project.org")'
 R -e 'remotes::install_url("https://cran.r-project.org/src/contrib/EnvStats_3.1.0.tar.gz", dependencies=TRUE)'
 R -e 'remotes::install_version("Hmisc", version = "4.8-0", repos = "https://cloud.r-project.org")'
-R -e "install.packages('https://cran.r-project.org/src/contrib/eva_0.2.6.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('https://cran.r-project.org/src/contrib/eva_0.2.6.tar.gz', repos=NULL, type='source')"
 
 conda run -n halla0820 $dir/update_fix/check_R_pkg.halla0820.sh
 conda deactivate

@@ -10,7 +10,7 @@ r=$(tput setaf 1)    # vermelho
 R_ver=$(R --version | grep version | grep R | awk '{print $3}')
 
 # Pacotes a checar
-pkgs=( tidyverse car rstatix ggpubr plyr textshaping ragg BiocManager rlang vctrs BiocGenerics S4Vectors IRanges UCSC.utils GenomeInfoDbData GenomeInfoDb matrixStats formatR lambda.r futile.options futile.logger RColorBrewer )
+pkgs=( textshaping ragg tidyverse car rstatix ggpubr plyr BiocManager rlang vctrs BiocGenerics S4Vectors IRanges UCSC.utils GenomeInfoDbData GenomeInfoDb matrixStats formatR lambda.r futile.options futile.logger RColorBrewer )
 
 # Cabeçalho
 echo "${g}╔═══════════════════╦════════════════╗"
