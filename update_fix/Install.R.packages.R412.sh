@@ -111,8 +111,6 @@ R -e "BiocManager::install('shiny', force = TRUE, update = FALSE)"
 conda install -y -n R412 conda-forge::r-htmltools
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/fastmap_1.2.0.tar.gz', repos=NULL, type='source')"
 R -e 'remotes::install_version("Matrix", version="1.5-0", dependencies=TRUE, repos="https://cloud.r-project.org")'
-sudo apt-get update
-sudo apt-get install libgeos-dev -y
 conda install -y -c conda-forge r-rgeos
 R -e 'remotes::install_version("SeuratObject", version="4.1.3", repos="https://cloud.r-project.org")'
 R -e 'remotes::install_version("Seurat", version="4.3.0", repos="https://cloud.r-project.org")'
