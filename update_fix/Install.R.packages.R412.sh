@@ -28,7 +28,7 @@ R -e "BiocManager::install('multtest', force = TRUE, update = FALSE)"
 R -e "install.packages('vegan',repos = 'https://cloud.r-project.org')"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/RProtoBufLib_2.14.1.tar.gz', repos=NULL, type='source')"
 R -e "remotes::install_github('RGLab/cytolib',repos = 'https://cloud.r-project.org')"
-R -e 'BiocManager::install("flowCore", ask = FALSE, update = TRUE)'
+
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/DBI_1.2.3.tar.gz', repos=NULL, type='source')"
 R -e "BiocManager::install('AnnotationDbi', force = TRUE, update = FALSE)"
 R -e "BiocManager::install('SingleCellExperiment', force = TRUE, update = FALSE)"
@@ -75,6 +75,8 @@ R -e "install.packages('~/MTD/update_fix/pvr_pkg/GOSemSim_2.34.0.tar.gz', repos=
 #conda install -y -n R412 bioconda::bioconductor-enrichplot
 conda install -y -n R412 conda-forge::r-tidyverse
 #R -e "BiocManager::install('ragg', force = TRUE, update = FALSE)"
+R -e 'remotes::install_version("RcppArmadillo", version="0.10.4.0", repos="https://cloud.r-project.org")'
+R -e 'BiocManager::install("flowCore", version="3.14", ask=FALSE, update=FALSE)'
 R -e "BiocManager::install('sctransform', force = TRUE, update = FALSE)"
 R -e "BiocManager::install('cmapR', force = TRUE, update = FALSE)"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/GO.db_3.19.1.tar.gz', repos=NULL, type='source')"
@@ -114,6 +116,10 @@ R -e 'remotes::install_version("Matrix", version="1.5-0", dependencies=TRUE, rep
 conda install -y -c conda-forge r-rgeos
 R -e 'remotes::install_version("SeuratObject", version="4.1.3", repos="https://cloud.r-project.org")'
 R -e 'remotes::install_version("Seurat", version="4.3.0", repos="https://cloud.r-project.org")'
+
+R -e 'remotes::install_version("RcppArmadillo", version="0.10.4.0", repos="https://cloud.r-project.org")'
+R -e 'BiocManager::install("flowCore", version="3.14", ask=FALSE, update=FALSE)'
+
 R -e "BiocManager::install('tximeta', force = TRUE, update = FALSE)"
 R -e "install.packages(c('BiocManager'), repos='https://cloud.r-project.org')"
 R -e "install.packages(c('plyr'), repos='https://cloud.r-project.org')"

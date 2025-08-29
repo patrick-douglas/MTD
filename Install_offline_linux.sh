@@ -90,7 +90,9 @@ echo "$condapath" > $dir/condaPath
 source $condapath/etc/profile.d/conda.sh
 sudo_with_pass "sudo apt-get update"
 sudo_with_pass "sudo apt-get install libgeos-dev -y"
-
+sudo_with_pass "sudo apt install libharfbuzz-dev libfribidi-dev libfreetype6-dev -y"
+sudo_with_pass "sudo apt install libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev -y"
+sudo_with_pass "sudo apt install libharfbuzz-dev libfribidi-dev libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev -y"
 conda deactivate
 echo 'installing conda environments...'
 conda env create -f Installation/MTD.yml
