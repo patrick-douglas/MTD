@@ -7,7 +7,7 @@ threads=`nproc`
 usage() {
     echo ""
     echo "Usage:"
-    echo "  bash $0 --genome <genome.fa.gz> --gtf-file <annotations.gtf.gz> --customized <TaxonID> --offline-folder <path>"
+    echo "  bash $0 --genome <genome.fa.gz> --gtf-file <annotations.gtf.gz> --ncbi-taxon-id <TaxonID> --offline-folder <path>"
     echo ""
     echo "Required options:"
     echo "  -d, --genome           Path to host genome FASTA (.fa.gz)"
