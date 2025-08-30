@@ -175,7 +175,7 @@ cp $dir/manifest.virus.sh $offline_files_folder/Kraken2DB_micro/library/manifest
 sed -i "s|^offline_files_folder=.*|offline_files_folder=$offline_files_folder|" $offline_files_folder/Kraken2DB_micro/library/manifest.virus.sh
 $offline_files_folder/Kraken2DB_micro/library/manifest.virus.sh
 sed -i -E 's/^>([^ ]+) (.+)/>\1 [\1] \2./' $offline_files_folder/Kraken2DB_micro/library/viral/all_viral_genomes.fna
-cat $offline_files_folder/Kraken2DB_micro/library/viral/all_viral_genomes.fna >> $dir/viruses4kraken.fa
+#cat $offline_files_folder/Kraken2DB_micro/library/viral/all_viral_genomes.fna >> $dir/viruses4kraken.fa
 # debug rsync error of kraken2-build
 cp -f $dir/Installation/rsync_from_ncbi.pl $condapath/pkgs/kraken2-2.1.2-pl5262h7d875b9_0/libexec/rsync_from_ncbi.pl
 cp -f $dir/Installation/rsync_from_ncbi.pl $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
