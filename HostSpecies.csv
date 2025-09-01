@@ -27,7 +27,7 @@ Taxon_ID,MartDatasets,Scientific_name,OrgDb,Common_name,kegg
 286419,cldingo_gene_ensembl,Canis lupus dingo,,,
 9615,clfamiliaris_gene_ensembl,Canis lupus familiaris,org.Cf.eg.db,Canine,cfa
 9925,chircus_gene_ensembl,Capra hircus,,,
-7957,cauratus_gene_ensembl,Carassius auratus,,,
+7957,cauratus_gene_ensembl,Carassius auratus,org.Cauratus.eg.db,Goldfish,caua
 1868482,csyrichta_gene_ensembl,Carlito syrichta,,,
 51154,cwagneri_gene_ensembl,Catagonus wagneri,,,
 10141,cporcellus_gene_ensembl,Cavia porcellus,,,
