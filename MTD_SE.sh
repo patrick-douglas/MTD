@@ -78,7 +78,7 @@ elif [[ $hostid == 9544 ]]; then
 
 elif [[ $hostid == 10090 ]]; then
     DB_host=$MTDIR/kraken2DB_mice
-t    DB_hisat2=$MTDIR/hisat2_index_mouse/genome_tran
+    DB_hisat2=$MTDIR/hisat2_index_mouse/genome_tran
     DB_blast=$MTDIR/mouse_blastdb/mouse_blastdb # for blast
     gtf=$MTDIR/ref_mouse/Mus_musculus.GRCm39.104.gtf.gz # for featureCounts
 
