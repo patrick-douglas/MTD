@@ -464,7 +464,7 @@ conda activate R412
 #$dir/update_fix/update_conda_pkgs.sh
 conda install -n R412 -y -c conda-forge pkg-config
 
-conda run -n R412 bash $dir/update_fix/Install.R.packages.R412.sh
+#conda run -n R412 bash $dir/update_fix/Install.R.packages.R412.sh
 
 # debug in case libcurl cannot be located in the conda R environment
 wget -T 300 -t 5 -N --no-if-modified-since https://cran.r-project.org/src/contrib/Archive/curl/curl_4.3.2.tar.gz
@@ -485,7 +485,7 @@ chmod +x MTD.sh
 cp $dir/update_fix/hclust2.py ~/miniconda3/envs/py2/lib/python2.7/site-packages/hclust2.py
 conda deactivate
 conda activate R412
-conda run -n R412 bash $dir/update_fix/Install.R.packages.R412.sh
+#conda run -n R412 bash $dir/update_fix/Install.R.packages.R412.sh
 conda deactivate
 
 #Install Annotation tools for base enviroment
