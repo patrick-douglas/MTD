@@ -92,7 +92,7 @@ sudo_with_pass "sudo apt-get update"
 sudo_with_pass "sudo apt-get install libgeos-dev -y"
 sudo_with_pass "sudo apt install libharfbuzz-dev libfribidi-dev libfreetype6-dev -y"
 sudo_with_pass "sudo apt install libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev -y"
-sudo_with_pass "sudo apt install libharfbuzz-dev libfribidi-dev libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev -y"
+sudo_with_pass "sudo apt install libharfbuzz-dev libfribidi-dev libfreetype6-dev libpng-dev libtiff5-dev libjpeg-dev pigz -y"
 conda deactivate
 echo 'installing conda environments...'
 conda env create -f Installation/MTD.yml
@@ -122,7 +122,9 @@ echo ">>                  [10%]${w}"
 conda activate halla0820 # install dependencies of halla
 #halla0820
 conda install -n halla0820 -y -c conda-forge pkg-config
-R -e "install.packages('https://cran.r-project.org/src/contrib/lattice_0.22-7.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+conda install -n halla0820 -y -c conda-forge ca-certificates openssl libcurl curl
+conda install -n halla0820 -y -c conda-forge libuv
+R -e "install.packages('https://cran.r-project.org/src/contrib/lattice_0.22-9.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('$dir/update_fix/pvr_pkg/Matrix_1.6-5.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('$dir/update_fix/pvr_pkg/mnormt_2.1.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('$dir/update_fix/pvr_pkg/nlme_3.1-167.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
@@ -134,10 +136,10 @@ R -e "install.packages('$dir/update_fix/pvr_pkg/R.oo_1.27.0.tar.gz', repos=NULL,
 R -e "install.packages('$dir/update_fix/pvr_pkg/rtf_0.4-14.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('$dir/update_fix/pvr_pkg/psychTools_2.4.3.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('https://cran.r-project.org/src/contrib/XICOR_0.4.1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
-R -e "install.packages('https://cran.r-project.org/src/contrib/mclust_6.1.1.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('https://cran.r-project.org/src/contrib/mclust_6.1.2.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e 'install.packages("BiocManager", repos = "https://cloud.r-project.org")'
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/MASS_7.3-60.tar.gz', repos=NULL, type='source')"
-R -e "install.packages('https://www.bioconductor.org/packages/release/bioc/src/contrib/preprocessCore_1.70.0.tar.gz', repos=NULL, type='source')"
+R -e "install.packages('$dir/update_fix/pvr_pkg/preprocessCore_1.72.0.tar.gz', repos=NULL, type='source')"
 R -e 'install.packages("remotes", repos="https://cloud.r-project.org")'
 R -e 'remotes::install_url("https://cran.r-project.org/src/contrib/EnvStats_3.1.0.tar.gz", dependencies=TRUE)'
 R -e 'remotes::install_version("Hmisc", version = "4.8-0", repos = "https://cloud.r-project.org")'
@@ -188,9 +190,9 @@ echo 'Preparing microbiome (virus, bacteria, archaea, protozoa, fungi, plasmid, 
 echo "${w}"
 # Kraken2 database building - Microbiome
 #update for bacterial genomes
-cp $dir/manifest.bacteria.sh $offline_files_folder/Kraken2DB_micro/library/manifest.sh 
-sed -i "s|^offline_files_folder=.*|offline_files_folder=$offline_files_folder|" $offline_files_folder/Kraken2DB_micro/library/manifest.sh 
-$offline_files_folder/Kraken2DB_micro/library/manifest.sh
+cp $dir/manifest.bacteria.sh $offline_files_folder/Kraken2DB_micro/library/manifest.bacteria.sh
+sed -i "s|^offline_files_folder=.*|offline_files_folder=$offline_files_folder|" $offline_files_folder/Kraken2DB_micro/library/manifest.bacteria.sh
+$offline_files_folder/Kraken2DB_micro/library/manifest.bacteria.sh
 
 #Fix manifest.sh 
 cp $dir/manifest.sh $offline_files_folder/Kraken2DB_micro/library/manifest.sh
@@ -200,21 +202,25 @@ sed -i "s|^offline_files_folder=.*|offline_files_folder=$offline_files_folder|" 
 
 DBNAME=kraken2DB_micro
 echo "Downloading NCBI taxonomy database with Kraken2—please wait..."
-kraken2-build --download-taxonomy --threads $threads --db $DBNAME $kmer $min_l $min_s
+# opção 1: tentar sem rsync
+kraken2-build --download-taxonomy --use-ftp --threads $threads --db "$DBNAME" $kmer $min_l $min_s
+#kraken2-build --download-taxonomy --threads $threads --db $DBNAME $kmer $min_l $min_s
 
 echo "Downloading RefSeq Archaea library with Kraken2—please wait..."
-kraken2-build --download-library archaea --threads $threads --db $DBNAME $kmer $min_l $min_s
+kraken2-build --use-ftp --download-library archaea --threads $threads --db $DBNAME $kmer $min_l $min_s
 
 #Use local files for bacteria
 cp -f $dir/Installation/rsync_from_ncbi_bacteria.pl $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
 sed -i "21s|^.*|my \$local_download_dir = \"$offline_files_folder/Kraken2DB_micro/library/bacteria/all/\";|" $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
+cp -f $offline_files_folder/Kraken2DB_micro/library/bacteria/assembly_summary_bacteria.txt $offline_files_folder/Kraken2DB_micro/library/bacteria/assembly_summary.txt
+chmod +x $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
 echo "Adding local bacterial sequences to Kraken2 database..."
-kraken2-build --download-library bacteria --threads $threads --db $DBNAME $kmer $min_l $min_s
+kraken2-build --use-ftp --download-library bacteria --threads $threads --db $DBNAME $kmer $min_l $min_s
 cp -f $dir/Installation/rsync_from_ncbi.pl $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
 echo "Downloading RefSeq Protozoa library with Kraken2—please wait..."
-kraken2-build --download-library protozoa --threads $threads --db $DBNAME $kmer $min_l $min_s
+kraken2-build --use-ftp --download-library protozoa --threads $threads --db $DBNAME $kmer $min_l $min_s
 echo "Downloading RefSeq Fungi library with Kraken2—please wait..."
-kraken2-build --download-library fungi --threads $threads --db $DBNAME $kmer $min_l $min_s
+kraken2-build --use-ftp --download-library fungi --threads $threads --db $DBNAME $kmer $min_l $min_s
 
 #Use local files for plasmid
 
@@ -232,7 +238,7 @@ cp -f $dir/Installation/download_genomic_library.sh $condapath/pkgs/kraken2-2.1.
 cp -f $dir/Installation/download_genomic_library.sh $condapath/envs/MTD/libexec/download_genomic_library.sh
 
 echo "Downloading UniVec_Core library with Kraken2—please wait..."
-kraken2-build --download-library UniVec_Core --threads $threads --db $DBNAME $kmer $min_l $min_s
+kraken2-build --use-ftp --download-library UniVec_Core --threads "$threads" --db "$DBNAME" $kmer $min_l $min_s
 
 echo "Adding custom viral sequences (viruses4kraken.fa) to Kraken2 database..."
 kraken2-build --add-to-library viruses4kraken.fa --threads $threads --db $DBNAME $kmer $min_l $min_s
@@ -245,8 +251,8 @@ echo 'Preparing host (human) database...'
 echo "${w}"
 # Kraken2 database building - Human
 DBNAME=kraken2DB_human
-kraken2-build --download-taxonomy --threads $threads --db $DBNAME $kmer $min_l $min_s
-kraken2-build --download-library human --threads $threads --db $DBNAME $kmer $min_l $min_s
+kraken2-build --use-ftp --download-taxonomy --threads $threads --db $DBNAME $kmer $min_l $min_s
+kraken2-build --use-ftp --download-library human --threads "$threads" --db "$DBNAME" $kmer $min_l $min_s
 kraken2-build --build --threads $threads --db $DBNAME $kmer $min_l $min_s
 
 echo "${g}"
@@ -261,10 +267,11 @@ cd $DBNAME
 #wget -T 300 -t 5 -N --no-if-modified-since https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/635/GCF_000001635.27_GRCm39/GCF_000001635.27_GRCm39_genomic.fna.gz
 #cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/GCF_000001635.27_GRCm39_genomic.fna.gz .
 cp $offline_files_folder/GCF_000001635.27_GRCm39_genomic.fna.gz .
+
 unpigz GCF_000001635.27_GRCm39_genomic.fna.gz
 mv GCF_000001635.27_GRCm39_genomic.fna GCF_000001635.27_GRCm39_genomic.fa
 cd ..
-kraken2-build --download-taxonomy --threads $threads --db $DBNAME $kmer $min_l $min_s
+kraken2-build --use-ftp --download-taxonomy --threads $threads --db $DBNAME $kmer $min_l $min_s
 kraken2-build --add-to-library $DBNAME/GCF_000001635.27_GRCm39_genomic.fa --threads $threads --db $DBNAME $kmer $min_l $min_s
 kraken2-build --build --threads $threads --db $DBNAME $kmer $min_l $min_s
 

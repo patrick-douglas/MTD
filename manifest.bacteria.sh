@@ -20,14 +20,18 @@ curl -fsSL -o "$assembly_summary_file" \
   ftp.ncbi.nlm.nih.gov/genomes/refseq/bacteria/assembly_summary.txt
 
 awk -F '\t' '
-    BEGIN { OFS="/" }
     /^#/ { next }
     ($12 == "Complete Genome" || $12 == "Chromosome") && $20 != "na" {
-        ftp_path=$20
-        sub(/^ftp:/,"https:",ftp_path)
-        split(ftp_path,a,"/")
-        asm=a[length(a)]
-        print ftp_path, asm "_genomic.fna.gz"
+        ftp_path = $20
+        sub(/^ftp:/, "https:", ftp_path)
+        gsub(/\/+$/, "", ftp_path)   # remove barra(s) no final
+
+        n = split(ftp_path, a, "/")
+        asm = a[n]
+
+        if (asm != "") {
+            print ftp_path "/" asm "_genomic.fna.gz"
+        }
     }
 ' "$assembly_summary_file" > "$manifest_list"
 

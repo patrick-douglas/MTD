@@ -4,18 +4,22 @@ set -euo pipefail
 ###############################################################################
 # BASIC CONFIGURATION
 ###############################################################################
-FTP_SERVER="ftp.ncbi.nlm.nih.gov"
-FTP_DIR="genomes/refseq/plasmid/"
-LOCAL_DIR="/media/me/18TB_BACKUP_LBN/lbn_workspace/RNA-Seq-LBN/viral-rna-seq/MTD/Compressed/MTD/Kraken2DB_micro/library/plasmid"
+BASE_URL="https://ftp.ncbi.nlm.nih.gov"
+REMOTE_DIR="genomes/refseq/plasmid"
+LOCAL_DIR="/media/me/18TB_BACKUP_LBN/drive.ifpa/LBN_RNA-Seq/Metatranscriptomics/MTD/MTD_Offline_Install_files/Kraken2DB_micro/library/plasmid"
 
 # Temporary files and failed download list
 TMP_DIR="$HOME"
 mkdir -p "$TMP_DIR"
-FAILED_DL="$TMP_DIR/failed_downloads.txt"
 
-TMP_REMOTE_LIST="$TMP_DIR/ncbi_remote_list.txt"
+FAILED_DL="$TMP_DIR/failed_downloads.txt"
+TMP_REMOTE_HTML="$TMP_DIR/ncbi_remote_plasmid.html"
 TMP_REMOTE_NAMES="$TMP_DIR/ncbi_remote_names.txt"
 TMP_LOCAL_LIST="$TMP_DIR/local_list.txt"
+CORRUPTED_LIST="$TMP_DIR/corrupted_files.txt"
+
+# Number of retries per file
+MAX_ATTEMPTS=3
 
 ###############################################################################
 # CREATE / CHECK DESTINATION FOLDER
@@ -23,23 +27,29 @@ TMP_LOCAL_LIST="$TMP_DIR/local_list.txt"
 mkdir -p "$LOCAL_DIR"
 
 ###############################################################################
-# FETCH REMOTE & LOCAL FILE LISTS
+# FETCH REMOTE FILE LIST
 ###############################################################################
-ftp -n "$FTP_SERVER" <<END_SCRIPT >"$TMP_REMOTE_LIST"
-quote USER anonymous
-quote PASS anonymous
-cd $FTP_DIR
-ls
-quit
-END_SCRIPT
-awk '{print $NF}' "$TMP_REMOTE_LIST" >"$TMP_REMOTE_NAMES"
+echo "Fetching remote file list..."
 
-ls "$LOCAL_DIR" >"$TMP_LOCAL_LIST"
+curl -4 -fsSL "$BASE_URL/$REMOTE_DIR/" -o "$TMP_REMOTE_HTML"
+
+grep -oP 'href="\K[^"]+\.gz(?=")' "$TMP_REMOTE_HTML" | sort -u > "$TMP_REMOTE_NAMES"
+
+if [[ ! -s "$TMP_REMOTE_NAMES" ]]; then
+  echo "ERROR: Failed to retrieve remote .gz file list from $BASE_URL/$REMOTE_DIR/"
+  rm -f "$TMP_REMOTE_HTML" "$TMP_REMOTE_NAMES"
+  exit 1
+fi
+
+###############################################################################
+# FETCH LOCAL FILE LIST
+###############################################################################
+find "$LOCAL_DIR" -maxdepth 1 -type f -printf "%f\n" | sort > "$TMP_LOCAL_LIST"
 
 ###############################################################################
 # DEFINE FILES TO BE DOWNLOADED
 ###############################################################################
-mapfile -t ALL_REMOTE <"$TMP_REMOTE_NAMES"
+mapfile -t ALL_REMOTE < "$TMP_REMOTE_NAMES"
 
 MISSING=()
 for f in "${ALL_REMOTE[@]}"; do
@@ -48,99 +58,124 @@ done
 
 TOTAL=${#ALL_REMOTE[@]}
 NEEDED=${#MISSING[@]}
-LOCAL_NOW=$(ls "$LOCAL_DIR" | wc -l)
+LOCAL_NOW=$(find "$LOCAL_DIR" -maxdepth 1 -type f | wc -l)
 
 echo -e "\n────────  SUMMARY  ────────
-Total on FTP     : $TOTAL
+Total on remote  : $TOTAL
 Already local    : $LOCAL_NOW
 To be downloaded : $NEEDED
 ───────────────────────────"
 
-[[ $NEEDED -eq 0 ]] && { echo "🎉 Nothing new to download."; rm -f "$TMP_REMOTE_LIST" "$TMP_REMOTE_NAMES" "$TMP_LOCAL_LIST"; exit 0; }
-
 ###############################################################################
-# FUNCTIONS: PROGRESS + DOWNLOAD
+# FUNCTIONS
 ###############################################################################
 draw_bar() {
-  local done=$1 need=$2 width=40
-  local pct=$((100*done/need))
-  local fill=$((pct*width/100))
+  local done=$1
+  local need=$2
+  local width=40
+  local pct=0
+  local fill=0
+
+  if [[ "$need" -gt 0 ]]; then
+    pct=$((100 * done / need))
+    fill=$((pct * width / 100))
+  fi
+
   printf "\rProgress: [%s%s] %d/%d (%d%%)" \
-         "$(printf '=%.0s' $(seq 1 $fill))" \
-         "$(printf ' %.0s' $(seq 1 $((width-fill))))" \
-         "$done" "$need" "$pct"
+    "$(printf '=%.0s' $(seq 1 "$fill"))" \
+    "$(printf ' %.0s' $(seq 1 $((width - fill))))" \
+    "$done" "$need" "$pct"
 }
 
-download_one() {
+download_and_verify() {
   local file="$1"
-  aria2c --continue --auto-file-renaming=false -x16 -s16 \
-         -d "$LOCAL_DIR" -o "$file" \
-         "ftp://$FTP_SERVER/$FTP_DIR/$file" \
-         > /dev/null 2>&1 || {
-    echo "❌ $file" >>"$FAILED_DL"
-    return 1
-  }
-}
+  local attempt
+  local ok=0
+  local url="$BASE_URL/$REMOTE_DIR/$file"
 
-export -f download_one
+  for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
+    echo "[$attempt/$MAX_ATTEMPTS] Downloading $file..."
+
+    rm -f "$LOCAL_DIR/$file"
+
+    aria2c \
+      --continue=false \
+      --auto-file-renaming=false \
+      --allow-overwrite=true \
+      -x16 -s16 \
+      -d "$LOCAL_DIR" \
+      -o "$file" \
+      "$url" \
+      > /dev/null 2>&1 || true
+
+    if [[ ! -s "$LOCAL_DIR/$file" ]]; then
+      echo "  ❌ File missing or empty after download"
+      rm -f "$LOCAL_DIR/$file"
+      continue
+    fi
+
+    if gzip -t "$LOCAL_DIR/$file" 2>/dev/null; then
+      echo "  ✅ Integrity OK"
+      ok=1
+      break
+    else
+      echo "  ❌ Corrupted or partial file — removing and retrying..."
+      rm -f "$LOCAL_DIR/$file"
+    fi
+  done
+
+  if [[ "$ok" -ne 1 ]]; then
+    echo "$file" >> "$FAILED_DL"
+    return 1
+  fi
+
+  return 0
+}
 
 ###############################################################################
-# LOOP / PARALLEL WITH PROGRESS BAR
+# DOWNLOAD LOOP
 ###############################################################################
 > "$FAILED_DL"
-DL_DONE=0
 
-if command -v parallel &>/dev/null; then
-  printf "%s\n" "${MISSING[@]}" | parallel --no-notice --halt now,fail=1 -j4 --bar \
-    'aria2c --continue --auto-file-renaming=false -x16 -s16 \
-     -d "'"$LOCAL_DIR"'" -o {} "ftp://'"$FTP_SERVER"'/'"$FTP_DIR"'{}" > /dev/null 2>&1 || \
-     { echo "❌ {}" >> "'"$FAILED_DL"'"; rm -f "'"$LOCAL_DIR"'/{}"; }'
+if [[ "$NEEDED" -eq 0 ]]; then
+  echo "🎉 Nothing new to download."
 else
-  # sequential fallback with custom progress bar
+  DL_DONE=0
   for file in "${MISSING[@]}"; do
-    download_one "$file" || true
+    download_and_verify "$file" || true
     ((DL_DONE++))
     draw_bar "$DL_DONE" "$NEEDED"
   done
   echo
 fi
-###############################################################################
-# VERIFICAÇÃO DE INTEGRIDADE E RE-DOWNLOAD DE ARQUIVOS CORROMPIDOS
-###############################################################################
-echo -e "\n🔎 Verifying integrity of downloaded .gz files..."
 
-CORRUPTED_LIST="$TMP_DIR/corrupted_files.txt"
+###############################################################################
+# FINAL EXTRA INTEGRITY CHECK
+###############################################################################
+echo -e "\n🔎 Verifying integrity of all local .gz files..."
+
 > "$CORRUPTED_LIST"
 
+shopt -s nullglob
 for file in "$LOCAL_DIR"/*.gz; do
-  gzip -t "$file" 2>/dev/null || echo "$(basename "$file")" >> "$CORRUPTED_LIST"
+  if ! gzip -t "$file" 2>/dev/null; then
+    echo "$(basename "$file")" >> "$CORRUPTED_LIST"
+  fi
 done
+shopt -u nullglob
 
 CORRUPTED_COUNT=$(wc -l < "$CORRUPTED_LIST")
-if [[ $CORRUPTED_COUNT -gt 0 ]]; then
-  echo -e "⚠️  Found $CORRUPTED_COUNT corrupted files. Attempting re-download with wget (3 attempts max)...\n"
+
+if [[ "$CORRUPTED_COUNT" -gt 0 ]]; then
+  echo "⚠️ Found $CORRUPTED_COUNT corrupted files after final verification."
+  echo "Removing corrupted files..."
   while read -r file; do
-    echo "🔁 Re-downloading $file..."
-
-    for attempt in {1..3}; do
-      echo "  Attempt $attempt..."
-      wget -q -O "$LOCAL_DIR/$file" "ftp://$FTP_SERVER/$FTP_DIR/$file"
-      if gzip -t "$LOCAL_DIR/$file" 2>/dev/null; then
-        echo "  ✅ Integrity check passed on attempt $attempt"
-        break
-      else
-        echo "  ❌ Integrity check failed on attempt $attempt"
-        (( attempt == 3 )) && {
-          echo "  ⚠️  Final attempt failed — removing $file and logging as failed."
-          echo "$file" >> "$FAILED_DL"
-          rm -f "$LOCAL_DIR/$file"
-        }
-      fi
-    done
-
+    [[ -n "$file" ]] || continue
+    rm -f "$LOCAL_DIR/$file"
+    echo "$file" >> "$FAILED_DL"
   done < "$CORRUPTED_LIST"
 else
-  echo "✅ All .gz files passed integrity check."
+  echo "✅ All .gz files passed final integrity check."
 fi
 
 rm -f "$CORRUPTED_LIST"
@@ -149,11 +184,13 @@ rm -f "$CORRUPTED_LIST"
 # FINAL REPORT
 ###############################################################################
 if [[ -s "$FAILED_DL" ]]; then
-  echo -e "\n⚠️  Some downloads failed:"
-  cat "$FAILED_DL"
+  echo -e "\n⚠️ Some files failed after $MAX_ATTEMPTS attempt(s):"
+  sort -u "$FAILED_DL"
 else
   echo -e "\n🎉 All downloads completed successfully!"
 fi
 
-# Cleanup
-rm -f "$TMP_REMOTE_LIST" "$TMP_REMOTE_NAMES" "$TMP_LOCAL_LIST"
+###############################################################################
+# CLEANUP
+###############################################################################
+rm -f "$TMP_REMOTE_HTML" "$TMP_REMOTE_NAMES" "$TMP_LOCAL_LIST"
