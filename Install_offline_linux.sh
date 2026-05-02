@@ -124,7 +124,7 @@ conda activate halla0820 # install dependencies of halla
 conda install -n halla0820 -y -c conda-forge pkg-config
 conda install -n halla0820 -y -c conda-forge ca-certificates openssl libcurl curl
 conda install -n halla0820 -y -c conda-forge libuv
-R -e "install.packages('https://cran.r-project.org/src/contrib/lattice_0.22-9.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
+R -e "install.packages('https://cran.r-project.org/src/contrib/00Archive/lattice/lattice_0.22-7.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('$dir/update_fix/pvr_pkg/Matrix_1.6-5.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('$dir/update_fix/pvr_pkg/mnormt_2.1.0.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
 R -e "install.packages('$dir/update_fix/pvr_pkg/nlme_3.1-167.tar.gz', repos=NULL, type='source', Ncpus=$threads)"
