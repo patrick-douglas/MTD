@@ -29,7 +29,8 @@ R -e "install.packages('vegan',repos = 'https://cloud.r-project.org')"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/RProtoBufLib_2.14.1.tar.gz', repos=NULL, type='source')"
 R -e "remotes::install_github('RGLab/cytolib',repos = 'https://cloud.r-project.org')"
 
-R -e "install.packages('~/MTD/update_fix/pvr_pkg/DBI_1.2.3.tar.gz', repos=NULL, type='source')"
+#R -e "install.packages('~/MTD/update_fix/pvr_pkg/DBI_1.2.3.tar.gz', repos=NULL, type='source')"
+R -e "BiocManager::install('DBI', force = TRUE, update = FALSE)"
 R -e "BiocManager::install('AnnotationDbi', force = TRUE, update = FALSE)"
 R -e "BiocManager::install('SingleCellExperiment', force = TRUE, update = FALSE)"
 R -e "BiocManager::install('phyloseq', force = TRUE, update = FALSE)"
@@ -49,7 +50,7 @@ R -e "BiocManager::install('metagenomeSeq', force = TRUE, update = FALSE)"
 conda install -y -n R412 -c conda-forge r-systemfonts
 conda install -y -n R412 -c conda-forge r-textshaping
 conda install -y -n R412 -c conda-forge r-ragg
-R -e 'remotes::install_bioc("biomaRt")'
+#R -e 'remotes::install_bioc("biomaRt")'
 
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/yulab.utils_0.1.9.tar.gz', repos=NULL, type='source')"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/ggfun_0.1.7.tar.gz', repos=NULL, type='source')"
@@ -66,7 +67,7 @@ R -e "install.packages('~/MTD/update_fix/pvr_pkg/GO.db_3.19.1.tar.gz', repos=NUL
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/GOSemSim_2.30.2.tar.gz', repos=NULL, type='source')"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/AnnotationDbi_1.66.0.tar.gz', repos=NULL, type='source')"
 R -e 'BiocManager::install("DOSE", version="3.14", ask=FALSE, update=FALSE)'
-R -e 'install.packages("ggtangle", repos = c("https://guangchuangyu.r-universe.dev", "https://cloud.r-project.org"))'
+#R -e 'install.packages("ggtangle", repos = c("https://guangchuangyu.r-universe.dev", "https://cloud.r-project.org"))'
 R -e 'install.packages("scatterpie", repos="https://cloud.r-project.org")'
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/GOSemSim_2.30.2.tar.gz', repos=NULL, type='source')"
 R -e "install.packages('~/MTD/update_fix/pvr_pkg/ggnewscale_0.5.2.tar.gz', repos=NULL, type='source')"

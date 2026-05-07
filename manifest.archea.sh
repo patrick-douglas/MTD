@@ -2,23 +2,26 @@
 set -euo pipefail
 
 ###############################################################################
-# 0. Diretórios e nomes de arquivos
+# Robust RefSeq Archaea downloader for Kraken2
 ###############################################################################
+
 offline_files_folder="/media/me/4TB_BACKUP_LBN/Compressed/MTD"
 
-new_download_dir="$offline_files_folder/Kraken2DB_micro/library/bacteria/all"
-home_download_dir="$HOME/MTD/kraken2DB_micro/library/bacteria/all"
+LIBRARY="archaea"
+
+new_download_dir="$offline_files_folder/Kraken2DB_micro/library/$LIBRARY/all"
+home_download_dir="$HOME/MTD/kraken2DB_micro/library/$LIBRARY/all"
 
 mkdir -p "$new_download_dir"
 mkdir -p "$home_download_dir"
-mkdir -p "$offline_files_folder/Kraken2DB_micro/library/bacteria"
+mkdir -p "$offline_files_folder/Kraken2DB_micro/library/$LIBRARY"
 
-assembly_summary_file="$offline_files_folder/Kraken2DB_micro/library/bacteria/assembly_summary_bacteria.txt"
-manifest_list="$offline_files_folder/Kraken2DB_micro/library/bacteria/manifest_bacteria.list.txt"
-failed_downloads="$offline_files_folder/failed_downloads_bacteria.txt"
-corrupted_list="$offline_files_folder/corrupted_bacteria.txt"
-to_download_list="$offline_files_folder/to_download_bacteria.txt"
-obsolete_list="$offline_files_folder/obsolete_local_bacteria.txt"
+assembly_summary_file="$offline_files_folder/Kraken2DB_micro/library/$LIBRARY/assembly_summary_${LIBRARY}.txt"
+manifest_list="$offline_files_folder/Kraken2DB_micro/library/$LIBRARY/manifest_${LIBRARY}.list.txt"
+failed_downloads="$offline_files_folder/failed_downloads_${LIBRARY}.txt"
+corrupted_list="$offline_files_folder/corrupted_${LIBRARY}.txt"
+to_download_list="$offline_files_folder/to_download_${LIBRARY}.txt"
+obsolete_list="$offline_files_folder/obsolete_local_${LIBRARY}.txt"
 
 rm -f "$assembly_summary_file" "$manifest_list" "$failed_downloads" \
       "$corrupted_list" "$to_download_list" "$obsolete_list"
@@ -27,26 +30,31 @@ progress() {
     local current="$1"
     local total="$2"
     local msg="$3"
-
     msg="${msg:0:100}"
     printf "\r\033[2K[%d/%d] %s" "$current" "$total" "$msg"
 }
 
 ###############################################################################
-# 1. Baixar assembly_summary.txt e gerar manifest
+# 1. Download assembly_summary.txt and generate manifest
 ###############################################################################
-echo "STEP 1: Downloading latest assembly_summary.txt bacteria..."
 
-curl -4 --retry 5 --retry-delay 2 --connect-timeout 20 -fsSL \
+echo "STEP 1: Downloading latest assembly_summary.txt for $LIBRARY..."
+
+curl -4 -L --retry 20 --retry-delay 10 --retry-all-errors \
+  --connect-timeout 30 -fsSL \
   -o "$assembly_summary_file" \
-  "https://ftp.ncbi.nih.gov/genomes/refseq/bacteria/assembly_summary.txt"
+  "https://ftp.ncbi.nlm.nih.gov/genomes/refseq/${LIBRARY}/assembly_summary.txt"
 
 awk -F '\t' '
     /^#/ { next }
+
+    # Column 12 = assembly_level
+    # Column 20 = ftp_path
     ($12 == "Complete Genome" || $12 == "Chromosome") && $20 != "na" {
         ftp_path = $20
+
         sub(/^ftp:/, "https:", ftp_path)
-        sub(/ftp\.ncbi\.nlm\.nih\.gov/, "ftp.ncbi.nih.gov", ftp_path)
+        sub(/ftp\.ncbi\.nlm\.nih\.gov/, "ftp.ncbi.nlm.nih.gov", ftp_path)
         gsub(/\/+$/, "", ftp_path)
 
         n = split(ftp_path, a, "/")
@@ -62,11 +70,12 @@ awk -F '\t' '
     }
 ' "$assembly_summary_file" > "$manifest_list"
 
-echo "✅ $(wc -l < "$manifest_list") bacterial genomes listed on NCBI servers."
+echo "✅ $(wc -l < "$manifest_list") archaeal genomes listed on NCBI servers."
 
 ###############################################################################
-# 2. Sincronizar pasta local com o NCBI
+# 2. Sync local folder against NCBI manifest
 ###############################################################################
+
 echo
 echo "STEP 2: Syncing local folder against NCBI manifest..."
 
@@ -89,8 +98,9 @@ shopt -u nullglob
 : > "$failed_downloads"
 
 ###############################################################################
-# 2A. Remover arquivos locais obsoletos
+# 2A. Remove obsolete local files
 ###############################################################################
+
 echo
 echo "STEP 2A: Checking LOCAL files for obsolete files..."
 
@@ -120,8 +130,9 @@ else
 fi
 
 ###############################################################################
-# Atualizar lista local após remoções
+# Refresh local map after removals
 ###############################################################################
+
 shopt -s nullglob
 local_paths=("$new_download_dir"/*.gz)
 shopt -u nullglob
@@ -134,22 +145,25 @@ for path in "${local_paths[@]}"; do
 done
 
 ###############################################################################
-# Função para obter tamanho remoto
+# Function to get remote file size
 ###############################################################################
+
 get_remote_size() {
     local url="$1"
 
-    curl -4 -fsSI \
-      --retry 3 \
-      --retry-delay 2 \
-      --connect-timeout 20 \
+    curl -4 -L -fsSI \
+      --retry 5 \
+      --retry-delay 5 \
+      --retry-all-errors \
+      --connect-timeout 30 \
       "$url" 2>/dev/null \
       | awk 'BEGIN{IGNORECASE=1} /^Content-Length:/ {gsub("\r","",$2); print $2; exit}'
 }
 
 ###############################################################################
-# 2B. Detectar faltantes e alterados
+# 2B. Detect missing and changed files
 ###############################################################################
+
 echo
 echo "STEP 2B: Checking REMOTE files against LOCAL files..."
 
@@ -173,7 +187,6 @@ for fname in "${!remote_map[@]}"; do
     local_size="$(stat -c%s "${local_map[$fname]}" 2>/dev/null || echo 0)"
     remote_size="$(get_remote_size "$url" || true)"
 
-    # Se falhar por DNS/rede/NCBI temporário, NÃO marca como alterado.
     if [[ -z "$remote_size" ]]; then
         ((size_check_failed_count+=1))
         continue
@@ -205,8 +218,9 @@ echo "Remote size check failed : $size_check_failed_count"
 echo "To download now          : $to_download_count"
 
 ###############################################################################
-# 3. Baixar arquivos faltantes/alterados
+# 3. Download missing/changed files
 ###############################################################################
+
 echo
 echo "STEP 3: Downloading missing/changed files..."
 
@@ -217,13 +231,17 @@ download_one() {
     local file
     file="$(basename "$url")"
 
-    for attempt in {1..3}; do
+    for attempt in {1..5}; do
         aria2c --disable-ipv6=true \
                --continue=true \
                --auto-file-renaming=false \
-               -x16 -s16 \
+               --max-tries=0 \
+               --retry-wait=20 \
+               --timeout=60 \
+               --connect-timeout=30 \
+               -x8 -s8 \
                -o "$file" \
-               "$url" > /dev/null 2>&1
+               "$url" > /dev/null 2>&1 || true
 
         if [[ -f "$file" ]] && gzip -t "$file" 2>/dev/null; then
             [[ -f "$home_download_dir/$file" ]] || cp -p "$file" "$home_download_dir/"
@@ -231,7 +249,7 @@ download_one() {
         else
             echo "❌ Attempt $attempt failed for $file"
             rm -f "$file"
-            sleep 1
+            sleep 5
         fi
     done
 
@@ -244,7 +262,7 @@ export home_download_dir
 if (( to_download_count == 0 )); then
     echo "✅ Local folder is already synchronized with NCBI."
 else
-    echo "Downloading $to_download_count genome(s)..."
+    echo "Downloading $to_download_count archaeal genome(s)..."
     mapfile -t download_urls < "$to_download_list"
 
     if command -v parallel >/dev/null 2>&1 && command -v aria2c >/dev/null 2>&1; then
@@ -285,8 +303,9 @@ else
 fi
 
 ###############################################################################
-# 4. Checar integridade e re-baixar corrompidos
+# 4. Verify integrity and redownload corrupted files
 ###############################################################################
+
 echo
 echo "STEP 4: Verifying integrity of .gz files..."
 
@@ -317,7 +336,7 @@ fi
 corrupted_count=$(wc -l < "$corrupted_list")
 
 if (( corrupted_count > 0 )); then
-    echo "⚠️ $corrupted_count corrupted file(s) found. Re-downloading with wget, max 3 attempts..."
+    echo "⚠️ $corrupted_count corrupted file(s) found. Re-downloading with wget, max 5 attempts..."
 
     corrupted_checked=0
 
@@ -334,7 +353,7 @@ if (( corrupted_count > 0 )); then
             continue
         fi
 
-        for attempt in {1..3}; do
+        for attempt in {1..5}; do
             progress "$corrupted_checked" "$corrupted_count" "[REDOWNLOAD] $fname attempt $attempt"
 
             wget -4 -q -O "$new_download_dir/$fname" "$url" || true
@@ -344,14 +363,15 @@ if (( corrupted_count > 0 )); then
                 echo "✅ Integrity OK after attempt $attempt: $fname"
                 [[ -f "$home_download_dir/$fname" ]] || cp -p "$new_download_dir/$fname" "$home_download_dir/"
                 break
-            elif [[ $attempt -eq 3 ]]; then
+            elif [[ $attempt -eq 5 ]]; then
                 echo
-                echo "❌ Still corrupted after 3 attempts: $fname"
-                echo "❌ Failed after 3 attempts: $fname" >> "$failed_downloads"
+                echo "❌ Still corrupted after 5 attempts: $fname"
+                echo "❌ Failed after 5 attempts: $fname" >> "$failed_downloads"
                 rm -f "$new_download_dir/$fname"
                 rm -f "$home_download_dir/$fname"
             else
                 rm -f "$new_download_dir/$fname"
+                sleep 5
             fi
         done
     done < "$corrupted_list"
@@ -362,8 +382,9 @@ fi
 rm -f "$corrupted_list"
 
 ###############################################################################
-# 5. Relatório final
+# 5. Final report
 ###############################################################################
+
 echo
 echo "STEP 5: Final report"
 echo "Remote genomes listed    : $total_remote"
@@ -381,5 +402,5 @@ if [[ -s "$failed_downloads" ]]; then
     cat "$failed_downloads"
 else
     echo
-    echo "✅ All bacterial genomes synchronized and verified successfully!"
+    echo "✅ All archaeal genomes synchronized and verified successfully!"
 fi

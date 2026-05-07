@@ -1,0 +1,190 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use File::Basename;
+use Getopt::Long;
+use POSIX;
+
+my $PROG = basename $0;
+my $KRAKEN2_DIR = '/home/me/miniconda3/envs/MTD/libexec';
+
+if (! -e "$KRAKEN2_DIR/classify") {
+  use Cwd 'abs_path';
+  $KRAKEN2_DIR = dirname abs_path($0);
+}
+
+$ENV{"KRAKEN2_DIR"} = $KRAKEN2_DIR;
+$ENV{"PATH"} = "$KRAKEN2_DIR:$ENV{PATH}";
+
+# ===============================
+# 🚀 FAST DOWNLOAD FUNCTION
+# ===============================
+sub fast_download_taxonomy {
+
+  my $db = $ENV{"KRAKEN2_DB_NAME"};
+  my $threads = $ENV{"KRAKEN2_THREAD_CT"} || 4;
+
+  my $aria_threads = $threads;
+  $aria_threads = 16 if $aria_threads > 16;
+  $aria_threads = 1  if $aria_threads < 1;
+
+  my $taxdir = "$db/taxonomy";
+
+  mkdir $db unless -d $db;
+  mkdir $taxdir unless -d $taxdir;
+
+  print STDERR "===> Using FAST taxonomy download\n";
+  print STDERR "Threads=$threads | aria2=$aria_threads\n";
+
+  my @files = (
+    "accession2taxid/nucl_gb.accession2taxid.gz",
+    "accession2taxid/nucl_wgs.accession2taxid.gz",
+    "taxdump.tar.gz"
+  );
+
+  my $base = "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy";
+$ENV{"KRAKEN2_USE_FTP"} = 0;
+
+  foreach my $f (@files) {
+
+    my $url = "$base/$f";
+    my $fname = basename($f);
+    my $out = "$taxdir/$fname";
+
+    next if -s $out || -s "$taxdir/" . ($fname =~ s/\.gz$//r);
+
+    print STDERR "Downloading $fname...\n";
+
+    if (system("command -v aria2c >/dev/null 2>&1") == 0) {
+
+      my $cmd =
+        "aria2c " .
+        "--continue=true " .
+        "--max-connection-per-server=$aria_threads " .
+        "--split=$aria_threads " .
+        "--min-split-size=10M " .
+        "--retry-wait=5 " .
+        "--max-tries=20 " .
+        "--timeout=60 " .
+        "--dir='$taxdir' " .
+        "--out='$fname' " .
+        "'$url'";
+
+      system($cmd) == 0 or die "aria2c failed\n";
+
+    } else {
+
+      my $cmd =
+        "wget -c " .
+        "--tries=20 " .
+        "--waitretry=5 " .
+        "--timeout=60 " .
+        "-O '$out' " .
+        "'$url'";
+
+      system($cmd) == 0 or die "wget failed\n";
+    }
+  }
+
+  system("tar -xzf '$taxdir/taxdump.tar.gz' -C '$taxdir'") == 0
+    or die "tar failed\n";
+
+  system("gunzip -f '$taxdir/nucl_gb.accession2taxid.gz' 2>/dev/null");
+  system("gunzip -f '$taxdir/nucl_wgs.accession2taxid.gz' 2>/dev/null");
+
+  print STDERR "===> FAST taxonomy download DONE\n";
+}
+
+# ===============================
+# DEFAULTS
+# ===============================
+my $DEF_THREAD_CT = 1;
+
+my (
+  $db,
+  $threads,
+  $dl_taxonomy,
+  $dl_library,
+  $add_to_library,
+  $build,
+  $standard,
+  $clean,
+  $special,
+);
+
+$db = $ENV{"KRAKEN2_DB_NAME"};
+$threads = $ENV{"KRAKEN2_THREAD_CT"} || $DEF_THREAD_CT;
+
+GetOptions(
+  "db=s" => \$db,
+  "threads=i" => \$threads,
+  "download-taxonomy" => \$dl_taxonomy,
+  "download-library=s" => \$dl_library,
+  "add-to-library=s" => \$add_to_library,
+  "build" => \$build,
+  "standard" => \$standard,
+  "clean" => \$clean,
+  "special=s" => \$special,
+) or die "Error parsing options\n";
+
+# ===============================
+# 🔧 FIX ENV (CRITICAL)
+# ===============================
+$ENV{"KRAKEN2_DB_NAME"} = $db;
+$ENV{"KRAKEN2_THREAD_CT"} = $threads;
+
+$ENV{"KRAKEN2_USE_FTP"} ||= "";
+$ENV{"KRAKEN2_SKIP_MAPS"} ||= "";
+$ENV{"KRAKEN2_PROTEIN_DB"} ||= "";
+$ENV{"KRAKEN2_MASK_LC"} ||= 1;
+
+# ===============================
+# TASKS
+# ===============================
+if ($dl_taxonomy) {
+
+  my $taxdir = "$db/taxonomy";
+
+  if (
+    -s "$taxdir/nodes.dmp" &&
+    -s "$taxdir/names.dmp" &&
+    -s "$taxdir/nucl_gb.accession2taxid" &&
+    -s "$taxdir/nucl_wgs.accession2taxid"
+  ) {
+    print STDERR "===> Taxonomy already exists. Skipping.\n";
+  }
+  else {
+    eval {
+      fast_download_taxonomy();
+    };
+
+    if ($@) {
+      print STDERR "Fast download failed → fallback Kraken\n";
+      exec "download_taxonomy.sh";
+    }
+  }
+}
+elsif ($dl_library) {
+  exec "download_genomic_library.sh", $dl_library;
+}
+elsif ($add_to_library) {
+  exec "add_to_library.sh", $add_to_library;
+}
+elsif ($standard) {
+  exec "standard_installation.sh";
+}
+elsif ($build) {
+  exec "build_kraken2_db.sh";
+}
+elsif ($clean) {
+  exec "clean_db.sh";
+}
+elsif ($special) {
+  exec "build_special_database.sh", $special;
+}
+else {
+  die "No task specified\n";
+}
+
+exit 0;

@@ -1,0 +1,35 @@
+name: MTD
+channels:
+  - biobakery
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  # System/build helpers for R packages compiled from source
+  - pkg-config
+  - libuv
+  - udunits2
+
+  # R package management
+  - r-biocmanager
+  - r-remotes
+
+  # R/system interface packages
+  - r-curl
+  - r-httr
+  - r-pkgconfig
+
+  # Compatibility/core packages used by MTD update_fix scripts
+  - r-rlang
+  - r-vctrs
+  - r-plyr
+
+  # Plotting/statistics packages from the original MTD install script
+  - r-tidyverse
+  - r-car
+  - r-rstatix
+  - r-ggpubr
+  - r-textshaping
+  - r-ragg
+  - r-systemfonts
+

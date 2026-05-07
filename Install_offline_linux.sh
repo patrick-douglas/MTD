@@ -96,8 +96,9 @@ sudo_with_pass "sudo apt install libharfbuzz-dev libfribidi-dev libfreetype6-dev
 conda deactivate
 echo 'installing conda environments...'
 conda env create -f Installation/MTD.yml
-
+conda env update -n MTD -f $dir/update_fix/MTD_R_additions.yml
 conda run -n MTD bash $dir/update_fix/Install.R.packages.MTD.sh
+
 
 #$dir/update_fix/Install.R.packages.MTD.sh
 
@@ -164,7 +165,7 @@ conda install -n MTD -y -c conda-forge pkg-config
 
 #Check if the file exists and have the same size before download
 #wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/virushostdb.genomic.fna.gz
-cp -f $offline_files_folder/virushostdb.genomic.fna.gz .
+cp -f $offline_files_folder/Ref_genomes/MTD_virus/virushostdb.genomic.fna.gz .
 #wget -c https://www.genome.jp/ftp/db/virushostdb/virushostdb.genomic.fna.gz
 
 unpigz -f virushostdb.genomic.fna.gz
@@ -203,11 +204,32 @@ sed -i "s|^offline_files_folder=.*|offline_files_folder=$offline_files_folder|" 
 DBNAME=kraken2DB_micro
 echo "Downloading NCBI taxonomy database with Kraken2—please wait..."
 # opção 1: tentar sem rsync
-kraken2-build --download-taxonomy --use-ftp --threads $threads --db "$DBNAME" $kmer $min_l $min_s
+#kraken2-build --download-taxonomy --use-ftp --threads $threads --db "$DBNAME" $kmer $min_l $min_s
 #kraken2-build --download-taxonomy --threads $threads --db $DBNAME $kmer $min_l $min_s
+#Use a new script modified to optimze the download 
+$dir/kraken2-build-download-taxonomy --download-taxonomy --threads $threads --db "$DBNAME" $kmer $min_l $min_s
 
+# Use local files for archaea
 echo "Downloading RefSeq Archaea library with Kraken2—please wait..."
+#kraken2-build --use-ftp --download-library archaea --threads $threads --db $DBNAME $kmer $min_l $min_s
+cp -f $dir/manifest.archea.sh $offline_files_folder/Kraken2DB_micro/library/archaea
+sed -i "s|^offline_files_folder=.*|offline_files_folder=$offline_files_folder|" $offline_files_folder/Kraken2DB_micro/library/archaea/manifest.archea.sh
+$offline_files_folder/Kraken2DB_micro/library/archaea/manifest.archea.sh
+
+
+cp -f $dir/Installation/rsync_from_ncbi_archaea.pl $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
+
+sed -i "13s|^.*|my \$local_download_dir = \"$offline_files_folder/Kraken2DB_micro/library/archaea/all/\";|" $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
+
+cp -f $offline_files_folder/Kraken2DB_micro/library/archaea/assembly_summary_archaea.txt $offline_files_folder/Kraken2DB_micro/library/archaea/assembly_summary.txt
+
+chmod +x $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
+
+echo "Adding local archaeal sequences to Kraken2 database..."
 kraken2-build --use-ftp --download-library archaea --threads $threads --db $DBNAME $kmer $min_l $min_s
+
+# Restore original Kraken2 rsync script
+cp -f $dir/Installation/rsync_from_ncbi.pl $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
 
 #Use local files for bacteria
 cp -f $dir/Installation/rsync_from_ncbi_bacteria.pl $condapath/envs/MTD/libexec/rsync_from_ncbi.pl
@@ -290,7 +312,7 @@ cp $offline_files_folder/GCF_003339765.1_Mmul_10_genomic.fna.gz .
 unpigz GCF_003339765.1_Mmul_10_genomic.fna.gz
 mv GCF_003339765.1_Mmul_10_genomic.fna GCF_003339765.1_Mmul_10_genomic.fa
 cd ..
-kraken2-build --download-taxonomy --threads $threads --db $DBNAME $kmer $min_l $min_s
+kraken2-build --use-ftp --download-taxonomy --threads $threads --db $DBNAME $kmer $min_l $min_s
 kraken2-build --add-to-library $DBNAME/GCF_003339765.1_Mmul_10_genomic.fa --threads $threads --db $DBNAME $kmer $min_l $min_s
 kraken2-build --build --threads $threads --db $DBNAME $kmer $min_l $min_s
 
@@ -321,7 +343,7 @@ cd $dir/HUMAnN/ref_database/
 #Temporary cp solution
 #cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/full_chocophlan.v296_201901.tar.gz .
 #cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/HUMAnN_updated/full_chocophlan.v201901_v31.tar.gz .
-cp $offline_files_folder/full_chocophlan.v201901_v31.tar.gz .
+cp $offline_files_folder/HUMAnN/full_chocophlan.v201901_v31.tar.gz .
 #Link 403 forbidden
 #wget -c http://huttenhower.sph.harvard.edu/humann2_data/uniprot/uniref_annotated/uniref90_annotated_v201901.tar.gz
 #Link working but slow
@@ -329,7 +351,7 @@ cp $offline_files_folder/full_chocophlan.v201901_v31.tar.gz .
 #Temporary cp solution
 #cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/uniref90_annotated_v201901.tar.gz .
 #cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/HUMAnN_updated/uniref90_annotated_v201901b_full.tar.gz .
-cp $offline_files_folder/uniref90_annotated_v201901b_full.tar.gz .
+cp $offline_files_folder/HUMAnN/uniref90_annotated_v201901b_full.tar.gz .
 
 #Link 403 forbidden
 #wget -c http://huttenhower.sph.harvard.edu/humann2_data/full_mapping_v201901.tar.gz
@@ -339,7 +361,7 @@ cp $offline_files_folder/uniref90_annotated_v201901b_full.tar.gz .
 #wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/HUMAnN/ref_database/full_mapping_v201901.tar.gz
 #cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/full_mapping_v201901.tar.gz .
 #cp /media/me/4TB_BACKUP_LBN/Compressed/MTD/HUMAnN_updated/full_mapping_v201901b.tar.gz .
-cp $offline_files_folder/full_mapping_v201901b.tar.gz .
+cp $offline_files_folder/HUMAnN/full_mapping_v201901b.tar.gz .
 mkdir -p $dir/HUMAnN/ref_database/chocophlan
 #tar xzvf full_chocophlan.v296_201901.tar.gz -C chocophlan/
 tar xzvf full_chocophlan.v201901_v31.tar.gz -C chocophlan/
@@ -367,17 +389,17 @@ echo "${w}"
     # download rhesus macaque GTF
 #    wget -c http://ftp.ensembl.org/pub/release-104/gtf/macaca_mulatta/Macaca_mulatta.Mmul_10.104.gtf.gz -P ref_rhesus
 #    wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/ref_rhesus/Macaca_mulatta.Mmul_10.104.gtf.gz -P ref_rhesus
-mkdir -p ref_rhesus && cp $offline_files_folder/Macaca_mulatta.Mmul_10.104.gtf.gz ref_rhesus
+mkdir -p ref_rhesus && cp $offline_files_folder/Ref_genomes/Macaca_mulatta/Macaca_mulatta.Mmul_10.104.gtf.gz ref_rhesus
 
     # download human GTF
 #    wget -c http://ftp.ensembl.org/pub/release-104/gtf/homo_sapiens/Homo_sapiens.GRCh38.104.gtf.gz -P ref_human
 #    wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/ref_human/Homo_sapiens.GRCh38.104.gtf.gz -P ref_human
-mkdir -p ref_human && cp $offline_files_folder/Homo_sapiens.GRCh38.104.gtf.gz ref_human
+mkdir -p ref_human && cp $offline_files_folder/Ref_genomes/Homo_sapiens/Homo_sapiens.GRCh38.104.gtf.gz ref_human
 
     # download mouse GTF
 #    wget -c http://ftp.ensembl.org/pub/release-104/gtf/mus_musculus/Mus_musculus.GRCm39.104.gtf.gz -P ref_mouse
 #    wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/ref_mouse/Mus_musculus.GRCm39.104.gtf.gz -P ref_mouse
-mkdir -p ref_mouse && cp $offline_files_folder/Mus_musculus.GRCm39.104.gtf.gz ref_mouse
+mkdir -p ref_mouse && cp $offline_files_folder/Ref_genomes/Mus_musculus/Mus_musculus.GRCm39.104.gtf.gz ref_mouse
 
 # Building indexes for hisat2
 echo "${g}"
@@ -395,7 +417,7 @@ python $dir/Installation/hisat2_extract_splice_sites.py genome.gtf > genome.ss
 python $dir/Installation/hisat2_extract_exons.py genome.gtf > genome.exon
 #wget -c http://ftp.ensembl.org/pub/release-104/fasta/macaca_mulatta/dna/Macaca_mulatta.Mmul_10.dna.toplevel.fa.gz #use ensembl genome to compatible with featureCount
 #wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/ref_rhesus/Macaca_mulatta.Mmul_10.dna.toplevel.fa.gz
-cp $offline_files_folder/Macaca_mulatta.Mmul_10.dna.toplevel.fa.gz .
+cp $offline_files_folder/Ref_genomes/Macaca_mulatta/Macaca_mulatta.Mmul_10.dna.toplevel.fa.gz .
 gzip -d Macaca_mulatta.Mmul_10.dna.toplevel.fa.gz
 mv Macaca_mulatta.Mmul_10.dna.toplevel.fa genome.fa
 hisat2-build --large-index -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
@@ -416,7 +438,7 @@ python $dir/Installation/hisat2_extract_splice_sites.py genome.gtf > genome.ss
 python $dir/Installation/hisat2_extract_exons.py genome.gtf > genome.exon
 #wget -c http://ftp.ensembl.org/pub/release-104/fasta/mus_musculus/dna/Mus_musculus.GRCm39.dna.primary_assembly.fa.gz #use ensembl genome to compatible with featureCount
 #wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/ref_mouse/Mus_musculus.GRCm39.dna.primary_assembly.fa.gz
-cp $offline_files_folder/Mus_musculus.GRCm39.dna.primary_assembly.fa.gz .
+cp $offline_files_folder/Ref_genomes/Mus_musculus/Mus_musculus.GRCm39.dna.primary_assembly.fa.gz .
 gzip -d Mus_musculus.GRCm39.dna.primary_assembly.fa.gz
 mv Mus_musculus.GRCm39.dna.primary_assembly.fa genome.fa
 hisat2-build --large-index -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
@@ -437,7 +459,7 @@ python $dir/Installation/hisat2_extract_splice_sites.py genome.gtf > genome.ss
 python $dir/Installation/hisat2_extract_exons.py genome.gtf > genome.exon
 #wget -c http://ftp.ensembl.org/pub/release-104/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz #use ensembl genome to compatible with featureCount
 #wget -T 300 -t 5 -N --no-if-modified-since https://master.dl.sourceforge.net/project/mtd/MTD/ref_human/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz
-cp $offline_files_folder/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz .
+cp $offline_files_folder/Ref_genomes/Homo_sapiens/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz .
 gzip -d Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz
 mv Homo_sapiens.GRCh38.dna.primary_assembly.fa genome.fa
 hisat2-build --large-index -p $threads --exon genome.exon --ss genome.ss genome.fa genome_tran
@@ -481,20 +503,23 @@ if [ -f /usr/lib/x86_64-linux-gnu/pkgconfig/libcurl.pc ]; then
     else 
     locate_lib=$(dirname $(locate libcurl | grep '\.pc'))
 fi
-R CMD INSTALL --configure-vars='LIB_DIR='"$locate_lib" curl_4.3.2.tar.gz
-R -e 'install.packages("~/MTD/update_fix/pvr_pkg/Matrix_1.6-5.tar.gz", repos=NULL, type="source")'
-Rscript $dir/Installation/R_packages_installation.R
-#~/miniconda3/envs/MTD/opt/krona/updateTaxonomy.sh
-conda deactivate
-conda activate MTD
-#~/miniconda3/envs/MTD/opt/krona/updateTaxonomy.sh
-chmod +x MTD.sh
-cp $dir/update_fix/hclust2.py ~/miniconda3/envs/py2/lib/python2.7/site-packages/hclust2.py
-conda deactivate
-conda activate R412
-#conda run -n R412 bash $dir/update_fix/Install.R.packages.R412.sh
-conda deactivate
 
+#Install R412 env packages
+cd $dir
+conda deactivate
+conda env remove -n R412 -y
+rm -rf ~/miniconda3/envs/R412
+rm -rf ~/miniconda3/pkgs/r-base-4.1.2-hde4fec0_0
+rm -f ~/miniconda3/pkgs/r-base-4.1.2-hde4fec0_0*.tar.bz2
+rm -f ~/miniconda3/pkgs/r-base-4.1.2-hde4fec0_0*.conda
+conda clean --packages --tarballs -y
+conda config --set channel_priority strict
+conda env create -f $dir/Installation/R412.yml
+conda activate R412
+$dir/update_fix/Install.R.packages.R412_optimized.sh.sh
+Rscript -e 'install.packages("https://bioconductor.org/packages/3.19/bioc/src/contrib/UCSC.utils_1.0.0.tar.gz", repos=NULL, type="source", dependencies=FALSE); library(UCSC.utils); packageVersion("UCSC.utils")'
+$dir/update_fix/check_R_pkg.R412.sh
+conda deactivate
 #Install Annotation tools for base enviroment
 bash $dir/update_fix/Install.R.AnnotPackages.base.sh
 echo "${g}"
