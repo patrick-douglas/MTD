@@ -149,7 +149,7 @@ mkdir -p $MTDIR/blastdb_$customized
 #cp genome_${customized}.fa $MTDIR/blastdb_$customized 
 
 cd ..
-kraken2-build --download-taxonomy --threads $threads --db $DBNAME
+kraken2-build --use-ftp --download-taxonomy --threads $threads --db $DBNAME
 kraken2-build --add-to-library $DBNAME/genome_${customized}.fa --threads $threads --db $DBNAME
 kraken2-build --build --threads $threads --db $DBNAME
 # download host GTF
