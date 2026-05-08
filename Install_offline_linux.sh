@@ -521,6 +521,7 @@ Rscript -e 'install.packages("https://bioconductor.org/packages/3.19/bioc/src/co
 $dir/update_fix/check_R_pkg.R412.sh
 conda deactivate
 #Install Annotation tools for base enviroment
+R -e 'BiocManager::install("GenomeInfoDb")'
 bash $dir/update_fix/Install.R.AnnotPackages.base.sh
 echo "${g}"
 echo "*********************************"

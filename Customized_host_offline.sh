@@ -79,7 +79,7 @@ rm -rf $MTDIR/kraken2DB_${customized} $MTDIR/ref_${customized} $MTDIR/hisat2_ind
 # get MTD folder place; same as Install.sh script file path (in the MTD folder)
 dir=$(dirname $(readlink -f $0))
 cd $dir # MTD folder place
-
+rm -rf ~/MTD/*$customized*
 # get conda path
 condapath=$(head -n 1 $MTDIR/condaPath)
 # activate MTD conda environment
@@ -131,17 +131,137 @@ echo "Taxon ID: $customized"
 echo ''
 
 # Check the header format of the FASTA file
-header=$(head -n 1 genome_${customized}.fa)
+# Add Kraken taxid to FASTA headers and append scientific name from HostSpecies.csv
 
-if [[ "$header" == *"dna:primary_assembly"* || "$header" == *"dna:genescaffold"* ]]; then
-    # Ensembl format detected
-    echo "Detected Ensembl format. Modifying headers for Ensembl..."
-    sed -i "s/^>\(.*\) dna:.* \(.*\):\(.*\):\(.*\):\(.*\) REF$/>kraken:taxid|${customized}|\\3 ${species_name} chromosome \\3, ${assembly_name} Primary Assembly/" genome_${customized}.fa
-else
-    # NCBI format detected
-    echo "Detected NCBI format. Modifying headers for NCBI..."
-    sed -i "s/^>\(.*\) \(.*\)/>kraken:taxid|${customized}|\\1 ${species_name} \\2/" genome_${customized}.fa
+fa="genome_${customized}.fa"
+taxid="${customized}"
+host_csv="${MTDIR}/HostSpecies.csv"
+
+if [[ ! -s "$fa" ]]; then
+    echo "ERROR: FASTA file not found or empty: $fa"
+    exit 1
 fi
+
+if [[ -z "${MTDIR:-}" ]]; then
+    echo "ERROR: MTDIR variable is not defined."
+    exit 1
+fi
+
+if [[ ! -s "$host_csv" ]]; then
+    echo "ERROR: Host species CSV not found or empty:"
+    echo "  $host_csv"
+    exit 1
+fi
+
+# ------------------------------------------------------------
+# Get scientific name from $MTDIR/HostSpecies.csv
+# Expected columns:
+# Taxon_ID,MartDatasets,Scientific_name,OrgDb,Common_name,kegg
+# ------------------------------------------------------------
+
+species_from_taxid=$(
+    awk -F',' -v id="$taxid" '
+    NR == 1 {
+        for (i = 1; i <= NF; i++) {
+            gsub(/\r/, "", $i)
+            if ($i == "Taxon_ID") tax_col = i
+            if ($i == "Scientific_name") sci_col = i
+        }
+
+        if (!tax_col || !sci_col) {
+            exit 2
+        }
+
+        next
+    }
+
+    {
+        gsub(/\r/, "", $0)
+
+        tax_id = $tax_col
+        sci_name = $sci_col
+
+        gsub(/^[ \t]+|[ \t]+$/, "", tax_id)
+        gsub(/^[ \t]+|[ \t]+$/, "", sci_name)
+
+        if (tax_id == id) {
+            print sci_name
+            exit
+        }
+    }
+    ' "$host_csv"
+)
+
+awk_status=$?
+
+if [[ "$awk_status" -eq 2 ]]; then
+    echo "ERROR: Could not find required columns Taxon_ID and Scientific_name in:"
+    echo "  $host_csv"
+    exit 1
+fi
+
+if [[ -z "$species_from_taxid" ]]; then
+    echo "WARNING: TaxID ${taxid} was not found in:"
+    echo "  $host_csv"
+
+    if [[ -n "${species_name:-}" ]]; then
+        species_from_taxid="$species_name"
+        echo "Using existing species_name variable: $species_from_taxid"
+    else
+        species_from_taxid="TaxID_${taxid}"
+        echo "Using fallback name: $species_from_taxid"
+    fi
+else
+    echo "Detected scientific name from HostSpecies.csv:"
+    echo "  TaxID ${taxid} -> ${species_from_taxid}"
+fi
+
+# ------------------------------------------------------------
+# Add Kraken taxid while preserving original FASTA headers
+# ------------------------------------------------------------
+
+echo "Adding Kraken taxid ${taxid} to FASTA headers..."
+echo "Appending organism name: $species_from_taxid"
+echo "Original FASTA headers will be preserved."
+
+tmp=$(mktemp)
+
+awk -v taxid="$taxid" -v organism="$species_from_taxid" '
+  /^>/ {
+    h = $0
+
+    # Remove initial ">"
+    sub(/^>/, "", h)
+
+    # Remove old Kraken taxid prefix if present
+    sub(/^kraken:taxid\|[0-9]+\|/, "", h)
+
+    # Remove previous organism tag at the end, if present
+    sub(/[[:space:]]+\[organism=[^]]+\][[:space:]]*$/, "", h)
+
+    print ">kraken:taxid|" taxid "|" h " [organism=" organism "]"
+    next
+  }
+
+  { print }
+' "$fa" > "$tmp" && mv "$tmp" "$fa"
+
+# ------------------------------------------------------------
+# Validate result
+# ------------------------------------------------------------
+
+total_headers=$(grep -c '^>' "$fa")
+tagged_headers=$(grep -c "^>kraken:taxid|${taxid}|" "$fa")
+
+echo "Total FASTA headers: $total_headers"
+echo "Headers with Kraken taxid ${taxid}: $tagged_headers"
+
+if [[ "$total_headers" -ne "$tagged_headers" ]]; then
+    echo "ERROR: Not all FASTA headers received the Kraken taxid."
+    exit 1
+fi
+
+echo "Done."
 
 echo "Header modification complete."
 rm -rf $MTDIR/blastdb_$customized
@@ -149,7 +269,8 @@ mkdir -p $MTDIR/blastdb_$customized
 #cp genome_${customized}.fa $MTDIR/blastdb_$customized 
 
 cd ..
-kraken2-build --use-ftp --download-taxonomy --threads $threads --db $DBNAME
+#kraken2-build --download-taxonomy --threads $threads --db $DBNAME
+$MTDIR/download_kraken2_taxonomy_https.sh  --db "$DBNAME"  --threads "$threads"
 kraken2-build --add-to-library $DBNAME/genome_${customized}.fa --threads $threads --db $DBNAME
 kraken2-build --build --threads $threads --db $DBNAME
 # download host GTF
