@@ -313,7 +313,7 @@ echo -e "Selected host species:\e[3m $species_name\e[0m"
 echo "Taxon ID: $customized"
 echo ''
 conda deactivate
-#conda activate R412
+conda activate R412
 cd $MTDIR
 rm -rf NCBI org.*eg*
 ################################################################################################
@@ -347,7 +347,8 @@ else
     echo "Error: Could not extract the package name from the R script output."
     exit 1
 fi
-
+R --no-restore -e 'packageVersion("org.Mlucifugus.eg.db")'
+conda deactivate
 ################################################################################################
 
 echo "Customized host reference building is done"

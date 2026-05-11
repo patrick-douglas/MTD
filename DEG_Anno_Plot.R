@@ -158,37 +158,91 @@ write.csv(norm,file=paste0(sub(".tsv$|.txt$","",filename),"_normalized.csv"))
 
 # merge and add suffixes; normalized and normalized&transformed
 merge.nt<-merge(norm,normtrans,by="row.names", suffixes=c(".norm",".normtrans"))
-if (filename == "host_counts.txt"){
-  library("biomaRt")
-  host_sp<-read.csv(args[4]) # read a list of supported host species
-  # add annotations; try up to 120 times/20 mins if biomaRt server not response
-  ensembl <- NULL
-  attempt <- 0
-  while ( is.null(ensembl) && attempt <= 120){
-    try(
-      ensembl <- useMart("ensembl",dataset=host_sp[host_sp$Taxon_ID==args[3],2])
-    )
-    attempt<-attempt+1
-    if (attempt > 1){
-      print(paste0("Retry to get gene annotations from ensembl: ",attempt," times")) 
-    }
-    Sys.sleep(10)
-  }
-  if (is.null(ensembl)){
-    stop("Failed to get gene annotations from ensembl server, please try again later")
-  }
-  names(merge.nt)[1]<-"GeneID"
+if (filename == "host_counts.txt") {
+  host_sp <- read.csv(args[4])
+
+  names(merge.nt)[1] <- "GeneID"
   genes <- merge.nt$GeneID
-  gene_ID <- getBM(filters="ensembl_gene_id",
-                   attributes=c("external_gene_name","ensembl_gene_id",
-                                "chromosome_name","start_position","end_position",
-                                "strand","gene_biotype","description"),
-                   values=genes,mart=ensembl)
-  names(gene_ID)[names(gene_ID)=="external_gene_name"]<-"gene_name" #rename the first column
-  gene_len<-read.table(args[1], row.names=1, sep="\t",header=T, quote="")
-  gene_len<-gene_len["Length"]
-  colnames(gene_len)<-"gene_length"
-  gene_ID<-merge(gene_ID,gene_len,by.x="ensembl_gene_id", by.y="row.names")
+
+  cache_file <- file.path(dirname(args[1]), "Host_DEG", "gene_ID_cache.csv")
+
+  if (file.exists(cache_file)) {
+    message("Using cached gene annotations: ", cache_file)
+
+    gene_ID <- read.csv(cache_file, header = TRUE, check.names = FALSE)
+
+    required_gene_id_cols <- c(
+      "gene_name",
+      "ensembl_gene_id",
+      "chromosome_name",
+      "start_position",
+      "end_position",
+      "strand",
+      "gene_biotype",
+      "description",
+      "gene_length"
+    )
+
+    missing_gene_id_cols <- setdiff(required_gene_id_cols, names(gene_ID))
+    if (length(missing_gene_id_cols) > 0) {
+      stop("Cached gene_ID file is missing columns: ",
+           paste(missing_gene_id_cols, collapse = ", "))
+    }
+
+    gene_ID <- gene_ID[gene_ID$ensembl_gene_id %in% genes, ]
+
+  } else {
+    message("No cached annotation found. Trying Ensembl online...")
+
+    library("biomaRt")
+
+    dataset_use <- as.character(host_sp[host_sp$Taxon_ID == args[3], 2])
+    message("Using Ensembl dataset: ", dataset_use)
+
+    ensembl <- NULL
+
+    ensembl <- tryCatch({
+      biomaRt::useEnsembl(
+        biomart = "genes",
+        dataset = dataset_use,
+        mirror = "www"
+      )
+    }, error = function(e) {
+      message("Failed to connect to Ensembl using useEnsembl(): ", conditionMessage(e))
+      NULL
+    })
+
+    if (is.null(ensembl)) {
+      stop("Failed to connect to Ensembl and no local cache was found: ", cache_file)
+    }
+
+    gene_ID <- biomaRt::getBM(
+      filters = "ensembl_gene_id",
+      attributes = c(
+        "external_gene_name",
+        "ensembl_gene_id",
+        "chromosome_name",
+        "start_position",
+        "end_position",
+        "strand",
+        "gene_biotype",
+        "description"
+      ),
+      values = genes,
+      mart = ensembl
+    )
+
+    names(gene_ID)[names(gene_ID) == "external_gene_name"] <- "gene_name"
+
+    gene_len <- read.table(args[1], row.names = 1, sep = "\t", header = TRUE, quote = "")
+    gene_len <- gene_len["Length"]
+    colnames(gene_len) <- "gene_length"
+
+    gene_ID <- merge(gene_ID, gene_len, by.x = "ensembl_gene_id", by.y = "row.names")
+
+    write.csv(gene_ID, cache_file, row.names = FALSE, quote = TRUE)
+    message("Saved gene annotation cache: ", cache_file)
+  }
 }
 # #to add entrezid separately; caution: may bring a issue of "duplicate" ENTREZID!!
 # library(clusterProfiler)
@@ -1254,6 +1308,7 @@ print(do.db)
     library(enrichplot)
     library(ggnewscale)
     library(do.db, character.only = TRUE)
+    do.db.obj <- get(do.db)
     library(ggplot2)
     
     # function to make plots for GSEA results
@@ -1341,14 +1396,14 @@ grep("lwd", ls(), value = TRUE)
 
         # to save plots for all results
         if (nrow(data@result)>30){
-          ridgeplot(data,showCatdatary = nrow(data@result))
+          ridgeplot(data,showCategory = nrow(data@result))
           ggsave(paste0(edb,"/GSEA_",edb0,"_ridgeplots_all.pdf"),height = 0.48*nrow(data@result),limitsize=F)
-          dotplot(data, showCatdatary=nrow(data@result)) + ggtitle("dotplot for GSEA")
+          dotplot(data, showCategory=nrow(data@result)) + ggtitle("dotplot for GSEA")
           ggsave(paste0(edb,"/GSEA_",edb0,"_dotplot_all.pdf"),height = 0.48*nrow(data@result), width = 6,limitsize=F)
-          cnetplot(datax, foldChange=genelist,cex_label_gene = 0.6, showCatdatary = round(nrow(data@result)/6))
+          cnetplot(datax, foldChange=genelist,cex_label_gene = 0.6, showCategory = round(nrow(data@result)/6))
           ggsave(paste0(edb,"/GSEA_",edb0,"_net_all.pdf"),limitsize=F)
 #Codigo original
-          treeplot(datax2,showCatdatary =nrow(data@result),nCluster = round(nrow(data@result)/6))
+          treeplot(datax2,showCategory =nrow(data@result),nCluster = round(nrow(data@result)/6))
 #Codigo modificado 
 #Calcular o número de clusters
 #nCluster <- round(nrow(data@result) / 6)
@@ -1358,27 +1413,405 @@ grep("lwd", ls(), value = TRUE)
 treeplot(datax2, showCategory = nrow(data@result), nCluster = nCluster)
 
           ggsave(paste0(edb,"/GSEA_",edb0,"_tree_all.pdf"),height=0.48*nrow(data@result),limitsize=F)
-          emapplot(datax2,layout="kk",showCatdatary = nrow(data@result))
+          emapplot(datax2,layout="kk",showCategory = nrow(data@result))
           ggsave(paste0(edb,"/GSEA_",edb0,"_map_all.pdf"),scale=nrow(data@result)/12,limitsize=F)
-          heatplot(datax2, foldChange=genelist, howCatdatary = nrow(data@result))
+          heatplot(datax2, foldChange=genelist, showCategory = nrow(data@result))
           ggsave(paste0(edb,"/GSEA_",edb0,"_heat_all.pdf"),height=1+0.3*nrow(data@result),width=0.2*round(max(nchar((data@result$core_enrichment)))/19),limitsize=F)
         }
       }
     }
-    # function for KEGG Pathview plots
-    pathview.p<-function(kk,ko.db,kegg_gene_list,dir){
-      if (nrow(kk@result)==0){
-        write("No enrichment result was found on KEGG.","No_KEGG_enrichment_result.txt")
-      } else {
-        library("pathview")
-        for (g in 1:nrow(kk@result)){
-          pathview(gene.data  = kegg_gene_list,
-                   pathway.id = kk@result[g,1],
-                   species    = ko.db,
-                   limit      = list(gene=max(abs(kegg_gene_list)), cpd=1))
+#### BEGIN FUNCTION: pathview.p ####
+# function for KEGG Pathview plots
+pathview.p <- function(kk, ko.db, kegg_gene_list, dir = NULL) {
+  if (is.null(kk) || nrow(kk@result) == 0) {
+    write("No enrichment result was found on KEGG.", "No_KEGG_enrichment_result.txt")
+    return(invisible(NULL))
+  }
+
+  ko.db <- trimws(as.character(ko.db))
+
+  suppressPackageStartupMessages(library("pathview"))
+
+  patch_pathview_mlf <- function() {
+    old_fun <- pathview::kegg.species.code
+
+    my_kegg_species_code <- function(species = "hsa", na.rm = FALSE, code.only = TRUE) {
+      species_chr <- as.character(species)
+
+      is_mlf <- species_chr %in% c(
+        "mlf",
+        "Myotis lucifugus",
+        "59463"
+      )
+
+      if (all(is_mlf)) {
+        if (code.only) {
+          return(rep("mlf", length(species_chr)))
+        } else {
+          out <- matrix(
+            rep(
+              c(
+                "T07795",
+                "59463",
+                "mlf",
+                "Myotis lucifugus",
+                "Little brown bat",
+                "1",
+                "102426605",
+                "102426605",
+                NA,
+                NA
+              ),
+              length(species_chr)
+            ),
+            nrow = length(species_chr),
+            byrow = TRUE
+          )
+
+          colnames(out) <- c(
+            "ktax.id",
+            "tax.id",
+            "kegg.code",
+            "scientific.name",
+            "common.name",
+            "entrez.gnodes",
+            "kegg.geneid",
+            "ncbi.geneid",
+            "ncbi.proteinid",
+            "uniprot"
+          )
+
+          return(out)
         }
       }
+
+      old_fun(
+        species = species,
+        na.rm = na.rm,
+        code.only = code.only
+      )
     }
+
+    unlockBinding("kegg.species.code", asNamespace("pathview"))
+    assign(
+      "kegg.species.code",
+      my_kegg_species_code,
+      envir = asNamespace("pathview")
+    )
+    lockBinding("kegg.species.code", asNamespace("pathview"))
+
+    message("Pathview patched for Myotis lucifugus / mlf")
+  }
+
+  if (ko.db == "mlf") {
+    patch_pathview_mlf()
+  }
+
+  gene_data <- kegg_gene_list
+  gene_data <- gene_data[!is.na(gene_data)]
+  gene_data <- gene_data[!is.na(names(gene_data))]
+  gene_data <- gene_data[names(gene_data) != ""]
+
+  # Para pathview com gene.idtype = "KEGG",
+  # usar IDs numéricos KEGG/Entrez sem prefixo "mlf:".
+  names(gene_data) <- sub("^.*:", "", names(gene_data))
+
+  for (g in 1:nrow(kk@result)) {
+    pathway_id <- as.character(kk@result[g, 1])
+    pathway_id <- sub("^path:", "", pathway_id)
+    pathway_id <- sub(paste0("^", ko.db), "", pathway_id)
+
+    message("Running pathview for pathway: ", pathway_id, " species: ", ko.db)
+
+    tryCatch({
+      pathview::pathview(
+        gene.data = gene_data,
+        pathway.id = pathway_id,
+        species = ko.db,
+        gene.idtype = "KEGG",
+        limit = list(
+          gene = max(abs(gene_data), na.rm = TRUE),
+          cpd = 1
+        ),
+        kegg.native = TRUE
+      )
+    }, error = function(e) {
+      message(
+        "Pathview failed for pathway ",
+        pathway_id,
+        ": ",
+        conditionMessage(e)
+      )
+
+      write(
+        paste0(
+          "Pathview failed for pathway ",
+          pathway_id,
+          ": ",
+          conditionMessage(e)
+        ),
+        file = paste0("Pathview_failed_", pathway_id, ".txt")
+      )
+    })
+  }
+
+  invisible(NULL)
+}
+#### END FUNCTION: pathview.p ####
+
+#### BEGIN FUNCTION: pathview.modules.p ####
+# Convert KEGG Module IDs such as M00087 into linked KEGG pathway IDs,
+# then run pathview on those pathways.
+pathview.modules.p <- function(kk_module, ko.db, kegg_gene_list, max_modules = 20) {
+  if (is.null(kk_module) || nrow(kk_module@result) == 0) {
+    write(
+      "No KEGG module enrichment result was found.",
+      "No_KEGG_module_enrichment_result.txt"
+    )
+    return(invisible(NULL))
+  }
+
+  ko.db <- trimws(as.character(ko.db))
+
+  suppressPackageStartupMessages(library("KEGGREST"))
+
+  module_ids <- as.character(kk_module@result$ID)
+  module_ids <- module_ids[grepl("^M[0-9]{5}$", module_ids)]
+
+  if (length(module_ids) == 0) {
+    write(
+      "No valid KEGG Module IDs were found in kk_module@result.",
+      "No_valid_KEGG_module_IDs_for_pathview.txt"
+    )
+    return(invisible(NULL))
+  }
+
+  module_ids <- head(unique(module_ids), max_modules)
+
+  module_to_pathway <- list()
+
+  for (mid in module_ids) {
+    message("Resolving KEGG module to pathway: ", mid)
+
+    kg <- tryCatch({
+      KEGGREST::keggGet(mid)
+    }, error = function(e) {
+      message("KEGGREST::keggGet failed for ", mid, ": ", conditionMessage(e))
+      NULL
+    })
+
+    if (is.null(kg) || length(kg) == 0) {
+      next
+    }
+
+    pathways <- kg[[1]]$PATHWAY
+
+    if (is.null(pathways) || length(pathways) == 0) {
+      message("No linked pathways found for module: ", mid)
+      next
+    }
+
+    pw_ids <- names(pathways)
+
+    # Usually returns IDs like "map00071" or similar.
+    # pathview wants the numeric pathway ID, e.g. "00071",
+    # together with species = "mlf".
+    pw_ids <- sub("^[a-z]{2,4}", "", pw_ids)
+    pw_ids <- pw_ids[grepl("^[0-9]{5}$", pw_ids)]
+
+    if (length(pw_ids) > 0) {
+      module_to_pathway[[mid]] <- unique(pw_ids)
+    }
+  }
+
+  if (length(module_to_pathway) == 0) {
+    write(
+      "No KEGG pathways could be resolved from enriched KEGG modules.",
+      "No_pathways_resolved_from_KEGG_modules.txt"
+    )
+    return(invisible(NULL))
+  }
+
+  resolved_table <- data.frame(
+    module_id = rep(names(module_to_pathway), lengths(module_to_pathway)),
+    pathway_id = unlist(module_to_pathway),
+    stringsAsFactors = FALSE
+  )
+
+  write.csv(
+    resolved_table,
+    "KEGG_modules_resolved_to_pathways.csv",
+    row.names = FALSE
+  )
+
+  pathway_ids <- unique(resolved_table$pathway_id)
+
+  message("Pathways resolved from KEGG modules:")
+  print(pathway_ids)
+
+  # Create a minimal object compatible with pathview.p:
+  # pathview.p only needs kk@result and the first column/ID.
+  fake_kk <- kk_module
+  fake_kk@result <- data.frame(
+    ID = pathway_ids,
+    Description = paste0("Pathway resolved from KEGG module: ", pathway_ids),
+    stringsAsFactors = FALSE
+  )
+
+  pathview.p(fake_kk, ko.db, kegg_gene_list)
+
+  invisible(resolved_table)
+}
+#### END FUNCTION: pathview.modules.p ####
+#### BEGIN FUNCTION: gseKEGG.safe ####
+gseKEGG.safe <- function(geneList, ko.db, minGSSize = 8, maxGSSize = 500, pvalueCutoff = 0.05) {
+  ko.db <- trimws(as.character(ko.db))
+
+  geneList <- geneList[!is.na(geneList)]
+  geneList <- geneList[!is.na(names(geneList))]
+  geneList <- geneList[names(geneList) != ""]
+  geneList <- geneList[!duplicated(names(geneList))]
+  geneList <- sort(geneList, decreasing = TRUE)
+
+  message("Trying gseKEGG with keyType = ncbi-geneid")
+
+  kk <- tryCatch({
+    clusterProfiler::gseKEGG(
+      geneList = geneList,
+      organism = ko.db,
+      keyType = "ncbi-geneid",
+      minGSSize = minGSSize,
+      maxGSSize = maxGSSize,
+      pvalueCutoff = pvalueCutoff,
+      verbose = FALSE
+    )
+  }, error = function(e) {
+    message("gseKEGG ncbi-geneid failed: ", conditionMessage(e))
+    NULL
+  })
+
+  if (!is.null(kk) && nrow(kk@result) > 0) {
+    message("gseKEGG ncbi-geneid worked.")
+    return(kk)
+  }
+
+  message("Trying gseKEGG with keyType = kegg")
+
+  kk <- tryCatch({
+    clusterProfiler::gseKEGG(
+      geneList = geneList,
+      organism = ko.db,
+      keyType = "kegg",
+      minGSSize = minGSSize,
+      maxGSSize = maxGSSize,
+      pvalueCutoff = pvalueCutoff,
+      verbose = FALSE
+    )
+  }, error = function(e) {
+    message("gseKEGG kegg failed: ", conditionMessage(e))
+    NULL
+  })
+
+  if (!is.null(kk) && nrow(kk@result) > 0) {
+    message("gseKEGG kegg worked.")
+    return(kk)
+  }
+
+  message("Falling back to KEGGREST::keggLink + clusterProfiler::GSEA")
+
+  suppressPackageStartupMessages(library("KEGGREST"))
+
+  links <- tryCatch({
+    KEGGREST::keggLink("pathway", ko.db)
+  }, error = function(e) {
+    message("KEGGREST::keggLink failed: ", conditionMessage(e))
+    NULL
+  })
+
+  if (is.null(links) || length(links) == 0) {
+    message("No KEGG pathway links found for organism: ", ko.db)
+    return(NULL)
+  }
+
+  df_links <- data.frame(
+    from = names(links),
+    to = unname(links),
+    stringsAsFactors = FALSE
+  )
+
+  if (any(grepl(paste0("^", ko.db, ":"), df_links$from))) {
+    gene_col <- df_links$from
+    path_col <- df_links$to
+  } else {
+    gene_col <- df_links$to
+    path_col <- df_links$from
+  }
+
+  TERM2GENE <- data.frame(
+    term = sub("^path:", "", path_col),
+    gene = sub(paste0("^", ko.db, ":"), "", gene_col),
+    stringsAsFactors = FALSE
+  )
+
+  TERM2GENE <- TERM2GENE[
+    grepl(paste0("^", ko.db, "[0-9]{5}$"), TERM2GENE$term) &
+    TERM2GENE$gene != "",
+  ]
+
+  TERM2GENE <- unique(TERM2GENE)
+
+  overlap <- length(intersect(names(geneList), TERM2GENE$gene))
+
+  message("KEGG TERM2GENE rows: ", nrow(TERM2GENE))
+  message("Unique KEGG pathway genes: ", length(unique(TERM2GENE$gene)))
+  message("geneList genes overlapping KEGG pathways: ", overlap)
+
+  if (overlap == 0) {
+    message("No overlap between geneList and KEGG pathway genes.")
+    return(NULL)
+  }
+
+  path_names <- tryCatch({
+    KEGGREST::keggList("pathway", ko.db)
+  }, error = function(e) {
+    message("KEGGREST::keggList pathway failed: ", conditionMessage(e))
+    NULL
+  })
+
+  if (is.null(path_names) || length(path_names) == 0) {
+    TERM2NAME <- NULL
+  } else {
+    TERM2NAME <- data.frame(
+      term = sub("^path:", "", names(path_names)),
+      name = as.character(path_names),
+      stringsAsFactors = FALSE
+    )
+
+    TERM2NAME$name <- sub(" - .*$", "", TERM2NAME$name)
+  }
+
+  kk <- tryCatch({
+    clusterProfiler::GSEA(
+      geneList = geneList,
+      TERM2GENE = TERM2GENE,
+      TERM2NAME = TERM2NAME,
+      minGSSize = minGSSize,
+      maxGSSize = maxGSSize,
+      pvalueCutoff = pvalueCutoff,
+      verbose = FALSE
+    )
+  }, error = function(e) {
+    message("Manual KEGG pathway GSEA failed: ", conditionMessage(e))
+    NULL
+  })
+
+  if (!is.null(kk)) {
+    message("Manual KEGG pathway GSEA returned terms: ", nrow(kk@result))
+  }
+
+  return(kk)
+}
+#### END FUNCTION: gseKEGG.safe ####
     # function for pathway enrichment by using comparison results between groups
     enrichment <- function(coldata_vs,args1,do.db){
       for (i in 1:nrow(coldata_vs)){
@@ -1389,151 +1822,359 @@ treeplot(datax2, showCategory = nrow(data@result), nCluster = nCluster)
         dir.create("KEGG")
         dir.create("KEGG/Modules")
         # prepare genelist for GSEA
-        df.compare<-read.csv(paste0("host_counts_",group1,"_vs_",group2,".csv"),header = T)
-        df.compare<-df.compare[df.compare$pvalue<0.05,]
-        # feature 1: numeric vector
-        genelist<-df.compare$log2FoldChange
-        # feature 2: named vector
-        names(genelist) = as.character(df.compare$X)
-        # feature 3: decreasing order
-        genelist = sort(genelist, decreasing = TRUE)
+        df.compare <- read.csv(paste0("host_counts_", group1, "_vs_", group2, ".csv"), header = TRUE)
+df.compare <- df.compare[df.compare$pvalue < 0.05, ]
+
+# Ler a tabela anotada geral para converter ENSMLUG -> gene_name
+deg_anno <- read.csv("../host_counts_DEG.csv", header = TRUE)
+
+id_map <- deg_anno[, c("gene_id", "gene_name")]
+id_map <- id_map[!is.na(id_map$gene_name) & id_map$gene_name != "" & id_map$gene_name != "-", ]
+id_map <- id_map[!duplicated(id_map$gene_id), ]
+
+df.compare <- merge(df.compare, id_map, by.x = "X", by.y = "gene_id")
+
+# geneList inicial usando SYMBOL
+genelist_symbol <- df.compare$log2FoldChange
+names(genelist_symbol) <- as.character(df.compare$gene_name)
+
+genelist_symbol <- genelist_symbol[!is.na(genelist_symbol)]
+genelist_symbol <- genelist_symbol[!is.na(names(genelist_symbol))]
+genelist_symbol <- genelist_symbol[names(genelist_symbol) != ""]
+genelist_symbol <- genelist_symbol[names(genelist_symbol) != "-"]
+
+# Remover símbolos duplicados mantendo o maior abs(log2FC)
+ord <- order(abs(genelist_symbol), decreasing = TRUE)
+genelist_symbol <- genelist_symbol[ord]
+genelist_symbol <- genelist_symbol[!duplicated(names(genelist_symbol))]
+
+# Converter SYMBOL -> ENTREZID
+sym2ent <- AnnotationDbi::select(
+  do.db,
+  keys = unique(names(genelist_symbol)),
+  keytype = "SYMBOL",
+  columns = c("SYMBOL", "ENTREZID")
+)
+
+sym2ent <- sym2ent[!is.na(sym2ent$ENTREZID), ]
+sym2ent <- sym2ent[!duplicated(sym2ent$SYMBOL), ]
+
+genelist <- genelist_symbol[sym2ent$SYMBOL]
+names(genelist) <- sym2ent$ENTREZID
+
+genelist <- genelist[!duplicated(names(genelist))]
+genelist <- sort(genelist, decreasing = TRUE)
+
+message("Genes before SYMBOL->ENTREZID mapping: ", length(genelist_symbol))
+message("Genes after SYMBOL->ENTREZID mapping: ", length(genelist))
+message("First geneList IDs for GSEA:")
+print(head(names(genelist), 20))
         
         ## GSEA for GO ##
-        ego <- gseGO(geneList     = genelist,
-                     OrgDb        = do.db,
-                     keyType      = 'ENSEMBL',
-                     ont          = "ALL",
-                     minGSSize    = 10,
-                     maxGSSize    = 500,
-                     pvalueCutoff = 0.05,
-                     verbose      = FALSE)
+ego <- gseGO(geneList     = genelist,
+             OrgDb        = do.db,
+             keyType      = "ENTREZID",
+             ont          = "ALL",
+             minGSSize    = 10,
+             maxGSSize    = 500,
+             pvalueCutoff = 0.05,
+             verbose      = FALSE)
         
         # save the full table of GSEA GO results
         write.csv(ego@result,"GO/GSEA_GO_results.csv")
-        egox <- setReadable(ego, do.db)
+        egox <- setReadable(ego, do.db, keyType = "ENTREZID")
         write.csv(egox@result,"GO/GSEA_GO_results_symbol.csv")
         # draw plots for GO GSEA results
         try(plots4gsea("GO",ego,egox,"GO", genelist, group1, group2))
         
         ## GSEA for KEGG ##
-        # KEGG pathway gene set enrichment analysis
-        ko.db <- host_sp[host_sp$Taxon_ID==args[3],6] # match host taxID with KEGG database
-        
-        # Convert gene IDs for gseKEGG function
-        # Some genes will be lost here because not all IDs will be converted
-        ENS2ENT.ids<-bitr(names(genelist), fromType = "ENSEMBL", toType = "ENTREZID", OrgDb=do.db)
-        # remove duplicate IDS (e.g. one ENSEMBL match with two ENTREZID)
-        dedup_ENS2ENT.ids = ENS2ENT.ids[!duplicated(ENS2ENT.ids[c("ENSEMBL")]),]
-        # Create a new dataframe df4kegg which has only the genes which were successfully ID converted
-        df4kegg = df.compare[df.compare$X %in% dedup_ENS2ENT.ids$ENSEMBL,]
-        # Create a new column in df4kegg with the corresponding ENTREZ IDs
-        df4kegg$Y = dedup_ENS2ENT.ids$ENTREZID
-        # Create a vector of the gene log2FoldChange
-        kegg_gene_list <- df4kegg$log2FoldChange
-        # Name vector with ENTREZ ids
-        names(kegg_gene_list) <- df4kegg$Y
-        # omit any NA values 
-        kegg_gene_list<-na.omit(kegg_gene_list)
-        # sort the list in decreasing order (required for clusterProfiler)
-        kegg_gene_list = sort(kegg_gene_list, decreasing = TRUE)
-        
-        # KEGG pathway gene set enrichment analysis
-        kk.p <- gseKEGG(geneList     = kegg_gene_list,
-#                       organism     = 'rno' ,
-#                       Rattus norvegicus above
-                        organism     = ko.db,
-                        keyType      = 'ncbi-geneid',
-                        minGSSize    = 8,
-                        pvalueCutoff = 0.05,
-                        verbose      = FALSE)
-        # KEGG (Modules) functional enrichment analysis
-        kk.f <- gseMKEGG(geneList = kegg_gene_list,
-                         organism = ko.db,
-                         keyType  = 'ncbi-geneid',
-                         minGSSize = 8,
-                         pvalueCutoff = 0.05)
-        
-        # save the full table of GSEA KEGG results
-        write.csv(kk.p@result,"KEGG/GSEA_KEGG_results.csv")
-        kkx.p <- setReadable(kk.p, do.db, 'ENTREZID')
-        write.csv(kkx.p@result,"KEGG/GSEA_KEGG_results_symbol.csv")
-        write.csv(kk.f@result,"KEGG/Modules/GSEA_KEGG_results.csv")
-        kkx.f <- setReadable(kk.f, do.db, 'ENTREZID')
-        write.csv(kkx.f@result,"KEGG/Modules/GSEA_KEGG_results_symbol.csv")
-        
-        # draw plots for KEGG GSEA results
-        try(plots4gsea("KEGG",kk.p,kkx.p,"KEGG",kegg_gene_list))
-        try(plots4gsea("KEGG/Modules",kk.f,kkx.f,"KEGG",kegg_gene_list))
-        
-        # KEGG pathview plots
-        dir.create("KEGG/Pathview") ; setwd("KEGG/Pathview")
-        try(pathview.p(kk.p,ko.db,kegg_gene_list))
-        setwd(paste0(dirname(args[1]),"/Host_DEG/",group1,"_vs_",group2)) # go back to each comparison folder from Pathview
-        dir.create("KEGG/Modules/Pathview") ; setwd("KEGG/Modules/Pathview")
-        try(pathview.p(kk.f,ko.db,kegg_gene_list))
-        setwd(paste0(dirname(args[1]),"/Host_DEG/",group1,"_vs_",group2)) # go back to each comparison folder from Pathview
+        ko.db <- trimws(as.character(host_sp[as.character(host_sp$Taxon_ID) == as.character(args[3]), 6][1]))
+
+        # Fallback específico para Myotis lucifugus, TaxID 59463
+        # KEGG organism code: mlf
+        if ((is.na(ko.db) || ko.db == "") && as.character(args[3]) == "59463") {
+          ko.db <- "mlf"
+        }
+
+        message("KEGG organism code used: [", ko.db, "]")
+
+        kegg_gene_list <- genelist
+        kegg_gene_list <- na.omit(kegg_gene_list)
+        kegg_gene_list <- sort(kegg_gene_list, decreasing = TRUE)
+
+        message("Number of genes sent to KEGG: ", length(kegg_gene_list))
+        message("First KEGG gene IDs:")
+        print(head(names(kegg_gene_list), 20))
+
+        if (is.na(ko.db) || ko.db == "") {
+          write(
+            "No KEGG organism code found for this host species. KEGG enrichment was skipped.",
+            "KEGG/No_KEGG_organism_code_found.txt"
+          )
+          write(
+            "No KEGG organism code found for this host species. KEGG module enrichment was skipped.",
+            "KEGG/Modules/No_KEGG_organism_code_found.txt"
+          )
+        } else {
+
+          kk.p <- gseKEGG.safe(
+          geneList = kegg_gene_list,
+          ko.db = ko.db,
+          minGSSize = 8,
+          maxGSSize = 500,
+          pvalueCutoff = 0.05
+             )
+
+          kk.f <- tryCatch({
+            gseMKEGG(
+              geneList     = kegg_gene_list,
+              organism     = ko.db,
+              keyType      = "ncbi-geneid",
+              minGSSize    = 8,
+              pvalueCutoff = 0.05
+            )
+          }, error = function(e) {
+            message("KEGG module GSEA failed: ", conditionMessage(e))
+            NULL
+          })
+
+          if (is.null(kk.p)) {
+            write(
+              paste0("KEGG pathway GSEA failed for organism code: ", ko.db),
+              "KEGG/No_KEGG_enrichment_result.txt"
+            )
+          } else {
+            write.csv(kk.p@result, "KEGG/GSEA_KEGG_results.csv")
+
+            kkx.p <- tryCatch({
+              setReadable(kk.p, do.db, keyType = "ENTREZID")
+            }, error = function(e) {
+              message("setReadable failed for KEGG pathways: ", conditionMessage(e))
+              kk.p
+            })
+
+            write.csv(kkx.p@result, "KEGG/GSEA_KEGG_results_symbol.csv")
+
+            try(plots4gsea("KEGG", kk.p, kkx.p, "KEGG", kegg_gene_list, group1, group2), silent = TRUE)
+
+            dir.create("KEGG/Pathview", showWarnings = FALSE, recursive = TRUE)
+            setwd("KEGG/Pathview")
+            try(pathview.p(kk.p, ko.db, kegg_gene_list), silent = TRUE)
+            setwd(paste0(dirname(args[1]), "/Host_DEG/", group1, "_vs_", group2))
+          }
+
+          if (is.null(kk.f)) {
+            write(
+              paste0("KEGG module GSEA failed for organism code: ", ko.db),
+              "KEGG/Modules/No_KEGG_module_enrichment_result.txt"
+            )
+          } else {
+            write.csv(kk.f@result, "KEGG/Modules/GSEA_KEGG_results.csv")
+
+            kkx.f <- tryCatch({
+              setReadable(kk.f, do.db, keyType = "ENTREZID")
+            }, error = function(e) {
+              message("setReadable failed for KEGG modules: ", conditionMessage(e))
+              kk.f
+            })
+
+            write.csv(kkx.f@result, "KEGG/Modules/GSEA_KEGG_results_symbol.csv")
+
+            try(plots4gsea("KEGG/Modules", kk.f, kkx.f, "KEGG", kegg_gene_list, group1, group2), silent = TRUE)
+
+dir.create("KEGG/Modules/Pathview", showWarnings = FALSE, recursive = TRUE)
+setwd("KEGG/Modules/Pathview")
+
+try(
+  pathview.modules.p(
+    kk_module = kk.f,
+    ko.db = ko.db,
+    kegg_gene_list = kegg_gene_list
+  ),
+  silent = TRUE
+)
+
+setwd(paste0(dirname(args[1]), "/Host_DEG/", group1, "_vs_", group2))
+          }
+        }
         
         setwd("../") # go back to the Host_DEG folder
       }
     }
     
     ## run GSEA enrichment analysis ##
-    enrichment(coldata_vs,args[1],do.db)
+    enrichment(coldata_vs,args[1],do.db.obj)
     
     # function for preparing genelist for biological theme comparison - compareCluster
-    BTC <- function(coldata_vs,do.db){
-      genelist.ct<-list()
-      for (i in 1:nrow(coldata_vs)){
-        group1<-coldata_vs$group1[i]
-        group2<-coldata_vs$group2[i]
-        # prepare genelist for enrichment
-        df.btc<-read.csv(paste0(getwd(),"/",group1,"_vs_",group2,"/","host_counts_",group1,"_vs_",group2,".csv"),header = T)
-        # filter DEG
-        flt_up <- df.btc[df.btc$log2FoldChange > 0.5 & df.btc$pvalue < 0.05,]
-        flt_down <- df.btc[df.btc$log2FoldChange < 0.5 & df.btc$pvalue < 0.05,]
-        # up-regulated gene name
-        genelist.u<-flt_up$X
-        # down-regulated gene name
-        genelist.d<-flt_down$X
-        # Some genes will be lost here because not all IDs will be converted
-        ENS2ENT.u<-bitr(genelist.u, fromType = "ENSEMBL", toType = "ENTREZID", OrgDb=do.db)
-        ENS2ENT.d<-bitr(genelist.d, fromType = "ENSEMBL", toType = "ENTREZID", OrgDb=do.db)
-        # remove duplicate IDS (e.g. one ENSEMBL match with two ENTREZID)
-        dedup_ENS2ENT.u = ENS2ENT.u[!duplicated(ENS2ENT.u[c("ENSEMBL")]),]
-        dedup_ENS2ENT.u = dedup_ENS2ENT.u$ENTREZID
-        dedup_ENS2ENT.d = ENS2ENT.d[!duplicated(ENS2ENT.d[c("ENSEMBL")]),]
-        dedup_ENS2ENT.d = dedup_ENS2ENT.d$ENTREZID
-        # make a list
-        genelist.c<-list(dedup_ENS2ENT.u,dedup_ENS2ENT.d)
-        names(genelist.c) <- c(paste0(group1,"_vs_",group2,"_UP"), paste0(group1,"_vs_",group2,"_DOWN"))
-        genelist.ct<-c(genelist.ct,genelist.c)
+BTC <- function(coldata_vs, do.db) {
+  genelist.ct <- list()
+
+  deg_anno <- read.csv("host_counts_DEG.csv", header = TRUE, check.names = FALSE)
+
+  id_map <- deg_anno[, c("gene_id", "gene_name")]
+  id_map <- id_map[
+    !is.na(id_map$gene_id) &
+    !is.na(id_map$gene_name) &
+    id_map$gene_name != "" &
+    id_map$gene_name != "-",
+  ]
+  id_map <- id_map[!duplicated(id_map$gene_id), ]
+
+  for (i in 1:nrow(coldata_vs)) {
+    group1 <- coldata_vs$group1[i]
+    group2 <- coldata_vs$group2[i]
+
+    df.btc <- read.csv(
+      paste0(getwd(), "/", group1, "_vs_", group2, "/host_counts_", group1, "_vs_", group2, ".csv"),
+      header = TRUE
+    )
+
+    flt_up <- df.btc[df.btc$log2FoldChange > 0.5 & df.btc$pvalue < 0.05, ]
+    flt_down <- df.btc[df.btc$log2FoldChange < -0.5 & df.btc$pvalue < 0.05, ]
+
+    convert_ens_to_entrez <- function(x) {
+      if (nrow(x) == 0) {
+        return(character(0))
       }
-      return(genelist.ct)
+
+      x <- merge(x, id_map, by.x = "X", by.y = "gene_id")
+
+      symbols <- unique(x$gene_name)
+      symbols <- symbols[!is.na(symbols) & symbols != "" & symbols != "-"]
+
+      if (length(symbols) == 0) {
+        return(character(0))
+      }
+
+      sym2ent <- AnnotationDbi::select(
+        do.db,
+        keys = symbols,
+        keytype = "SYMBOL",
+        columns = c("SYMBOL", "ENTREZID")
+      )
+
+      sym2ent <- sym2ent[!is.na(sym2ent$ENTREZID), ]
+      sym2ent <- sym2ent[!duplicated(sym2ent$SYMBOL), ]
+
+      unique(sym2ent$ENTREZID)
     }
+
+    dedup_ENT.u <- convert_ens_to_entrez(flt_up)
+    dedup_ENT.d <- convert_ens_to_entrez(flt_down)
+
+    genelist.c <- list(dedup_ENT.u, dedup_ENT.d)
+    names(genelist.c) <- c(
+      paste0(group1, "_vs_", group2, "_UP"),
+      paste0(group1, "_vs_", group2, "_DOWN")
+    )
+
+    genelist.ct <- c(genelist.ct, genelist.c)
+  }
+
+  return(genelist.ct)
+}
     ## run biological theme comparison ##
-    genelist.ct <- BTC(coldata_vs,do.db)
-    # GO enrichment comparison
-    try(cgo <- compareCluster(genelist.ct, fun = enrichGO, OrgDb=do.db))
-    try(cgo <- setReadable(cgo, OrgDb = do.db, keyType="ENTREZID"))
-    if (exists("cgo")==T){
-      dotplot(cgo, showCategory = nrow(cgo@compareClusterResult)) +
-        theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
-      ggsave("biological_theme_comparison_GO.pdf",limitsize=F,height = 0.54*nrow(cgo@compareClusterResult), width = 3*length(unique(cgo@compareClusterResult$Cluster)))
-      ggsave("biological_theme_comparison_GO_net.pdf",
-             plot = cnetplot(cgo,cex_label_gene = 0.6, showCatdatary = round(nrow(cgo@compareClusterResult)/6)),
-             limitsize=F)
-    }
-    # KEGG enrichment comparison
-    try(ck <- compareCluster(genelist.ct, fun = enrichKEGG))
-    try(ck <- setReadable(ck, OrgDb = do.db, keyType="ENTREZID"))
-    if (exists("ck")==T){
-      dotplot(ck, showCategory = nrow(ck@compareClusterResult)) +
-        theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
-      ggsave("biological_theme_comparison_KEGG.pdf",limitsize=F,height = 0.54*nrow(ck@compareClusterResult), width = 3*length(unique(ck@compareClusterResult$Cluster)))
-      ggsave("biological_theme_comparison_KEGG_net.pdf",
-             plot = cnetplot(ck,cex_label_gene = 0.6, showCatdatary = round(nrow(ck@compareClusterResult)/6)),
-             limitsize=F)
-    }
+    genelist.ct <- BTC(coldata_vs,do.db.obj)
+# GO enrichment comparison
+try(cgo <- compareCluster(
+  genelist.ct,
+  fun = enrichGO,
+  OrgDb = do.db.obj,
+  keyType = "ENTREZID"
+))
+
+try(cgo <- setReadable(
+  cgo,
+  OrgDb = do.db.obj,
+  keyType = "ENTREZID"
+))
+
+if (exists("cgo") == TRUE) {
+  dotplot(cgo, showCategory = nrow(cgo@compareClusterResult)) +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+
+  ggsave(
+    "biological_theme_comparison_GO.pdf",
+    limitsize = FALSE,
+    height = 0.54 * nrow(cgo@compareClusterResult),
+    width = 3 * length(unique(cgo@compareClusterResult$Cluster))
+  )
+
+  ggsave(
+    "biological_theme_comparison_GO_net.pdf",
+    plot = cnetplot(cgo, cex_label_gene = 0.6, showCategory = round(nrow(cgo@compareClusterResult) / 6)),
+    limitsize = FALSE
+  )
+}
+
+#### BEGIN BLOCK: KEGG enrichment comparison ####
+# KEGG enrichment comparison
+
+ko.db <- trimws(as.character(
+  host_sp[as.character(host_sp$Taxon_ID) == as.character(args[3]), 6][1]
+))
+
+if ((is.na(ko.db) || ko.db == "") && as.character(args[3]) == "59463") {
+  ko.db <- "mlf"
+}
+
+message("KEGG compareCluster organism code used: [", ko.db, "]")
+
+ck <- tryCatch({
+  compareCluster(
+    genelist.ct,
+    fun = enrichKEGG,
+    organism = ko.db,
+    keyType = "ncbi-geneid"
+  )
+}, error = function(e) {
+  message("compareCluster KEGG failed: ", conditionMessage(e))
+  NULL
+})
+
+if (!is.null(ck) && nrow(ck@compareClusterResult) > 0) {
+
+  ck <- tryCatch({
+    setReadable(
+      ck,
+      OrgDb = do.db.obj,
+      keyType = "ENTREZID"
+    )
+  }, error = function(e) {
+    message("setReadable KEGG compareCluster failed: ", conditionMessage(e))
+    ck
+  })
+
+  dotplot(ck, showCategory = nrow(ck@compareClusterResult)) +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+
+  ggsave(
+    "biological_theme_comparison_KEGG.pdf",
+    limitsize = FALSE,
+    height = 0.54 * nrow(ck@compareClusterResult),
+    width = 3 * length(unique(ck@compareClusterResult$Cluster))
+  )
+
+  ggsave(
+    "biological_theme_comparison_KEGG_net.pdf",
+    plot = cnetplot(
+      ck,
+      cex_label_gene = 0.6,
+      showCategory = round(nrow(ck@compareClusterResult) / 6)
+    ),
+    limitsize = FALSE
+  )
+
+} else {
+  write(
+    paste0(
+      "No KEGG enrichment found by compareCluster, or KEGG compareCluster failed. ",
+      "Organism code used: ", ko.db
+    ),
+    "No_KEGG_compareCluster_result.txt"
+  )
+}
+#### END BLOCK: KEGG enrichment comparison ####
   }
 }
 

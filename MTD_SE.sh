@@ -298,6 +298,13 @@ echo "${g}MTD running  progress:"
 echo '>>>>>>              [30%]'
 
 echo "Decontamination step${w}"
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate MTD
+
+export PYTHONNOUSERSITE=1
+unset PYTHONPATH
+unset PYTHONHOME
+
 conta_file=$MTDIR/conta_ls.txt
 if test -f "$conta_file"; then
     tls=$(awk -F '\t' '{print $2}' $conta_file)
@@ -392,7 +399,8 @@ python $MTDIR/Tools/export2graphlan/export2graphlan.py \
     -a annot.txt -t tree.txt \
     --discard_otus --most_abundant 50 \
     --annotations 2,3,4,5,6 \
-    --external_annotations 7 --internal_levels --max_clade_size 300
+    --external_annotations 7 \
+    --max_clade_size 300
 
 conda deactivate
 conda activate MTD
@@ -585,13 +593,322 @@ conda activate R412
 cd $outputdr
 echo "${r}"
 echo "before DEG_Anno_Plot.R "
-read -p "PRESS ENTER"
+#read -p "PRESS ENTER"
 echo "${w}"
 echo $MTDIR
 echo $outputdr
 echo $inputdr
 echo $hostid 
 echo $metadata
+#### BEGIN FUNCTION: update_host_gene_cache_online ####
+update_host_gene_cache_online() {
+    local outputdr="$1"
+    local hostid="$2"
+    local mtdir="$3"
+
+    local host_counts="${outputdr}/host_counts.txt"
+    local host_species="${mtdir}/HostSpecies.csv"
+    local cache_dir="${outputdr}/Host_DEG"
+    local cache_main="${cache_dir}/gene_ID_cache.csv"
+    local cache_online="${cache_dir}/gene_ID_cache_online.csv"
+    local cache_backup="${cache_dir}/gene_ID_cache_backup_before_online_$(date +%Y%m%d_%H%M%S).csv"
+    local biomart_script="${mtdir}/test_biomart_connection.R"
+
+    # Usa o Rscript do ambiente ativo.
+    # Neste ponto do seu pipeline, o ambiente esperado é R412.
+    local biomart_rscript
+    biomart_rscript="$(command -v Rscript)"
+
+    echo "------------------------------------------------------------"
+    echo "Trying to update host gene annotation cache from BioMart"
+    echo "BioMart Rscript: $biomart_rscript"
+    echo "Host counts: $host_counts"
+    echo "HostSpecies: $host_species"
+    echo "TaxID: $hostid"
+    echo "Main cache: $cache_main"
+    echo "Online cache: $cache_online"
+    echo "------------------------------------------------------------"
+
+    if [[ -z "$biomart_rscript" || ! -x "$biomart_rscript" ]]; then
+        echo "[WARN] Could not find a valid Rscript in PATH."
+        echo "[WARN] Skipping online BioMart cache update."
+        return 0
+    fi
+
+    "$biomart_rscript" -e 'cat("[INFO] R:", R.version.string, "\n"); cat("[INFO] biomaRt:", as.character(packageVersion("biomaRt")), "\n")' || {
+        echo "[WARN] Could not check R/biomaRt version."
+    }
+
+    mkdir -p "$cache_dir"
+
+    if [[ ! -s "$host_counts" ]]; then
+        echo "[WARN] host_counts.txt not found: $host_counts"
+        echo "[WARN] Cannot update BioMart cache. Continuing with existing/local cache if available."
+        return 0
+    fi
+
+    if [[ ! -s "$host_species" ]]; then
+        echo "[WARN] HostSpecies.csv not found: $host_species"
+        echo "[WARN] Cannot update BioMart cache. Continuing with existing/local cache if available."
+        return 0
+    fi
+
+    if [[ ! -s "$biomart_script" ]]; then
+        echo "[WARN] BioMart updater script not found: $biomart_script"
+        echo "[WARN] Cannot update BioMart cache. Continuing with existing/local cache if available."
+        return 0
+    fi
+
+    rm -f "$cache_online"
+
+    echo "[INFO] Trying to fetch fresh BioMart annotations..."
+
+    "$biomart_rscript" "$biomart_script" \
+        "$host_counts" \
+        "$host_species" \
+        "$hostid" \
+        "$cache_online"
+
+    local biomart_status=$?
+
+    if [[ "$biomart_status" -ne 0 || ! -s "$cache_online" ]]; then
+        echo "[WARN] Online BioMart cache update failed."
+        echo "[WARN] Keeping existing/local gene_ID_cache.csv if available."
+
+        if [[ -s "$cache_main" ]]; then
+            echo "[OK] Existing cache found: $cache_main"
+        else
+            echo "[WARN] No existing cache found. The local fallback will try host_counts_DEG.csv."
+        fi
+
+        return 0
+    fi
+
+    echo "[INFO] Validating online cache coverage..."
+
+    "$biomart_rscript" - <<RS
+host_counts <- "$host_counts"
+cache_online <- "$cache_online"
+
+cts <- read.table(
+  host_counts,
+  row.names = 1,
+  sep = "\t",
+  header = TRUE,
+  quote = "",
+  check.names = FALSE
+)
+
+cts <- cts[, -c(1:5), drop = FALSE]
+cts <- cts[rowSums(cts[-1]) > 0, , drop = FALSE]
+
+genes <- rownames(cts)
+
+gene_ID <- read.csv(cache_online, header = TRUE, check.names = FALSE)
+
+required <- c(
+  "gene_name",
+  "ensembl_gene_id",
+  "chromosome_name",
+  "start_position",
+  "end_position",
+  "strand",
+  "gene_biotype",
+  "description",
+  "gene_length"
+)
+
+missing <- setdiff(required, names(gene_ID))
+
+if (length(missing) > 0) {
+  stop("Online cache is missing columns: ", paste(missing, collapse = ", "))
+}
+
+matched <- gene_ID[gene_ID\$ensembl_gene_id %in% genes, ]
+
+coverage <- 100 * nrow(matched) / length(genes)
+
+cat("[INFO] Genes in host_counts:", length(genes), "\\n")
+cat("[INFO] Genes in online cache:", nrow(gene_ID), "\\n")
+cat("[INFO] Genes matched:", nrow(matched), "\\n")
+cat("[INFO] Coverage:", round(coverage, 2), "%\\n")
+
+if (coverage < 90) {
+  stop("Online cache coverage is below 90%. Refusing to replace main cache.")
+}
+
+cat("[OK] Online cache is valid.\\n")
+RS
+
+    local validate_status=$?
+
+    if [[ "$validate_status" -ne 0 ]]; then
+        echo "[WARN] Online cache validation failed."
+        echo "[WARN] Keeping existing/local cache if available."
+        return 0
+    fi
+
+    if [[ -s "$cache_main" ]]; then
+        echo "[INFO] Backing up current main cache:"
+        echo "       $cache_backup"
+        cp "$cache_main" "$cache_backup"
+    fi
+
+    cp "$cache_online" "$cache_main"
+
+    echo "[OK] Main cache updated from online BioMart:"
+    echo "     $cache_main"
+
+    return 0
+}
+#### END FUNCTION: update_host_gene_cache_online ####
+
+
+#### BEGIN FUNCTION: prepare_gene_id_cache ####
+prepare_gene_id_cache() {
+    local outputdr="$1"
+
+    local cache_file="${outputdr}/Host_DEG/gene_ID_cache.csv"
+    local deg_file="${outputdr}/Host_DEG/host_counts_DEG.csv"
+
+    local rscript_bin
+    rscript_bin="$(command -v Rscript)"
+
+    echo "------------------------------------------------------------"
+    echo "Checking local host gene annotation cache"
+    echo "Rscript: $rscript_bin"
+    echo "Cache file: $cache_file"
+    echo "Source DEG file: $deg_file"
+    echo "------------------------------------------------------------"
+
+    if [[ -z "$rscript_bin" || ! -x "$rscript_bin" ]]; then
+        echo "[WARN] Could not find a valid Rscript in PATH."
+        echo "[WARN] Cannot validate/create local gene_ID_cache.csv."
+        return 0
+    fi
+
+    mkdir -p "$(dirname "$cache_file")"
+
+    if [[ -s "$cache_file" ]]; then
+        echo "[INFO] gene_ID_cache.csv already exists. Validating..."
+
+        "$rscript_bin" - <<RS
+cache_file <- "$cache_file"
+
+ok <- TRUE
+
+tryCatch({
+  gene_ID <- read.csv(cache_file, header = TRUE, check.names = FALSE)
+
+  required <- c(
+    "gene_name",
+    "ensembl_gene_id",
+    "chromosome_name",
+    "start_position",
+    "end_position",
+    "strand",
+    "gene_biotype",
+    "description",
+    "gene_length"
+  )
+
+  missing <- setdiff(required, names(gene_ID))
+
+  if (length(missing) > 0) {
+    cat("[WARN] Cache is incomplete. Missing columns:", paste(missing, collapse = ", "), "\\n")
+    ok <- FALSE
+  } else {
+    cat("[OK] Cache is valid. Genes:", nrow(gene_ID), "\\n")
+  }
+}, error = function(e) {
+  cat("[WARN] Cache exists but could not be read:", conditionMessage(e), "\\n")
+  ok <<- FALSE
+})
+
+if (!ok) {
+  quit(status = 1)
+}
+RS
+
+        local cache_status=$?
+
+        if [[ "$cache_status" -eq 0 ]]; then
+            echo "[OK] Existing cache passed validation."
+            return 0
+        else
+            echo "[WARN] Existing cache is invalid. Removing it and trying local rebuild."
+            rm -f "$cache_file"
+        fi
+    fi
+
+    if [[ ! -s "$deg_file" ]]; then
+        echo "[WARN] Cannot create local cache because host_counts_DEG.csv does not exist yet."
+        echo "[WARN] DEG_Anno_Plot.R may try Ensembl online if no cache is available."
+        return 0
+    fi
+
+    echo "[INFO] Creating gene_ID_cache.csv from existing host_counts_DEG.csv..."
+
+    "$rscript_bin" - <<RS
+deg_file <- "$deg_file"
+cache_file <- "$cache_file"
+
+deg <- read.csv(deg_file, header = TRUE, check.names = FALSE)
+
+required <- c(
+  "gene_name",
+  "gene_id",
+  "chromosome_name",
+  "start_position",
+  "end_position",
+  "strand",
+  "gene_biotype",
+  "description",
+  "gene_length"
+)
+
+missing <- setdiff(required, names(deg))
+
+if (length(missing) > 0) {
+  stop("Cannot create cache. Missing columns in host_counts_DEG.csv: ",
+       paste(missing, collapse = ", "))
+}
+
+gene_ID <- deg[, required]
+
+names(gene_ID)[names(gene_ID) == "gene_id"] <- "ensembl_gene_id"
+
+gene_ID <- gene_ID[!is.na(gene_ID\$ensembl_gene_id), ]
+gene_ID <- gene_ID[!duplicated(gene_ID\$ensembl_gene_id), ]
+
+write.csv(
+  gene_ID,
+  cache_file,
+  row.names = FALSE,
+  quote = TRUE
+)
+
+cat("[OK] Cache created successfully:", cache_file, "\\n")
+cat("[OK] Genes:", nrow(gene_ID), "\\n")
+RS
+
+    local create_status=$?
+
+    if [[ "$create_status" -ne 0 ]]; then
+        echo "[WARN] Failed to create local gene_ID_cache.csv."
+        echo "[WARN] DEG_Anno_Plot.R may try Ensembl online or fail if no cache exists."
+        return 0
+    fi
+
+    echo "[OK] Local gene_ID_cache.csv is ready."
+    return 0
+}
+#### END FUNCTION: prepare_gene_id_cache ####
+
+#### BEGIN CALL: host gene annotation cache update ####
+update_host_gene_cache_online "$outputdr" "$hostid" "$MTDIR" || true
+prepare_gene_id_cache "$outputdr"
+#### END CALL: host gene annotation cache update ####
 
 Rscript $MTDIR/DEG_Anno_Plot.R $outputdr/host_counts.txt $inputdr/samplesheet.csv $hostid $MTDIR/HostSpecies.csv $metadata
 #Aqui o arquivo definido pela variavel $metadata pode causar erros na analise DE, principalemnte se tiver grupos com apenas 1 fator, melhor rodar sem o $metadata e usar apenas do samplessheet.csv

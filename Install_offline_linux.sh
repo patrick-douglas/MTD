@@ -516,7 +516,7 @@ conda clean --packages --tarballs -y
 conda config --set channel_priority strict
 conda env create -f $dir/Installation/R412.yml
 conda activate R412
-$dir/update_fix/Install.R.packages.R412_optimized.sh.sh
+$dir/update_fix/Install.R.packages.R412_optimized.sh
 Rscript -e 'install.packages("https://bioconductor.org/packages/3.19/bioc/src/contrib/UCSC.utils_1.0.0.tar.gz", repos=NULL, type="source", dependencies=FALSE); library(UCSC.utils); packageVersion("UCSC.utils")'
 $dir/update_fix/check_R_pkg.R412.sh
 conda deactivate
