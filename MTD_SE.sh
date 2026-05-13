@@ -6,6 +6,25 @@ g=$(tput setaf 2)
 y=$(tput setaf 3) 
 p=$(tput setaf 5) 
 echo "${w}"
+die() {
+    echo "${r}[ERROR] $*${w}" >&2
+    exit 1
+}
+
+require_file() {
+    local f="$1"
+    local label="${2:-file}"
+
+    if [[ ! -s "$f" ]]; then
+        echo "${r}[MISSING] $label: $f${w}" >&2
+        exit 1
+    fi
+}
+
+run_cmd() {
+    echo "${g}[RUN]${w} $*"
+    "$@" || die "Command failed: $*"
+}
 # default settings
 pdm="spearman" # method in HALLA
 length=35 # read length trimming by fastp
@@ -262,37 +281,177 @@ Skipping trimming with fastp step..."
     cp $CUSTOM_PATH/* .
     ;;
 esac
-
 #$MTDIR/MTD_scripts/data_trimming.sh 
 
 echo "${g}MTD running  progress:"
 echo '>>>>                [20%]'
 
+# Novo DB host com genoma de Carollia perspicillata
+#DB_host="/home/me/MTD/kraken2DB_host_carollia_mCarPer1.2"
+
 echo "Reads classification by kraken2; 1st step for host ${w}"
-for i in $lsn; do # store input sample name in i; eg. DJ01
-    kraken2 --db $DB_host --use-names \
-        --report Report_host_$i.txt \
-        --threads $threads \
+echo "Host DB: $DB_host"
+
+if [[ ! -d "$DB_host" ]]; then
+    echo "[ERROR] Host Kraken2 DB folder not found:"
+    echo "$DB_host"
+    exit 1
+fi
+
+if [[ ! -s "$DB_host/hash.k2d" || ! -s "$DB_host/opts.k2d" || ! -s "$DB_host/taxo.k2d" ]]; then
+    echo "[ERROR] Host Kraken2 DB appears incomplete."
+    echo "Expected files:"
+    echo "  $DB_host/hash.k2d"
+    echo "  $DB_host/opts.k2d"
+    echo "  $DB_host/taxo.k2d"
+    exit 1
+fi
+
+summary_file="kraken_host_summary.tsv"
+echo -e "sample\thost_classified_reads\thost_classified_pct\thost_unclassified_reads\thost_unclassified_pct" > "$summary_file"
+
+# Threshold para marcar amostras com baixa classificação como host
+HOST_LOW_WARN=50
+
+for i in $lsn; do
+    echo "============================================================"
+    echo "[HOST] Sample: $i"
+    echo "Input: Trimmed_${i}.fq.gz"
+    echo "============================================================"
+
+    if [[ ! -s "Trimmed_${i}.fq.gz" ]]; then
+        echo "[ERROR] Missing input file:"
+        echo "Trimmed_${i}.fq.gz"
+        exit 1
+    fi
+
+    kraken2 --db "$DB_host" --use-names \
+        --report "Report_host_${i}.txt" \
+        --output "Report_host_${i}.kraken" \
+        --threads "$threads" \
         --gzip-compressed \
-        --classified-out ${i}_host.fq \
-        --unclassified-out ${i}_non-host_raw.fq \
-        Trimmed_${i}.fq.gz \
-        > Report_host_$i.kraken
+        --classified-out "${i}_host.fq" \
+        --unclassified-out "${i}_non-host_raw.fq" \
+        "Trimmed_${i}.fq.gz"
+
+    report="Report_host_${i}.txt"
+
+    host_unclassified_pct=$(awk '$4=="U"{print $1; exit}' "$report")
+    host_unclassified_reads=$(awk '$4=="U"{print $2; exit}' "$report")
+
+    host_classified_pct=$(awk '$4=="R" && $5==1{print $1; exit}' "$report")
+    host_classified_reads=$(awk '$4=="R" && $5==1{print $2; exit}' "$report")
+
+    # Fallback caso a linha root não apareça por algum motivo
+    if [[ -z "$host_classified_pct" ]]; then
+        host_classified_pct=$(awk -v u="$host_unclassified_pct" 'BEGIN{printf "%.2f", 100-u}')
+    fi
+
+    if [[ -z "$host_classified_reads" ]]; then
+        host_classified_reads="NA"
+    fi
+
+    echo
+    echo "[RESULT] Sample: $i"
+    echo "  Classified as host:   ${host_classified_pct}%  (${host_classified_reads} reads)"
+    echo "  Unclassified:         ${host_unclassified_pct}%  (${host_unclassified_reads} reads)"
+
+    echo -e "${i}\t${host_classified_reads}\t${host_classified_pct}\t${host_unclassified_reads}\t${host_unclassified_pct}" >> "$summary_file"
+
+    echo
+    echo "[HOST] Main taxa with >=1%:"
+    awk '
+        $4!="U" && !($4=="R" && $5==1) && $1 >= 1 {
+            name=$6
+            for (j=7; j<=NF; j++) name=name" "$j
+            printf "    %7s%%  %12s reads  rank=%-4s taxid=%-10s %s\n", $1, $2, $4, $5, name
+        }
+    ' "$report" | head -n 20
+
+    # Warning para amostras com pouca classificação como host
+    if awk -v p="$host_classified_pct" -v t="$HOST_LOW_WARN" 'BEGIN{exit !(p < t)}'; then
+        echo
+        echo "  [WARNING] Low host classification for sample $i"
+        echo "  Host classified: ${host_classified_pct}%"
+        echo "  This sample may contain more microbial reads, contamination, or lower host RNA content."
+    fi
+
+    echo
 done
+
+echo "============================================================"
+echo "[OK] Host Kraken2 summary saved to:"
+echo "$summary_file"
+echo "============================================================"
+column -t "$summary_file"
 
 echo "${g}MTD running  progress:"
 echo '>>>>>               [25%]'
 
 echo "Reads classification by kraken2; 2nd step for non-host reads ${w}"
-for i in $lsn; do # store input sample name in i; eg. DJ01
-    kraken2 --db $DB_micro --use-names \
-        --report Report_non-host.raw_$i.txt \
-        --threads $threads \
-        --classified-out ${i}_raw_cseqs.fq \
-        --unclassified-out ${i}_raw_ucseqs.fq \
-        ${i}_non-host_raw.fq \
-        > Report_non-host_raw_$i.kraken
+
+summary_file="kraken_nonhost_raw_summary.tsv"
+echo -e "sample\tmicro_classified_reads\tmicro_classified_pct\tmicro_unclassified_reads\tmicro_unclassified_pct" > "$summary_file"
+
+for i in $lsn; do
+    echo "============================================================"
+    echo "[MICRO RAW] Sample: $i"
+    echo "Input: ${i}_non-host_raw.fq"
+    echo "============================================================"
+
+    kraken2 --db "$DB_micro" --use-names \
+        --report "Report_non-host.raw_${i}.txt" \
+        --output "Report_non-host_raw_${i}.kraken" \
+        --threads "$threads" \
+        --classified-out "${i}_raw_cseqs.fq" \
+        --unclassified-out "${i}_raw_ucseqs.fq" \
+        "${i}_non-host_raw.fq"
+
+    report="Report_non-host.raw_${i}.txt"
+
+    micro_unclassified_pct=$(awk '$4=="U"{print $1; exit}' "$report")
+    micro_unclassified_reads=$(awk '$4=="U"{print $2; exit}' "$report")
+
+    micro_classified_pct=$(awk '$4=="R" && $5==1{print $1; exit}' "$report")
+    micro_classified_reads=$(awk '$4=="R" && $5==1{print $2; exit}' "$report")
+
+    # Fallback caso a linha root não apareça por algum motivo
+    if [[ -z "$micro_classified_pct" ]]; then
+        micro_classified_pct=$(awk -v u="$micro_unclassified_pct" 'BEGIN{printf "%.2f", 100-u}')
+    fi
+
+    if [[ -z "$micro_classified_reads" ]]; then
+        micro_classified_reads="NA"
+    fi
+
+    echo
+    echo "[RESULT] Sample: $i"
+    echo "  Classified in DB_micro:   ${micro_classified_pct}%  (${micro_classified_reads} reads)"
+    echo "  Unclassified in DB_micro: ${micro_unclassified_pct}%  (${micro_unclassified_reads} reads)"
+
+    echo -e "${i}\t${micro_classified_reads}\t${micro_classified_pct}\t${micro_unclassified_reads}\t${micro_unclassified_pct}" >> "$summary_file"
+
+    # Marca amostras estranhas com classificação microbiana alta
+    if awk -v p="$micro_classified_pct" 'BEGIN{exit !(p >= 20)}'; then
+        echo "  [WARNING] High DB_micro classification for sample $i"
+        echo "  Top taxa with >=1% in report:"
+        awk '
+            $4!="U" && !($4=="R" && $5==1) && $1 >= 1 {
+                name=$6
+                for (j=7; j<=NF; j++) name=name" "$j
+                printf "    %7s%%  %12s reads  rank=%-4s taxid=%-10s %s\n", $1, $2, $4, $5, name
+            }
+        ' "$report" | head -n 20
+    fi
+
+    echo
 done
+
+echo "============================================================"
+echo "[OK] Non-host raw Kraken2 summary saved to:"
+echo "$summary_file"
+echo "============================================================"
+column -t "$summary_file"
 
 echo "${g}MTD running  progress:"
 echo '>>>>>>              [30%]'
@@ -600,111 +759,33 @@ echo $outputdr
 echo $inputdr
 echo $hostid 
 echo $metadata
-#### BEGIN FUNCTION: update_host_gene_cache_online ####
-update_host_gene_cache_online() {
+#### BEGIN FUNCTION: prepare_gene_id_cache_from_gtf ####
+prepare_gene_id_cache_from_gtf() {
     local outputdr="$1"
-    local hostid="$2"
-    local mtdir="$3"
+    local gtf_file="$2"
 
-    local host_counts="${outputdr}/host_counts.txt"
-    local host_species="${mtdir}/HostSpecies.csv"
     local cache_dir="${outputdr}/Host_DEG"
-    local cache_main="${cache_dir}/gene_ID_cache.csv"
-    local cache_online="${cache_dir}/gene_ID_cache_online.csv"
-    local cache_backup="${cache_dir}/gene_ID_cache_backup_before_online_$(date +%Y%m%d_%H%M%S).csv"
-    local biomart_script="${mtdir}/test_biomart_connection.R"
+    local cache_file="${cache_dir}/gene_ID_cache.csv"
 
-    # Usa o Rscript do ambiente ativo.
-    # Neste ponto do seu pipeline, o ambiente esperado é R412.
-    local biomart_rscript
-    biomart_rscript="$(command -v Rscript)"
+    local rscript_bin
+    rscript_bin="$(command -v Rscript)"
 
     echo "------------------------------------------------------------"
-    echo "Trying to update host gene annotation cache from BioMart"
-    echo "BioMart Rscript: $biomart_rscript"
-    echo "Host counts: $host_counts"
-    echo "HostSpecies: $host_species"
-    echo "TaxID: $hostid"
-    echo "Main cache: $cache_main"
-    echo "Online cache: $cache_online"
+    echo "Preparing offline host gene annotation cache from GTF"
+    echo "Rscript: $rscript_bin"
+    echo "GTF: $gtf_file"
+    echo "Cache: $cache_file"
     echo "------------------------------------------------------------"
-
-    if [[ -z "$biomart_rscript" || ! -x "$biomart_rscript" ]]; then
-        echo "[WARN] Could not find a valid Rscript in PATH."
-        echo "[WARN] Skipping online BioMart cache update."
-        return 0
-    fi
-
-    "$biomart_rscript" -e 'cat("[INFO] R:", R.version.string, "\n"); cat("[INFO] biomaRt:", as.character(packageVersion("biomaRt")), "\n")' || {
-        echo "[WARN] Could not check R/biomaRt version."
-    }
 
     mkdir -p "$cache_dir"
 
-    if [[ ! -s "$host_counts" ]]; then
-        echo "[WARN] host_counts.txt not found: $host_counts"
-        echo "[WARN] Cannot update BioMart cache. Continuing with existing/local cache if available."
-        return 0
-    fi
+    if [[ -s "$cache_file" ]]; then
+        echo "[INFO] Existing gene_ID_cache.csv found. Validating..."
 
-    if [[ ! -s "$host_species" ]]; then
-        echo "[WARN] HostSpecies.csv not found: $host_species"
-        echo "[WARN] Cannot update BioMart cache. Continuing with existing/local cache if available."
-        return 0
-    fi
+        "$rscript_bin" - <<RS
+cache_file <- "$cache_file"
 
-    if [[ ! -s "$biomart_script" ]]; then
-        echo "[WARN] BioMart updater script not found: $biomart_script"
-        echo "[WARN] Cannot update BioMart cache. Continuing with existing/local cache if available."
-        return 0
-    fi
-
-    rm -f "$cache_online"
-
-    echo "[INFO] Trying to fetch fresh BioMart annotations..."
-
-    "$biomart_rscript" "$biomart_script" \
-        "$host_counts" \
-        "$host_species" \
-        "$hostid" \
-        "$cache_online"
-
-    local biomart_status=$?
-
-    if [[ "$biomart_status" -ne 0 || ! -s "$cache_online" ]]; then
-        echo "[WARN] Online BioMart cache update failed."
-        echo "[WARN] Keeping existing/local gene_ID_cache.csv if available."
-
-        if [[ -s "$cache_main" ]]; then
-            echo "[OK] Existing cache found: $cache_main"
-        else
-            echo "[WARN] No existing cache found. The local fallback will try host_counts_DEG.csv."
-        fi
-
-        return 0
-    fi
-
-    echo "[INFO] Validating online cache coverage..."
-
-    "$biomart_rscript" - <<RS
-host_counts <- "$host_counts"
-cache_online <- "$cache_online"
-
-cts <- read.table(
-  host_counts,
-  row.names = 1,
-  sep = "\t",
-  header = TRUE,
-  quote = "",
-  check.names = FALSE
-)
-
-cts <- cts[, -c(1:5), drop = FALSE]
-cts <- cts[rowSums(cts[-1]) > 0, , drop = FALSE]
-
-genes <- rownames(cts)
-
-gene_ID <- read.csv(cache_online, header = TRUE, check.names = FALSE)
+gene_ID <- read.csv(cache_file, header = TRUE, check.names = FALSE)
 
 required <- c(
   "gene_name",
@@ -721,207 +802,219 @@ required <- c(
 missing <- setdiff(required, names(gene_ID))
 
 if (length(missing) > 0) {
-  stop("Online cache is missing columns: ", paste(missing, collapse = ", "))
+  stop("Cache is missing columns: ", paste(missing, collapse = ", "))
 }
 
-matched <- gene_ID[gene_ID\$ensembl_gene_id %in% genes, ]
-
-coverage <- 100 * nrow(matched) / length(genes)
-
-cat("[INFO] Genes in host_counts:", length(genes), "\\n")
-cat("[INFO] Genes in online cache:", nrow(gene_ID), "\\n")
-cat("[INFO] Genes matched:", nrow(matched), "\\n")
-cat("[INFO] Coverage:", round(coverage, 2), "%\\n")
-
-if (coverage < 90) {
-  stop("Online cache coverage is below 90%. Refusing to replace main cache.")
+if (nrow(gene_ID) == 0) {
+  stop("Cache has zero rows.")
 }
 
-cat("[OK] Online cache is valid.\\n")
+cat("[OK] Existing cache is valid. Genes:", nrow(gene_ID), "\\n")
 RS
 
-    local validate_status=$?
-
-    if [[ "$validate_status" -ne 0 ]]; then
-        echo "[WARN] Online cache validation failed."
-        echo "[WARN] Keeping existing/local cache if available."
-        return 0
-    fi
-
-    if [[ -s "$cache_main" ]]; then
-        echo "[INFO] Backing up current main cache:"
-        echo "       $cache_backup"
-        cp "$cache_main" "$cache_backup"
-    fi
-
-    cp "$cache_online" "$cache_main"
-
-    echo "[OK] Main cache updated from online BioMart:"
-    echo "     $cache_main"
-
-    return 0
-}
-#### END FUNCTION: update_host_gene_cache_online ####
-
-
-#### BEGIN FUNCTION: prepare_gene_id_cache ####
-prepare_gene_id_cache() {
-    local outputdr="$1"
-
-    local cache_file="${outputdr}/Host_DEG/gene_ID_cache.csv"
-    local deg_file="${outputdr}/Host_DEG/host_counts_DEG.csv"
-
-    local rscript_bin
-    rscript_bin="$(command -v Rscript)"
-
-    echo "------------------------------------------------------------"
-    echo "Checking local host gene annotation cache"
-    echo "Rscript: $rscript_bin"
-    echo "Cache file: $cache_file"
-    echo "Source DEG file: $deg_file"
-    echo "------------------------------------------------------------"
-
-    if [[ -z "$rscript_bin" || ! -x "$rscript_bin" ]]; then
-        echo "[WARN] Could not find a valid Rscript in PATH."
-        echo "[WARN] Cannot validate/create local gene_ID_cache.csv."
-        return 0
-    fi
-
-    mkdir -p "$(dirname "$cache_file")"
-
-    if [[ -s "$cache_file" ]]; then
-        echo "[INFO] gene_ID_cache.csv already exists. Validating..."
-
-        "$rscript_bin" - <<RS
-cache_file <- "$cache_file"
-
-ok <- TRUE
-
-tryCatch({
-  gene_ID <- read.csv(cache_file, header = TRUE, check.names = FALSE)
-
-  required <- c(
-    "gene_name",
-    "ensembl_gene_id",
-    "chromosome_name",
-    "start_position",
-    "end_position",
-    "strand",
-    "gene_biotype",
-    "description",
-    "gene_length"
-  )
-
-  missing <- setdiff(required, names(gene_ID))
-
-  if (length(missing) > 0) {
-    cat("[WARN] Cache is incomplete. Missing columns:", paste(missing, collapse = ", "), "\\n")
-    ok <- FALSE
-  } else {
-    cat("[OK] Cache is valid. Genes:", nrow(gene_ID), "\\n")
-  }
-}, error = function(e) {
-  cat("[WARN] Cache exists but could not be read:", conditionMessage(e), "\\n")
-  ok <<- FALSE
-})
-
-if (!ok) {
-  quit(status = 1)
-}
-RS
-
-        local cache_status=$?
-
-        if [[ "$cache_status" -eq 0 ]]; then
-            echo "[OK] Existing cache passed validation."
+        if [[ "$?" -eq 0 ]]; then
             return 0
         else
-            echo "[WARN] Existing cache is invalid. Removing it and trying local rebuild."
+            echo "[WARN] Existing cache is invalid. Rebuilding from GTF..."
             rm -f "$cache_file"
         fi
     fi
 
-    if [[ ! -s "$deg_file" ]]; then
-        echo "[WARN] Cannot create local cache because host_counts_DEG.csv does not exist yet."
-        echo "[WARN] DEG_Anno_Plot.R may try Ensembl online if no cache is available."
-        return 0
+    if [[ ! -s "$gtf_file" ]]; then
+        echo "[ERROR] GTF file not found or empty: $gtf_file"
+        return 1
     fi
 
-    echo "[INFO] Creating gene_ID_cache.csv from existing host_counts_DEG.csv..."
+    if [[ -z "$rscript_bin" || ! -x "$rscript_bin" ]]; then
+        echo "[ERROR] Could not find Rscript in PATH."
+        return 1
+    fi
 
     "$rscript_bin" - <<RS
-deg_file <- "$deg_file"
+gtf_file <- "$gtf_file"
 cache_file <- "$cache_file"
 
-deg <- read.csv(deg_file, header = TRUE, check.names = FALSE)
+cat("[INFO] Reading GTF:", gtf_file, "\\n")
 
-required <- c(
-  "gene_name",
-  "gene_id",
-  "chromosome_name",
-  "start_position",
-  "end_position",
-  "strand",
-  "gene_biotype",
-  "description",
-  "gene_length"
-)
-
-missing <- setdiff(required, names(deg))
-
-if (length(missing) > 0) {
-  stop("Cannot create cache. Missing columns in host_counts_DEG.csv: ",
-       paste(missing, collapse = ", "))
+open_gtf <- function(path) {
+  if (grepl("\\\\.gz$", path)) {
+    gzfile(path, open = "rt")
+  } else {
+    file(path, open = "rt")
+  }
 }
 
-gene_ID <- deg[, required]
+extract_attr <- function(x, key) {
+  pattern <- paste0(key, ' "([^"]+)"')
+  hit <- regexpr(pattern, x, perl = TRUE)
+  out <- rep(NA_character_, length(x))
+  ok <- hit > 0
+  out[ok] <- sub(pattern, "\\\\1", regmatches(x, hit)[ok], perl = TRUE)
+  out
+}
 
-names(gene_ID)[names(gene_ID) == "gene_id"] <- "ensembl_gene_id"
+con <- open_gtf(gtf_file)
+gtf <- read.delim(
+  con,
+  header = FALSE,
+  sep = "\\t",
+  comment.char = "#",
+  quote = "",
+  stringsAsFactors = FALSE
+)
+close(con)
 
-gene_ID <- gene_ID[!is.na(gene_ID\$ensembl_gene_id), ]
-gene_ID <- gene_ID[!duplicated(gene_ID\$ensembl_gene_id), ]
+if (ncol(gtf) < 9) {
+  stop("GTF has fewer than 9 columns. Is this a valid GTF?")
+}
 
-write.csv(
-  gene_ID,
-  cache_file,
-  row.names = FALSE,
-  quote = TRUE
+names(gtf)[1:9] <- c(
+  "seqname", "source", "feature", "start", "end",
+  "score", "strand", "frame", "attribute"
 )
 
-cat("[OK] Cache created successfully:", cache_file, "\\n")
+genes <- gtf[gtf\$feature == "gene", , drop = FALSE]
+
+if (nrow(genes) == 0) {
+  cat("[WARN] No 'gene' features found. Falling back to exon-derived gene ranges.\\n")
+
+  exons <- gtf[gtf\$feature == "exon", , drop = FALSE]
+
+  if (nrow(exons) == 0) {
+    stop("No gene or exon features found in GTF.")
+  }
+
+  exons\$gene_id <- extract_attr(exons\$attribute, "gene_id")
+  exons\$gene_name <- extract_attr(exons\$attribute, "gene_name")
+  exons\$gene_biotype <- extract_attr(exons\$attribute, "gene_biotype")
+
+  if (all(is.na(exons\$gene_biotype))) {
+    exons\$gene_biotype <- extract_attr(exons\$attribute, "gene_type")
+  }
+
+  exons <- exons[!is.na(exons\$gene_id), , drop = FALSE]
+
+  genes <- aggregate(
+    cbind(start, end) ~ gene_id + seqname + strand,
+    data = exons,
+    FUN = function(z) c(min = min(z), max = max(z))
+  )
+
+  genes\$start_position <- genes\$start[, "min"]
+  genes\$end_position <- genes\$end[, "max"]
+  genes\$start <- NULL
+  genes\$end <- NULL
+
+  meta <- exons[!duplicated(exons\$gene_id), c("gene_id", "gene_name", "gene_biotype"), drop = FALSE]
+  genes <- merge(genes, meta, by = "gene_id", all.x = TRUE)
+
+} else {
+  genes\$gene_id <- extract_attr(genes\$attribute, "gene_id")
+  genes\$gene_name <- extract_attr(genes\$attribute, "gene_name")
+  genes\$gene_biotype <- extract_attr(genes\$attribute, "gene_biotype")
+
+  if (all(is.na(genes\$gene_biotype))) {
+    genes\$gene_biotype <- extract_attr(genes\$attribute, "gene_type")
+  }
+
+  genes\$start_position <- genes\$start
+  genes\$end_position <- genes\$end
+}
+
+genes <- genes[!is.na(genes\$gene_id), , drop = FALSE]
+genes <- genes[!duplicated(genes\$gene_id), , drop = FALSE]
+
+genes\$gene_name[is.na(genes\$gene_name) | genes\$gene_name == ""] <- genes\$gene_id[is.na(genes\$gene_name) | genes\$gene_name == ""]
+genes\$gene_biotype[is.na(genes\$gene_biotype) | genes\$gene_biotype == ""] <- "unknown"
+
+gene_ID <- data.frame(
+  gene_name = genes\$gene_name,
+  ensembl_gene_id = genes\$gene_id,
+  chromosome_name = genes\$seqname,
+  start_position = genes\$start_position,
+  end_position = genes\$end_position,
+  strand = genes\$strand,
+  gene_biotype = genes\$gene_biotype,
+  description = genes\$gene_name,
+  gene_length = abs(as.numeric(genes\$end_position) - as.numeric(genes\$start_position)) + 1,
+  stringsAsFactors = FALSE
+)
+
+gene_ID <- gene_ID[!is.na(gene_ID\$ensembl_gene_id), , drop = FALSE]
+gene_ID <- gene_ID[!duplicated(gene_ID\$ensembl_gene_id), , drop = FALSE]
+
+write.csv(gene_ID, cache_file, row.names = FALSE, quote = TRUE)
+
+cat("[OK] Offline cache created:", cache_file, "\\n")
 cat("[OK] Genes:", nrow(gene_ID), "\\n")
+cat("[INFO] First rows:\\n")
+print(utils::head(gene_ID, 3))
 RS
 
-    local create_status=$?
+    local status=$?
 
-    if [[ "$create_status" -ne 0 ]]; then
-        echo "[WARN] Failed to create local gene_ID_cache.csv."
-        echo "[WARN] DEG_Anno_Plot.R may try Ensembl online or fail if no cache exists."
-        return 0
+    if [[ "$status" -ne 0 || ! -s "$cache_file" ]]; then
+        echo "[ERROR] Failed to create gene_ID_cache.csv from GTF."
+        return 1
     fi
 
-    echo "[OK] Local gene_ID_cache.csv is ready."
+    echo "[OK] gene_ID_cache.csv is ready."
     return 0
 }
-#### END FUNCTION: prepare_gene_id_cache ####
+#### END FUNCTION: prepare_gene_id_cache_from_gtf ####
 
 #### BEGIN CALL: host gene annotation cache update ####
+
+prepare_gene_id_cache_from_gtf "$outputdr" "$gtf" || {
+    echo "${r}[ERROR] Could not prepare gene_ID_cache.csv from local GTF.${w}"
+    exit 1
+}
+
+# Opcional: só tenta BioMart depois que já existe um cache local seguro.
+# Se a internet/DNS falhar, o pipeline continua usando o cache do GTF.
 update_host_gene_cache_online "$outputdr" "$hostid" "$MTDIR" || true
-prepare_gene_id_cache "$outputdr"
+
 #### END CALL: host gene annotation cache update ####
 
-Rscript $MTDIR/DEG_Anno_Plot.R $outputdr/host_counts.txt $inputdr/samplesheet.csv $hostid $MTDIR/HostSpecies.csv $metadata
-#Aqui o arquivo definido pela variavel $metadata pode causar erros na analise DE, principalemnte se tiver grupos com apenas 1 fator, melhor rodar sem o $metadata e usar apenas do samplessheet.csv
+Rscript "$MTDIR/DEG_Anno_Plot.R" \
+    "$outputdr/host_counts.txt" \
+    "$inputdr/samplesheet.csv" \
+    "$hostid" \
+    "$MTDIR/HostSpecies.csv" \
+    $metadata
+
+require_file "$outputdr/Host_DEG/host_counts_TPM.csv" "Host TPM matrix generated by DEG_Anno_Plot.R"
 
 echo "${g}MTD running  progress:"
 echo '>>>>>>>>>>>>>>>     [75%]'
 
 echo "ssGSEA${w}"
-Rscript $MTDIR/gct_making.R $outputdr/Host_DEG/host_counts_TPM.csv $inputdr/samplesheet.csv
 
-Rscript $MTDIR/Tools/ssGSEA2.0/ssgsea-cli.R -i $outputdr/ssGSEA/host.gct -o $outputdr/ssGSEA/ssgsea-results -d $MTDIR/Tools/ssGSEA2.0/db/msigdb/c2.all.v7.5.1.symbols.gmt -y $MTDIR/Tools/ssGSEA2.0/config.yaml -u $threads
+require_file "$outputdr/Host_DEG/host_counts_TPM.csv" "Host TPM matrix"
 
-Rscript $MTDIR/for_halla.R $outputdr/ssGSEA/ssgsea-results-scores.gct $inputdr/samplesheet.csv $metadata
+run_cmd Rscript "$MTDIR/gct_making.R" \
+    "$outputdr/Host_DEG/host_counts_TPM.csv" \
+    "$inputdr/samplesheet.csv"
+
+require_file "$outputdr/ssGSEA/host.gct" "ssGSEA input GCT"
+
+run_cmd Rscript "$MTDIR/Tools/ssGSEA2.0/ssgsea-cli.R" \
+    -i "$outputdr/ssGSEA/host.gct" \
+    -o "$outputdr/ssGSEA/ssgsea-results" \
+    -d "$MTDIR/Tools/ssGSEA2.0/db/msigdb/c2.all.v7.5.1.symbols.gmt" \
+    -y "$MTDIR/Tools/ssGSEA2.0/config.yaml" \
+    -u "$threads"
+
+require_file "$outputdr/ssGSEA/ssgsea-results-scores.gct" "ssGSEA scores"
+
+run_cmd Rscript "$MTDIR/for_halla.R" \
+    "$outputdr/ssGSEA/ssgsea-results-scores.gct" \
+    "$inputdr/samplesheet.csv" \
+    $metadata
+
+require_file "$outputdr/halla/Microbiomes.txt" "HAllA microbiome input"
+require_file "$outputdr/halla/Host_gene.txt" "HAllA host gene input"
+require_file "$outputdr/halla/Host_score.txt" "HAllA host pathway input"
 
 echo "${g}MTD running  progress:"
 echo '>>>>>>>>>>>>>>>>    [80%]'
