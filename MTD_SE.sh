@@ -385,6 +385,80 @@ echo "$summary_file"
 echo "============================================================"
 column -t "$summary_file"
 
+
+echo "============================================================"
+echo "[SUMMARY] Creating global Kraken read composition table"
+echo "============================================================"
+
+host_summary="kraken_host_summary.tsv"
+micro_summary="kraken_nonhost_raw_summary.tsv"
+out_summary="kraken_global_read_composition.tsv"
+
+if [[ ! -s "$host_summary" ]]; then
+    echo "[ERROR] Missing file: $host_summary"
+    exit 1
+fi
+
+if [[ ! -s "$micro_summary" ]]; then
+    echo "[ERROR] Missing file: $micro_summary"
+    exit 1
+fi
+
+echo -e "sample\ttotal_reads\thost\tmicrobiome\tunclassified\tcheck_pct_sum" > "$out_summary"
+
+awk '
+BEGIN {
+    FS=OFS="\t"
+}
+
+NR==FNR {
+    if (FNR == 1) next
+
+    sample=$1
+    host_reads[sample]=$2
+    host_unclassified_reads[sample]=$4
+    total_reads[sample]=$2 + $4
+
+    next
+}
+
+FNR > 1 {
+    sample=$1
+
+    micro_reads=$2
+    micro_unclassified_reads=$4
+
+    if (!(sample in total_reads)) {
+        print "[WARNING] Sample found in micro summary but not in host summary: " sample > "/dev/stderr"
+        next
+    }
+
+    total=total_reads[sample]
+    host=host_reads[sample]
+    micro=micro_reads
+    unclassified=micro_unclassified_reads
+
+    host_pct=(host/total)*100
+    micro_pct=(micro/total)*100
+    unclassified_pct=(unclassified/total)*100
+    check_sum=host_pct + micro_pct + unclassified_pct
+
+    host_label=sprintf("%d (%.2f%%)", host, host_pct)
+    micro_label=sprintf("%d (%.2f%%)", micro, micro_pct)
+    unclassified_label=sprintf("%d (%.2f%%)", unclassified, unclassified_pct)
+
+    printf "%s\t%d\t%s\t%s\t%s\t%.2f\n", \
+        sample, total, host_label, micro_label, unclassified_label, check_sum
+}
+' "$host_summary" "$micro_summary" >> "$out_summary"
+
+echo
+echo "[OK] Global read composition saved to:"
+echo "$out_summary"
+echo
+
+column -s $'\t' -t "$out_summary"
+
 echo "${g}MTD running  progress:"
 echo '>>>>>               [25%]'
 
