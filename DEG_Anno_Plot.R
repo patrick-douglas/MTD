@@ -2076,20 +2076,54 @@ BTC <- function(coldata_vs, do.db) {
     ## run biological theme comparison ##
     genelist.ct <- BTC(coldata_vs,do.db.obj)
 # GO enrichment comparison
-try(cgo <- compareCluster(
-  genelist.ct,
-  fun = enrichGO,
-  OrgDb = do.db.obj,
-  keyType = "ENTREZID"
-))
+# User-adjustable settings
+go_pvalue_cutoff <- 0.05
+go_qvalue_cutoff <- 0.2
+go_padjust_method <- "BH"
+go_ont <- "ALL"
 
-try(cgo <- setReadable(
-  cgo,
-  OrgDb = do.db.obj,
-  keyType = "ENTREZID"
-))
+cgo <- tryCatch({
+  compareCluster(
+    genelist.ct,
+    fun = enrichGO,
+    OrgDb = do.db.obj,
+    keyType = "ENTREZID",
+    ont = go_ont,
+    pAdjustMethod = go_padjust_method,
+    pvalueCutoff = go_pvalue_cutoff,
+    qvalueCutoff = go_qvalue_cutoff
+  )
+}, error = function(e) {
+  warning(
+    "GO compareCluster failed or found no enrichment. ",
+    "Settings used: ont=", go_ont,
+    ", pAdjustMethod=", go_padjust_method,
+    ", pvalueCutoff=", go_pvalue_cutoff,
+    ", qvalueCutoff=", go_qvalue_cutoff,
+    ". Error: ", conditionMessage(e)
+  )
+  NULL
+})
 
-if (exists("cgo") == TRUE) {
+if (!is.null(cgo) && nrow(cgo@compareClusterResult) > 0) {
+
+  cgo <- tryCatch({
+    setReadable(
+      cgo,
+      OrgDb = do.db.obj,
+      keyType = "ENTREZID"
+    )
+  }, error = function(e) {
+    warning("setReadable failed for GO compareCluster: ", conditionMessage(e))
+    cgo
+  })
+
+  write.csv(
+    cgo@compareClusterResult,
+    "biological_theme_comparison_GO_results.csv",
+    row.names = FALSE
+  )
+
   dotplot(cgo, showCategory = nrow(cgo@compareClusterResult)) +
     theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
 
@@ -2100,10 +2134,38 @@ if (exists("cgo") == TRUE) {
     width = 3 * length(unique(cgo@compareClusterResult$Cluster))
   )
 
+  cnet_show <- max(1, round(nrow(cgo@compareClusterResult) / 6))
+
   ggsave(
     "biological_theme_comparison_GO_net.pdf",
-    plot = cnetplot(cgo, cex_label_gene = 0.6, showCategory = round(nrow(cgo@compareClusterResult) / 6)),
+    plot = cnetplot(
+      cgo,
+      cex_label_gene = 0.6,
+      showCategory = cnet_show
+    ),
     limitsize = FALSE
+  )
+
+} else {
+
+  warning(
+    "No significant GO enrichment found by compareCluster. ",
+    "GO compareCluster plots will be skipped."
+  )
+
+  write(
+    paste0(
+      "No significant GO enrichment found by compareCluster.\n",
+      "This is not a pipeline failure.\n\n",
+      "Settings used:\n",
+      "  ont = ", go_ont, "\n",
+      "  pAdjustMethod = ", go_padjust_method, "\n",
+      "  pvalueCutoff = ", go_pvalue_cutoff, "\n",
+      "  qvalueCutoff = ", go_qvalue_cutoff, "\n\n",
+      "Input gene clusters were generated, but no GO term passed these cutoffs.\n",
+      "GO compareCluster plots were skipped.\n"
+    ),
+    "No_GO_compareCluster_result.txt"
   )
 }
 

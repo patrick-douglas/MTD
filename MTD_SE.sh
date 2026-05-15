@@ -200,7 +200,7 @@ echo "${g}MTD running  progress:"
 echo ">>                  [10%]"
 
 echo "Raw reads trimming${w}"
-choice="execute"
+choice="skip"
 #choice="skip" Just copy pre compressed files path is required
 #choice="execute" Perform the filtering or not based if the parameter -t is declared or not
 case $choice in
@@ -275,7 +275,7 @@ if [ -n "$no_trimm" ]; then
 fi
     ;;
   skip)
-CUSTOM_PATH=/media/me/4TB_BACKUP_LBN/temp/A.macularius
+CUSTOM_PATH=/home/me/projeto_morcego/MTD_raw_gz/
     echo "WARNING: USING UNTRIMMED DATA FROM $CUSTOM_PATH
 Skipping trimming with fastp step..."
     cp $CUSTOM_PATH/* .
@@ -385,6 +385,127 @@ echo "$summary_file"
 echo "============================================================"
 column -t "$summary_file"
 
+echo "${g}MTD running  progress:"
+echo '>>>>>               [25%]'
+
+# ------------------------------------------------------------
+# Reads classification by Kraken2; 2nd step for non-host reads
+# Microbiome classification using reads not classified as host
+# ------------------------------------------------------------
+
+echo "Reads classification by kraken2; 2nd step for non-host reads ${w}"
+echo "Microbiome DB: $DB_micro"
+
+if [[ ! -d "$DB_micro" ]]; then
+    echo "[ERROR] Microbiome Kraken2 DB folder not found:"
+    echo "$DB_micro"
+    exit 1
+fi
+
+if [[ ! -s "$DB_micro/hash.k2d" || ! -s "$DB_micro/opts.k2d" || ! -s "$DB_micro/taxo.k2d" ]]; then
+    echo "[ERROR] Microbiome Kraken2 DB appears incomplete."
+    echo "Expected files:"
+    echo "  $DB_micro/hash.k2d"
+    echo "  $DB_micro/opts.k2d"
+    echo "  $DB_micro/taxo.k2d"
+    exit 1
+fi
+
+micro_summary="kraken_nonhost_raw_summary.tsv"
+
+echo -e "sample\tmicro_classified_reads\tmicro_classified_pct\tmicro_unclassified_reads\tmicro_unclassified_pct" > "$micro_summary"
+
+# Threshold para alertar amostras com muita classificação microbiana dentro do non-host
+MICRO_HIGH_WARN=20
+
+for i in $lsn; do
+    echo "============================================================"
+    echo "[MICRO RAW] Sample: $i"
+    echo "Input: ${i}_non-host_raw.fq"
+    echo "============================================================"
+
+    if [[ ! -s "${i}_non-host_raw.fq" ]]; then
+        echo "[ERROR] Missing non-host file from host-filtering step:"
+        echo "${i}_non-host_raw.fq"
+        exit 1
+    fi
+
+    kraken2 --db "$DB_micro" --use-names \
+        --report "Report_non-host.raw_${i}.txt" \
+        --output "Report_non-host_raw_${i}.kraken" \
+        --threads "$threads" \
+        --classified-out "${i}_raw_cseqs.fq" \
+        --unclassified-out "${i}_raw_ucseqs.fq" \
+        "${i}_non-host_raw.fq"
+
+    report="Report_non-host.raw_${i}.txt"
+
+    micro_unclassified_pct=$(awk '$4=="U"{print $1; exit}' "$report")
+    micro_unclassified_reads=$(awk '$4=="U"{print $2; exit}' "$report")
+
+    micro_classified_pct=$(awk '$4=="R" && $5==1{print $1; exit}' "$report")
+    micro_classified_reads=$(awk '$4=="R" && $5==1{print $2; exit}' "$report")
+
+    if [[ -z "$micro_unclassified_pct" ]]; then
+        micro_unclassified_pct="NA"
+    fi
+
+    if [[ -z "$micro_unclassified_reads" ]]; then
+        micro_unclassified_reads="NA"
+    fi
+
+    if [[ -z "$micro_classified_pct" ]]; then
+        if [[ "$micro_unclassified_pct" != "NA" ]]; then
+            micro_classified_pct=$(awk -v u="$micro_unclassified_pct" 'BEGIN{printf "%.2f", 100-u}')
+        else
+            micro_classified_pct="NA"
+        fi
+    fi
+
+    if [[ -z "$micro_classified_reads" ]]; then
+        micro_classified_reads="NA"
+    fi
+
+    echo
+    echo "[RESULT] Sample: $i"
+    echo "  Classified in DB_micro:   ${micro_classified_pct}%  (${micro_classified_reads} reads)"
+    echo "  Unclassified in DB_micro: ${micro_unclassified_pct}%  (${micro_unclassified_reads} reads)"
+
+    echo -e "${i}\t${micro_classified_reads}\t${micro_classified_pct}\t${micro_unclassified_reads}\t${micro_unclassified_pct}" >> "$micro_summary"
+
+    if [[ "$micro_classified_pct" != "NA" ]]; then
+        if awk -v p="$micro_classified_pct" -v t="$MICRO_HIGH_WARN" 'BEGIN{exit !(p >= t)}'; then
+            echo
+            echo "  [WARNING] High DB_micro classification for sample $i"
+            echo "  Microbial classification here is ${micro_classified_pct}% of the NON-HOST reads, not of total reads."
+            echo
+            echo "  Top taxa with >=1% in report:"
+            awk '
+                $4!="U" && !($4=="R" && $5==1) && $1 >= 1 {
+                    name=$6
+                    for (j=7; j<=NF; j++) name=name" "$j
+                    printf "    %7s%%  %12s reads  rank=%-4s taxid=%-10s %s\n", $1, $2, $4, $5, name
+                }
+            ' "$report" | head -n 20
+        fi
+    fi
+
+    echo
+done
+
+echo "============================================================"
+echo "[OK] Non-host raw Kraken2 summary saved to:"
+echo "$micro_summary"
+echo "============================================================"
+column -s $'\t' -t "$micro_summary"
+
+echo "${g}MTD running  progress:"
+echo '>>>>>>              [30%]'
+
+# ------------------------------------------------------------
+# Global read composition summary
+# Percentages are calculated relative to the original total reads
+# ------------------------------------------------------------
 
 echo "============================================================"
 echo "[SUMMARY] Creating global Kraken read composition table"
@@ -415,8 +536,10 @@ NR==FNR {
     if (FNR == 1) next
 
     sample=$1
+
     host_reads[sample]=$2
     host_unclassified_reads[sample]=$4
+
     total_reads[sample]=$2 + $4
 
     next
@@ -441,6 +564,7 @@ FNR > 1 {
     host_pct=(host/total)*100
     micro_pct=(micro/total)*100
     unclassified_pct=(unclassified/total)*100
+
     check_sum=host_pct + micro_pct + unclassified_pct
 
     host_label=sprintf("%d (%.2f%%)", host, host_pct)
@@ -459,76 +583,18 @@ echo
 
 column -s $'\t' -t "$out_summary"
 
-echo "${g}MTD running  progress:"
-echo '>>>>>               [25%]'
-
-echo "Reads classification by kraken2; 2nd step for non-host reads ${w}"
-
-summary_file="kraken_nonhost_raw_summary.tsv"
-echo -e "sample\tmicro_classified_reads\tmicro_classified_pct\tmicro_unclassified_reads\tmicro_unclassified_pct" > "$summary_file"
-
-for i in $lsn; do
-    echo "============================================================"
-    echo "[MICRO RAW] Sample: $i"
-    echo "Input: ${i}_non-host_raw.fq"
-    echo "============================================================"
-
-    kraken2 --db "$DB_micro" --use-names \
-        --report "Report_non-host.raw_${i}.txt" \
-        --output "Report_non-host_raw_${i}.kraken" \
-        --threads "$threads" \
-        --classified-out "${i}_raw_cseqs.fq" \
-        --unclassified-out "${i}_raw_ucseqs.fq" \
-        "${i}_non-host_raw.fq"
-
-    report="Report_non-host.raw_${i}.txt"
-
-    micro_unclassified_pct=$(awk '$4=="U"{print $1; exit}' "$report")
-    micro_unclassified_reads=$(awk '$4=="U"{print $2; exit}' "$report")
-
-    micro_classified_pct=$(awk '$4=="R" && $5==1{print $1; exit}' "$report")
-    micro_classified_reads=$(awk '$4=="R" && $5==1{print $2; exit}' "$report")
-
-    # Fallback caso a linha root não apareça por algum motivo
-    if [[ -z "$micro_classified_pct" ]]; then
-        micro_classified_pct=$(awk -v u="$micro_unclassified_pct" 'BEGIN{printf "%.2f", 100-u}')
-    fi
-
-    if [[ -z "$micro_classified_reads" ]]; then
-        micro_classified_reads="NA"
-    fi
-
-    echo
-    echo "[RESULT] Sample: $i"
-    echo "  Classified in DB_micro:   ${micro_classified_pct}%  (${micro_classified_reads} reads)"
-    echo "  Unclassified in DB_micro: ${micro_unclassified_pct}%  (${micro_unclassified_reads} reads)"
-
-    echo -e "${i}\t${micro_classified_reads}\t${micro_classified_pct}\t${micro_unclassified_reads}\t${micro_unclassified_pct}" >> "$summary_file"
-
-    # Marca amostras estranhas com classificação microbiana alta
-    if awk -v p="$micro_classified_pct" 'BEGIN{exit !(p >= 20)}'; then
-        echo "  [WARNING] High DB_micro classification for sample $i"
-        echo "  Top taxa with >=1% in report:"
-        awk '
-            $4!="U" && !($4=="R" && $5==1) && $1 >= 1 {
-                name=$6
-                for (j=7; j<=NF; j++) name=name" "$j
-                printf "    %7s%%  %12s reads  rank=%-4s taxid=%-10s %s\n", $1, $2, $4, $5, name
-            }
-        ' "$report" | head -n 20
-    fi
-
-    echo
-done
-
+echo
+echo "[INFO] Interpretation:"
+echo "  total_reads    = original reads after trimming/compression step"
+echo "  host           = reads classified as host in Kraken2 host step"
+echo "  microbiome     = reads classified by DB_micro after host removal"
+echo "  unclassified   = reads not classified as host and not classified by DB_micro"
+echo "  check_pct_sum  = should be close to 100.00"
 echo "============================================================"
-echo "[OK] Non-host raw Kraken2 summary saved to:"
-echo "$summary_file"
-echo "============================================================"
-column -t "$summary_file"
-
 echo "${g}MTD running  progress:"
 echo '>>>>>>              [30%]'
+mkdir -p $outputdr/kraken
+mv kraken_global_read_composition.tsv kraken_host_summary.tsv kraken_nonhost_raw_summary.tsv $outputdr/kraken/
 
 echo "Decontamination step${w}"
 source ~/miniconda3/etc/profile.d/conda.sh
@@ -785,7 +851,7 @@ if [[ $blast == blast ]]; then
         -db $DB_blast \
         -infmt fastq \
         -out $i.sam \
-        -num_threads 8 #$threads
+        -num_threads $threads #$threads
     done
 #for i in $lsn; do magicblast -query ${i}_host.fq -db $DB_blast -infmt fastq -out $i.sam -num_threads 8; done
 else
@@ -1095,63 +1161,229 @@ echo '>>>>>>>>>>>>>>>>    [80%]'
 echo "MTD DEG analyses are done. Starting microbiome x host association analyses..."
 
 echo "halla: association analysis${w}"
-#mkdir -p $outputdr/Associations
+
 conda deactivate
 conda activate halla0820
-echo "${g}Analyzing microbiome x host_genes associations...${w}"
-#mkdir -p $outputdr/halla/host_gene # need to create a new directory for output to avoid "exists; deleting..." issue by halla
-halla -x $outputdr/halla/Microbiomes.txt -y $outputdr/halla/Host_gene.txt -o $outputdr/halla/host_gene --x_dataset_label Microbiomes --y_dataset_label Host_gene --diagnostic_plot -m ${pdm}
 
-#O script abaixo parece ser inutil, pois so gera um heatmap com as medias do hostgene e micromiomas, esse script nao e original foi em quem fiz
-#python $MTDIR/generate_halla_heatmap.py -m $outputdr/halla/Microbiomes.txt -g $outputdr/halla/Host_gene.txt  -o $outputdr/halla/host_gene/hallagram_all.pdf
+export PYTHONNOUSERSITE=1
+unset PYTHONPATH
+unset PYTHONHOME
+export MPLBACKEND=Agg
+export PYTHONWARNINGS="ignore"
 
-#Abaixo uma abordagem diferente para verificar as associaçoes entre host gene vs microbiomas
-python $MTDIR/pls_da_analysis.py -x $outputdr/halla/Microbiomes.txt -y $outputdr/halla/Host_gene.txt -o $outputdr/halla/pls_da_results.pdf
+HALLA_THREADS="${threads:-$(nproc)}"
+export OMP_NUM_THREADS="$HALLA_THREADS"
+export OPENBLAS_NUM_THREADS="$HALLA_THREADS"
+export MKL_NUM_THREADS="$HALLA_THREADS"
+export NUMEXPR_NUM_THREADS="$HALLA_THREADS"
 
-#usando k-means
-python $MTDIR/kmeans_clustering.py -x $outputdr/halla/Microbiomes.txt -y $outputdr/halla/Host_gene.txt -o $outputdr/halla/kmeans_results.pdf -k 3
+RUN_EXTRA_PEARSON="${RUN_EXTRA_PEARSON:-1}"
+RUN_FULL_HALLAGRAM="${RUN_FULL_HALLAGRAM:-0}"
+HALLA_DIAGNOSTIC="${HALLA_DIAGNOSTIC:-0}"
 
-#Abaixo as tres opcoes de correlacoes para ver se alguma da um valor significativo pois a default de pearson nao deu nada
-halla -x $outputdr/halla/Microbiomes.txt -y $outputdr/halla/Host_gene.txt -o $outputdr/halla/pearson --x_dataset_label Microbiomes --y_dataset_label Host_gene --diagnostic_plot -m pearson --num_threads 12
-halla -x $outputdr/halla/Microbiomes.txt -y $outputdr/halla/Host_gene.txt -o $outputdr/halla/spearman --x_dataset_label Microbiomes --y_dataset_label Host_gene --diagnostic_plot -m spearman --num_threads 12
- 
-   # show all clusters
-    if [[ $pdm == "spearman" ]]; then
-        pdm_name='Pairwise Spearman'
-    elif [[ $pdm == "pearson" ]]; then
-        pdm_name='Pairwise Pearson'
-    elif [[ $pdm == "mi" ]]; then
-        pdm_name='mi'
-    elif [[ $pdm == "nmi" ]]; then
-        pdm_name='nmi'
-    elif [[ $pdm == "xicor" ]]; then
-        pdm_name='xicor'
-    elif [[ $pdm == "dcor" ]]; then
-        pdm_name='dcor'
+echo "[INFO] HAllA threads: $HALLA_THREADS"
+echo "[INFO] RUN_EXTRA_HALLA: $RUN_EXTRA_HALLA"
+echo "[INFO] RUN_FULL_HALLAGRAM: $RUN_FULL_HALLAGRAM"
+echo "[INFO] HALLA_DIAGNOSTIC: $HALLA_DIAGNOSTIC"
+
+run_halla_safe() {
+    local xfile="$1"
+    local yfile="$2"
+    local outdir="$3"
+    local metric="$4"
+    local xlabel="$5"
+    local ylabel="$6"
+    local logfile="${outdir}.halla.log"
+
+    echo "============================================================"
+    echo "[HALLA] X: $xfile"
+    echo "[HALLA] Y: $yfile"
+    echo "[HALLA] Output: $outdir"
+    echo "[HALLA] Metric: $metric"
+    echo "[HALLA] Threads: $HALLA_THREADS"
+    echo "============================================================"
+
+    if [[ ! -s "$xfile" ]]; then
+        echo "[WARNING] Missing HAllA X input: $xfile"
+        return 0
     fi
 
-#    hallagram -i $outputdr/halla/host_gene --cbar_label "${pdm_name[@]}" --x_dataset_label Microbiomes --y_dataset_label Host_gene --output $outputdr/halla/host_gene/hallagram_all.png --block_num -1
-    hallagram -i $outputdr/halla/host_gene --cbar_label "${pdm_name[@]}" --x_dataset_label Microbiomes --y_dataset_label Host_gene --output $outputdr/halla/host_gene/hallagram_all.pdf --block_num -1
-        # if hallagram_all.png not exist, show top 300 blocks
-        if [[ ! -f $outputdr/halla/host_gene/hallagram_all.pdf ]]; then
-hallagram -i $outputdr/halla/host_gene --cbar_label "${pdm_name[@]}" --x_dataset_label Microbiomes --y_dataset_label Host_gene --output $outputdr/halla/host_gene/hallagram_Top5.pdf --block_num 5
-hallagram -i $outputdr/halla/host_gene --cbar_label "${pdm_name[@]}" --x_dataset_label Microbiomes --y_dataset_label Host_gene --output $outputdr/halla/host_gene/hallagram_Top10.pdf --block_num 10
-hallagram -i $outputdr/halla/host_gene --cbar_label "${pdm_name[@]}" --x_dataset_label Microbiomes --y_dataset_label Host_gene --output $outputdr/halla/host_gene/hallagram_Top25.pdf --block_num 25
-hallagram -i $outputdr/halla/host_gene --cbar_label "${pdm_name[@]}" --x_dataset_label Microbiomes --y_dataset_label Host_gene --output $outputdr/halla/host_gene/hallagram_Top50.pdf --block_num 50
-hallagram -i $outputdr/halla/host_gene --cbar_label "${pdm_name[@]}" --x_dataset_label Microbiomes --y_dataset_label Host_gene --output $outputdr/halla/host_gene/hallagram_Top300.pdf --block_num 300
-        fi
+    if [[ ! -s "$yfile" ]]; then
+        echo "[WARNING] Missing HAllA Y input: $yfile"
+        return 0
+    fi
+
+    mkdir -p "$(dirname "$outdir")"
+
+    if [[ -d "$outdir" ]]; then
+        local backup="${outdir}.previous_$(date +%Y%m%d_%H%M%S)"
+        echo "[INFO] Existing HAllA output folder found. Moving to: $backup"
+        mv "$outdir" "$backup"
+    fi
+
+    local halla_diag_args=""
+if [[ "${HALLA_DIAGNOSTIC:-0}" == "1" ]]; then
+    halla_diag_args="--diagnostic_plot"
+fi
+
+halla -x "$xfile" -y "$yfile" -o "$outdir" --x_dataset_label "$xlabel" --y_dataset_label "$ylabel" $halla_diag_args -m "$metric" --num_threads "$HALLA_THREADS" > "$logfile" 2>&1
+    local status=$?
+
+    if [[ "$status" -ne 0 ]]; then
+        echo "[WARNING] HAllA exited with status $status for: $outdir"
+        echo "[WARNING] This often happens during report/hallagram plotting after the statistics were computed."
+        echo "[WARNING] Log saved at: $logfile"
+
+        mkdir -p "$outdir"
+
+        {
+            echo "HAllA finished with warning/error status: $status"
+            echo "This may be caused by report/hallagram plotting, especially MatplotlibDeprecationWarning."
+            echo "The MTD pipeline continued instead of stopping."
+            echo "Log file:"
+            echo "$logfile"
+            echo
+            echo "Relevant log lines:"
+            grep -E "Number of significant|significant clusters|Traceback|MatplotlibDeprecationWarning|ERROR|WARNING" "$logfile" | tail -n 100
+        } > "$outdir/HAllA_finished_with_warning.txt"
+
+        echo "[INFO] Relevant HAllA log lines:"
+        grep -E "Number of significant|significant clusters|Traceback|MatplotlibDeprecationWarning|ERROR|WARNING" "$logfile" | tail -n 40
+
+        return 0
+    fi
+
+    echo "[OK] HAllA completed successfully: $outdir"
+    echo "[OK] Log saved at: $logfile"
+    return 0
+}
+
+run_hallagram_safe() {
+    local indir="$1"
+    local outfile="$2"
+    local block_num="$3"
+    local xlabel="$4"
+    local ylabel="$5"
+    local cbar="$6"
+    local logfile="${outfile}.log"
+
+    echo "============================================================"
+    echo "[HALLAGRAM] Input: $indir"
+    echo "[HALLAGRAM] Output: $outfile"
+    echo "[HALLAGRAM] block_num: $block_num"
+    echo "============================================================"
+
+    if [[ ! -d "$indir" ]]; then
+        echo "[WARNING] HAllA folder does not exist; skipping hallagram: $indir"
+        return 0
+    fi
+
+    mkdir -p "$(dirname "$outfile")"
+
+    hallagram -i "$indir" --cbar_label "$cbar" --x_dataset_label "$xlabel" --y_dataset_label "$ylabel" --output "$outfile" --block_num "$block_num" > "$logfile" 2>&1
+    local status=$?
+
+    if [[ "$status" -ne 0 ]]; then
+        echo "[WARNING] hallagram failed for: $outfile"
+        echo "[WARNING] Log saved at: $logfile"
+        grep -E "Traceback|Error|WARNING|MatplotlibDeprecationWarning" "$logfile" | tail -n 40
+        return 0
+    fi
+
+    echo "[OK] hallagram saved: $outfile"
+    return 0
+}
+
+run_python_plot_safe() {
+    local label="$1"
+    local cmd="$2"
+    local logfile="$3"
+
+    echo "============================================================"
+    echo "[PYTHON] $label"
+    echo "============================================================"
+
+    eval "$cmd" > "$logfile" 2>&1
+    local status=$?
+
+    if [[ "$status" -ne 0 ]]; then
+        echo "[WARNING] $label failed; continuing."
+        echo "[WARNING] Log saved at: $logfile"
+        tail -n 40 "$logfile"
+        return 0
+    fi
+
+    echo "[OK] $label completed."
+    return 0
+}
+
+if [[ "$pdm" == "spearman" ]]; then
+    pdm_name='Pairwise Spearman'
+elif [[ "$pdm" == "pearson" ]]; then
+    pdm_name='Pairwise Pearson'
+elif [[ "$pdm" == "mi" ]]; then
+    pdm_name='mi'
+elif [[ "$pdm" == "nmi" ]]; then
+    pdm_name='nmi'
+elif [[ "$pdm" == "xicor" ]]; then
+    pdm_name='xicor'
+elif [[ "$pdm" == "dcor" ]]; then
+    pdm_name='dcor'
+else
+    pdm_name="$pdm"
+fi
+
+echo "${g}Analyzing microbiome x host_genes associations...${w}"
+
+run_halla_safe "$outputdr/halla/Microbiomes.txt" "$outputdr/halla/Host_gene.txt" "$outputdr/halla/host_gene" "$pdm" "Microbiomes" "Host_gene"
+
+run_python_plot_safe "PLS-DA microbiome x host_gene" "python $MTDIR/pls_da_analysis.py -x $outputdr/halla/Microbiomes.txt -y $outputdr/halla/Host_gene.txt -o $outputdr/halla/pls_da_results.pdf" "$outputdr/halla/pls_da_analysis.log"
+
+run_python_plot_safe "k-means microbiome x host_gene" "python $MTDIR/kmeans_clustering.py -x $outputdr/halla/Microbiomes.txt -y $outputdr/halla/Host_gene.txt -o $outputdr/halla/kmeans_results.pdf -k 3" "$outputdr/halla/kmeans_clustering.log"
+
+if [[ "$RUN_EXTRA_PEARSON" == "1" ]]; then
+    echo "[INFO] RUN_EXTRA_PEARSON=1, running extra Pearson HAllA analysis."
+    run_halla_safe "$outputdr/halla/Microbiomes.txt" "$outputdr/halla/Host_gene.txt" "$outputdr/halla/pearson" "pearson" "Microbiomes" "Host_gene"
+else
+    echo "[INFO] Skipping extra Pearson HAllA run."
+    echo "[INFO] To enable it: RUN_EXTRA_PEARSON=1 bash MTD_SE.sh ..."
+fi
+
+run_hallagram_safe "$outputdr/halla/host_gene" "$outputdr/halla/host_gene/hallagram_Top5.pdf" 5 "Microbiomes" "Host_gene" "$pdm_name"
+run_hallagram_safe "$outputdr/halla/host_gene" "$outputdr/halla/host_gene/hallagram_Top10.pdf" 10 "Microbiomes" "Host_gene" "$pdm_name"
+run_hallagram_safe "$outputdr/halla/host_gene" "$outputdr/halla/host_gene/hallagram_Top25.pdf" 25 "Microbiomes" "Host_gene" "$pdm_name"
+run_hallagram_safe "$outputdr/halla/host_gene" "$outputdr/halla/host_gene/hallagram_Top50.pdf" 50 "Microbiomes" "Host_gene" "$pdm_name"
+
+if [[ "$RUN_FULL_HALLAGRAM" == "1" ]]; then
+    run_hallagram_safe "$outputdr/halla/host_gene" "$outputdr/halla/host_gene/hallagram_all.pdf" -1 "Microbiomes" "Host_gene" "$pdm_name"
+else
+    echo "[INFO] Skipping full host_gene hallagram by default."
+    echo "[INFO] To enable it: RUN_FULL_HALLAGRAM=1 bash MTD_SE.sh ..."
+fi
+
 echo "${g}"
 echo 'MTD running  progress:'
 echo '>>>>>>>>>>>>>>>>>>  [90%]'
 
 echo 'Analyzing microbiome x host_pathways associations...'
 echo "${w}"
-# for microbiome x host_pathways(ssGSEA)
-#mkdir -p $outputdr/halla/pathway
-halla -x $outputdr/halla/Microbiomes.txt -y $outputdr/halla/Host_score.txt -o $outputdr/halla/pathway --x_dataset_label Microbiomes --y_dataset_label Host_pathway --diagnostic_plot -m ${pdm}
 
-# show all clusters
-hallagram -i $outputdr/halla/pathway --cbar_label "${pdm_name[@]}" --x_dataset_label Microbiomes --y_dataset_label Host_pathway --output $outputdr/halla/pathway_hallagram_all.pdf --block_num -1
+run_halla_safe "$outputdr/halla/Microbiomes.txt" "$outputdr/halla/Host_score.txt" "$outputdr/halla/pathway" "$pdm" "Microbiomes" "Host_pathway"
+
+run_hallagram_safe "$outputdr/halla/pathway" "$outputdr/halla/pathway_hallagram_Top5.pdf" 5 "Microbiomes" "Host_pathway" "$pdm_name"
+run_hallagram_safe "$outputdr/halla/pathway" "$outputdr/halla/pathway_hallagram_Top10.pdf" 10 "Microbiomes" "Host_pathway" "$pdm_name"
+run_hallagram_safe "$outputdr/halla/pathway" "$outputdr/halla/pathway_hallagram_Top25.pdf" 25 "Microbiomes" "Host_pathway" "$pdm_name"
+run_hallagram_safe "$outputdr/halla/pathway" "$outputdr/halla/pathway_hallagram_Top50.pdf" 50 "Microbiomes" "Host_pathway" "$pdm_name"
+
+if [[ "$RUN_FULL_HALLAGRAM" == "1" ]]; then
+    run_hallagram_safe "$outputdr/halla/pathway" "$outputdr/halla/pathway_hallagram_all.pdf" -1 "Microbiomes" "Host_pathway" "$pdm_name"
+else
+    echo "[INFO] Skipping full pathway hallagram by default."
+fi
+
+conda deactivate
+conda activate MTD
+
 echo "${g}"
 echo 'MTD running  progress:'
 echo '>>>>>>>>>>>>>>>>>>>>[100%]'
