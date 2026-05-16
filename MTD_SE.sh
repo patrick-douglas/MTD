@@ -287,7 +287,7 @@ echo "${g}MTD running  progress:"
 echo '>>>>                [20%]'
 
 # Novo DB host com genoma de Carollia perspicillata
-#DB_host="/home/me/MTD/kraken2DB_host_carollia_mCarPer1.2"
+#DB_host="/home/me/MTD/kraken2DB_40233_89673"
 
 echo "Reads classification by kraken2; 1st step for host ${w}"
 echo "Host DB: $DB_host"
@@ -591,6 +591,7 @@ echo "  microbiome     = reads classified by DB_micro after host removal"
 echo "  unclassified   = reads not classified as host and not classified by DB_micro"
 echo "  check_pct_sum  = should be close to 100.00"
 echo "============================================================"
+exit 1
 echo "${g}MTD running  progress:"
 echo '>>>>>>              [30%]'
 mkdir -p $outputdr/kraken
