@@ -530,7 +530,7 @@ if (filename %in% c("bracken_species_all",
   colnames(tax_table(data.adj)) <- c("Kingdom", "Phylum", "Class", "Order", "Family",  "Genus", "Species")
   #Estimated and exported alpha diversity
   #The measures of diversity that aren't totally reliant on singletons, eg. Shannon/Simpson, are valid to use, and users can ignore the warning in phyloseq when calculating those measures.
-  data.alpha<-estimate_richness(data.adj)
+data.alpha<-estimate_richness(data.adj, measures = c("Observed", "Shannon", "Simpson", "InvSimpson"))
   write.csv(data.alpha, file="alpha-diversity.csv")
   theme_set(theme_bw())
   p.alpha <- plot_richness(data,measures = c("Shannon","Simpson"))
@@ -791,32 +791,96 @@ if (filename %in% c("bracken_species_all",
   otu  = otu_table(data.adj)
   data_sam <- phyloseq(otu,tax, sam)
 
-  # change color scale for plot_bar
-  HowManyPhyla <- length(levels(as.factor(data_sam@tax_table[,2])))
-  getPalette = colorRampPalette(brewer.pal(12, "Set2"))
-  PhylaPalette = getPalette(HowManyPhyla)
+  # Dynamic color scale for plot_bar
+  # This avoids "Insufficient values in manual scale" when the number of phyla
+  # is larger than a fixed palette.
 
-  # phyloseq bar plots
-try(plot_bar(data, fill = "Phylum") +
-  scale_fill_manual(values = PhylaPalette))
-try(ggsave("Bar_phy.pdf", limitsize = FALSE))
+  fix_tax_rank <- function(ps, rank = "Phylum", unknown = "Unclassified") {
+    tt <- as(tax_table(ps), "matrix")
 
-try(plot_bar(data_sam, fill = "Phylum", facet_grid = ~Groups) +
-  scale_fill_manual(values = PhylaPalette))
-try(ggsave("Bar_group_phy.pdf", limitsize = FALSE))
+    if (!rank %in% colnames(tt)) {
+      warning("[WARNING] Taxonomic rank not found in tax_table: ", rank)
+      return(ps)
+    }
 
+    tt[, rank] <- as.character(tt[, rank])
+    tt[is.na(tt[, rank]) | tt[, rank] == "" | tt[, rank] == "NA", rank] <- unknown
+
+    tax_table(ps) <- tax_table(tt)
+    ps
+  }
+
+  make_tax_palette <- function(ps, rank = "Phylum") {
+    tt <- as(tax_table(ps), "matrix")
+
+    if (!rank %in% colnames(tt)) {
+      return(character(0))
+    }
+
+    taxa <- sort(unique(as.character(tt[, rank])))
+    taxa <- taxa[!is.na(taxa) & taxa != "" & taxa != "NA"]
+
+    n <- length(taxa)
+
+    if (n == 0) {
+      return(character(0))
+    }
+
+    pal <- grDevices::hcl.colors(n, palette = "Dark 3")
+    names(pal) <- taxa
+
+    pal
+  }
+
+  # Make sure missing phylum labels are explicit
+  data <- fix_tax_rank(data, rank = "Phylum")
+  data_sam <- fix_tax_rank(data_sam, rank = "Phylum")
+
+  PhylaPalette_data <- make_tax_palette(data, rank = "Phylum")
+  PhylaPalette_sam <- make_tax_palette(data_sam, rank = "Phylum")
+
+  message("[INFO] Number of phyla in data: ", length(PhylaPalette_data))
+  message("[INFO] Number of phyla in data_sam: ", length(PhylaPalette_sam))
+
+  # phyloseq bar plot: all samples
+  try({
+    p_bar_phy <- plot_bar(data, fill = "Phylum") +
+      scale_fill_manual(values = PhylaPalette_data, drop = FALSE)
+
+    ggsave("Bar_phy.pdf", plot = p_bar_phy, limitsize = FALSE)
+  }, silent = FALSE)
+
+  # phyloseq bar plot: grouped/faceted
+  try({
+    p_bar_group_phy <- plot_bar(data_sam, fill = "Phylum", facet_grid = ~Groups) +
+      scale_fill_manual(values = PhylaPalette_sam, drop = FALSE)
+
+    ggsave("Bar_group_phy.pdf", plot = p_bar_group_phy, limitsize = FALSE)
+  }, silent = FALSE)
 
   # relative abundance bar plot
-  data_sam_relabund<-transform_sample_counts(data_sam, function(x) x / sum(x))
+  data_sam_relabund <- transform_sample_counts(data_sam, function(x) {
+    if (sum(x) == 0) {
+      return(x)
+    } else {
+      return(x / sum(x))
+    }
+  })
+
+  data_sam_relabund <- fix_tax_rank(data_sam_relabund, rank = "Phylum")
+  PhylaPalette_relabund <- make_tax_palette(data_sam_relabund, rank = "Phylum")
 
   theme_set(theme_grey())
 
-  plot_bar(data_sam_relabund, fill="Phylum") +
-    geom_bar(stat="identity", position="stack") +
-    labs(x = "", y = "Relative Abundance\n") +
-    theme(panel.background = element_blank()) +
-    scale_fill_manual(values =PhylaPalette)
-  ggsave("Bar_relative_phy.pdf")
+  try({
+    p_bar_relative_phy <- plot_bar(data_sam_relabund, fill = "Phylum") +
+      geom_bar(stat = "identity", position = "stack") +
+      labs(x = "", y = "Relative Abundance\n") +
+      theme(panel.background = element_blank()) +
+      scale_fill_manual(values = PhylaPalette_relabund, drop = FALSE)
+
+    ggsave("Bar_relative_phy.pdf", plot = p_bar_relative_phy)
+  }, silent = FALSE)
 
   # alpha diversity box plot
   theme_set(theme_bw())
