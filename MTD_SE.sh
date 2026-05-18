@@ -52,7 +52,17 @@ metadata=""                            # optional metadata file
 # If provided through --kraken-host-db, only Kraken2 host filtering uses this custom DB.
 KRAKEN_HOST_DB=""
 
+# Kraken2 defaults for host filtering
+# Rationale:
+#   Host filtering should be sensitive enough to remove host reads,
+#   but not completely permissive.
+KRAKEN_HOST_CONF="0.05"
+KRAKEN_HOST_MIN_HIT_GROUPS="3"
+
 # Kraken2/Bracken defaults for microbiome classification
+# Rationale:
+#   Microbiome classification is slightly more conservative to reduce
+#   false-positive microbial calls after host removal.
 KRAKEN_MICRO_CONF="0.10"
 KRAKEN_MICRO_MIN_HIT_GROUPS="3"
 BRACKEN_THRESHOLD="10"
@@ -94,6 +104,12 @@ Kraken2 host filtering:
                                            If not provided, DB_host is selected automatically from --hostid.
                                            This does NOT change GTF, BLAST/HISAT2, featureCounts, or host DEG resources.
 
+      --kraken-host-confidence FLOAT       Kraken2 --confidence for host-filtering step
+                                           Default: ${KRAKEN_HOST_CONF}
+
+      --kraken-host-min-hit-groups INT     Kraken2 --minimum-hit-groups for host-filtering step
+                                           Default: ${KRAKEN_HOST_MIN_HIT_GROUPS}
+
 Kraken2 microbiome classification:
       --kraken-micro-confidence FLOAT      Kraken2 --confidence for microbiome step
                                            Default: ${KRAKEN_MICRO_CONF}
@@ -124,6 +140,8 @@ Examples:
       --blast \\
       --no-trim \\
       --kraken-host-db /home/me/MTD/kraken2DB_Carollia_Myotis/ \\
+      --kraken-host-confidence 0.05 \\
+      --kraken-host-min-hit-groups 3 \\
       --kraken-micro-confidence 0.10 \\
       --kraken-micro-min-hit-groups 3 \\
       --bracken-threshold 10
@@ -238,7 +256,23 @@ while [[ $# -gt 0 ]]; do
             KRAKEN_HOST_DB="${1#*=}"
             shift
             ;;
+        --kraken-host-confidence|--kraken-host-conf)
+            KRAKEN_HOST_CONF="$2"
+            shift 2
+            ;;
+        --kraken-host-confidence=*|--kraken-host-conf=*)
+            KRAKEN_HOST_CONF="${1#*=}"
+            shift
+            ;;
 
+        --kraken-host-min-hit-groups)
+            KRAKEN_HOST_MIN_HIT_GROUPS="$2"
+            shift 2
+            ;;
+        --kraken-host-min-hit-groups=*)
+            KRAKEN_HOST_MIN_HIT_GROUPS="${1#*=}"
+            shift
+            ;;
         --kraken-micro-confidence|--kraken-micro-conf)
             KRAKEN_MICRO_CONF="$2"
             shift 2
@@ -330,12 +364,24 @@ if ! [[ "$read_len" =~ ^[0-9]+$ ]] || [[ "$read_len" -lt 1 ]]; then
     die "--bracken-read-len must be a positive integer. Got: $read_len"
 fi
 
+# ------------------------------------------------------------
+# Kraken2/Bracken parameter validation
+# ------------------------------------------------------------
+
+if ! [[ "$KRAKEN_HOST_MIN_HIT_GROUPS" =~ ^[0-9]+$ ]] || [[ "$KRAKEN_HOST_MIN_HIT_GROUPS" -lt 1 ]]; then
+    die "--kraken-host-min-hit-groups must be a positive integer. Got: $KRAKEN_HOST_MIN_HIT_GROUPS"
+fi
+
 if ! [[ "$KRAKEN_MICRO_MIN_HIT_GROUPS" =~ ^[0-9]+$ ]] || [[ "$KRAKEN_MICRO_MIN_HIT_GROUPS" -lt 1 ]]; then
     die "--kraken-micro-min-hit-groups must be a positive integer. Got: $KRAKEN_MICRO_MIN_HIT_GROUPS"
 fi
 
 if ! [[ "$BRACKEN_THRESHOLD" =~ ^[0-9]+$ ]] || [[ "$BRACKEN_THRESHOLD" -lt 0 ]]; then
     die "--bracken-threshold must be an integer >= 0. Got: $BRACKEN_THRESHOLD"
+fi
+
+if ! awk -v x="$KRAKEN_HOST_CONF" 'BEGIN { exit !(x >= 0 && x <= 1) }'; then
+    die "--kraken-host-confidence must be between 0 and 1. Got: $KRAKEN_HOST_CONF"
 fi
 
 if ! awk -v x="$KRAKEN_MICRO_CONF" 'BEGIN { exit !(x >= 0 && x <= 1) }'; then
@@ -486,6 +532,8 @@ echo "  threads:                        $threads"
 echo "  host alignment mode:            $blast"
 echo "  no_trim:                        $no_trimm"
 echo "  custom raw cache path:          ${CUSTOM_PATH:-not provided}"
+echo "  Kraken host confidence:         $KRAKEN_HOST_CONF"
+echo "  Kraken host min hit groups:     $KRAKEN_HOST_MIN_HIT_GROUPS"
 echo "  Kraken micro confidence:        $KRAKEN_MICRO_CONF"
 echo "  Kraken micro min hit groups:    $KRAKEN_MICRO_MIN_HIT_GROUPS"
 echo "  Bracken threshold:              $BRACKEN_THRESHOLD"
@@ -500,6 +548,8 @@ if [[ "$KRAKEN_HOST_DB_MODE" == "custom_path_from_--kraken-host-db" ]]; then
 else
     echo "  --kraken-host-db not provided; using DB from --hostid"
 fi
+echo "  --kraken-host-confidence $KRAKEN_HOST_CONF"
+echo "  --kraken-host-min-hit-groups $KRAKEN_HOST_MIN_HIT_GROUPS"
 
 echo "${g}============================================"
 echo "Selected host annotation species:${w} ${ital}${species_name}${noital}${g}"
@@ -574,6 +624,8 @@ write_methods_log() {
         csv_row "Host filtering" "Kraken2" "host_kraken_db" "$DB_host" "Kraken2 database used for host read filtering"
         csv_row "Host filtering" "Kraken2" "host_kraken_db_mode" "$KRAKEN_HOST_DB_MODE" "Whether DB_host came from --hostid or --kraken-host-db"
         csv_row "Host filtering" "Kraken2" "host_kraken_db_from_hostid" "$DB_host_from_hostid" "Default Kraken2 host DB selected from --hostid before optional override"
+        csv_row "Host filtering" "Kraken2" "confidence" "$KRAKEN_HOST_CONF" "Kraken2 --confidence used for host filtering"
+        csv_row "Host filtering" "Kraken2" "minimum_hit_groups" "$KRAKEN_HOST_MIN_HIT_GROUPS" "Kraken2 --minimum-hit-groups used for host filtering"
         csv_row "Host filtering" "Kraken2" "classified_out" "SAMPLE_host.fq" "Reads classified as host"
         csv_row "Host filtering" "Kraken2" "unclassified_out" "SAMPLE_non-host_raw.fq" "Reads not classified as host and used for microbiome classification"
 
@@ -1029,6 +1081,9 @@ for i in $lsn; do
     echo "============================================================"
     echo "[HOST] Sample: $i"
     echo "Input: Trimmed_${i}.fq.gz"
+    echo "Host Kraken2 DB: $DB_host"
+    echo "Kraken2 host confidence: $KRAKEN_HOST_CONF"
+    echo "Kraken2 host minimum hit groups: $KRAKEN_HOST_MIN_HIT_GROUPS"
     echo "============================================================"
 
     if [[ ! -s "Trimmed_${i}.fq.gz" ]]; then
@@ -1038,6 +1093,8 @@ for i in $lsn; do
     fi
 
     kraken2 --db "$DB_host" --use-names \
+        --confidence "$KRAKEN_HOST_CONF" \
+        --minimum-hit-groups "$KRAKEN_HOST_MIN_HIT_GROUPS" \
         --report "Report_host_${i}.txt" \
         --output "Report_host_${i}.kraken" \
         --threads "$threads" \
