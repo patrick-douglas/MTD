@@ -2053,20 +2053,24 @@ preflight_kraken2_accession_mapping() {
                 || true
         fi
 
-        log_error "Kraken2 taxonomy is current, but accessions remain unmapped."
-        log_error "Unmapped accessions: $unmapped_count"
-        log_error "Build was stopped before capacity estimation and database construction."
-        log_error "Unmapped list:"
-        log_error "  $unmapped_report"
+        log_warning "Kraken2 taxonomy is current, but accessions remain unmapped."
+        log_warning "Unmapped accessions: $unmapped_count"
+        log_warning "The expensive database build has not started."
+        log_warning "Unmapped list:"
+        log_warning "  $unmapped_report"
 
         if [[ -s "$origin_report" ]]; then
-            log_error "Library-origin report:"
-            log_error "  $origin_report"
+            log_warning "Library-origin report:"
+            log_warning "  $origin_report"
         fi
 
         head -n 20 "$unmapped_report" >&2
         rm -rf -- "$work_dir"
-        return 1
+
+        # Return 2 specifically for an otherwise successful lookup
+        # that left residual accessions. The caller may apply the
+        # narrow, audited plasmid-only policy and repeat the preflight.
+        return 2
     fi
 
     if [[ ! -s "$map_output" ]]; then
@@ -2083,8 +2087,52 @@ preflight_kraken2_accession_mapping() {
     log_info "  $database/seqid2taxid.map"
 }
 
+
+# MTD_KRAKEN2_PLASMID_UNMAPPED_FILTER_V1
+filter_unmapped_plasmid_records() {
+    local database="$1"
+    local unmapped_report="$database/unmapped.prebuild.txt"
+    local origin_report="$database/unmapped.prebuild.origins.tsv"
+    local audit_report="$database/filtered_plasmid_unmapped.tsv"
+    local helper="$dir/Installation/filter_kraken2_unmapped_plasmids.py"
+    local max_count="${MTD_KRAKEN2_MAX_FILTERED_PLASMID_ACCESSIONS:-1000}"
+    local max_fraction="${MTD_KRAKEN2_MAX_FILTERED_PLASMID_FRACTION:-0.01}"
+
+    if [[ ! -f "$helper" ]]; then
+        log_error "Plasmid filtering helper not found:"
+        log_error "  $helper"
+        return 1
+    fi
+
+    if [[ ! -s "$unmapped_report" ]]; then
+        log_error "No unmapped-accession report is available for filtering."
+        return 1
+    fi
+
+    if [[ ! -s "$origin_report" ]]; then
+        log_error "No library-origin report is available for filtering."
+        return 1
+    fi
+
+    log_warning "Applying the restricted plasmid-only unmapped-reference policy."
+    log_warning "Maximum accessions: $max_count"
+    log_warning "Maximum plasmid fraction: $max_fraction"
+    log_warning "All exclusions will be written to:"
+    log_warning "  $audit_report"
+
+    python3 \
+        "$helper" \
+        --database "$database" \
+        --unmapped "$unmapped_report" \
+        --origins "$origin_report" \
+        --output "$audit_report" \
+        --max-count "$max_count" \
+        --max-fraction "$max_fraction"
+}
+
 prepare_kraken2_database_mapping() {
     local database="$1"
+    local preflight_status=0
 
     sync_database_taxonomy_with_current_cache "$database"
 
@@ -2095,10 +2143,32 @@ prepare_kraken2_database_mapping() {
         rm -f -- "$database/seqid2taxid.map"
     fi
 
-    if ! preflight_kraken2_accession_mapping "$database"; then
+    if preflight_kraken2_accession_mapping "$database"; then
+        return 0
+    else
+        preflight_status=$?
+    fi
+
+    if (( preflight_status != 2 )); then
+        log_error "Kraken2 reference mapping preflight failed."
+        exit 1
+    fi
+
+    if ! filter_unmapped_plasmid_records "$database"; then
+        log_error "Residual accessions were not eligible for safe filtering."
         log_error "Kraken2 reference mapping validation failed."
         exit 1
     fi
+
+    log_info "Repeating accession-to-TaxID preflight after plasmid filtering..."
+
+    if ! preflight_kraken2_accession_mapping "$database"; then
+        log_error "Unmapped references remain after plasmid filtering."
+        log_error "Kraken2 reference mapping validation failed."
+        exit 1
+    fi
+
+    log_ok "Plasmid-only unmappable references were excluded and audited."
 }
 
 build_kraken2_database() {
