@@ -2814,6 +2814,96 @@ add_local_bacteria_library() {
     restore_default_rsync_helper
 }
 
+
+# MTD_NCBI_EUKARYOTE_HTTPS_CACHE_V1
+add_local_cached_refseq_library() {
+    local database="$1"
+    local library="$2"
+    local manifest_name="$3"
+    local manifest_source
+    local manifest_destination
+    local cache_root
+    local helper
+    local download_status=0
+    local required_file
+
+    manifest_source="$MANIFEST_SCRIPTS_DIR/$manifest_name"
+    manifest_destination="$offline_files_folder/Kraken2DB_micro/library/$manifest_name"
+    cache_root="$offline_files_folder/Kraken2DB_micro/library/$library"
+    helper="$KRAKEN_ENV_LIBEXEC/rsync_from_ncbi.pl"
+
+    log_info "Synchronizing the current NCBI RefSeq '$library' collection over HTTPS..."
+
+    copy_required_file \
+        "$manifest_source" \
+        "$manifest_destination"
+
+    chmod +x "$manifest_destination"
+
+    run_required_command \
+        "Synchronizing NCBI RefSeq '$library' genomes" \
+        env \
+        MTD_MANIFEST_HELPER="$MANIFEST_SCRIPTS_DIR/sync_ncbi_cache.py" \
+        MTD_OFFLINE_FILES_FOLDER="$offline_files_folder" \
+        "$manifest_destination"
+
+    if [[ ! -s "$cache_root/assembly_summary_${library}.txt" ]]; then
+        log_error "Current NCBI assembly summary was not stored:"
+        log_error "  $cache_root/assembly_summary_${library}.txt"
+        exit 1
+    fi
+
+    if [[ ! -s "$cache_root/manifest_${library}.names.txt" ]]; then
+        log_error "Current NCBI file manifest was not stored:"
+        log_error "  $cache_root/manifest_${library}.names.txt"
+        exit 1
+    fi
+
+    install_kraken_helper \
+        "$dir/Installation/rsync_from_ncbi_bacteria.pl" \
+        "rsync_from_ncbi.pl"
+
+    patch_perl_local_download_dir \
+        "$helper" \
+        "$cache_root/all/"
+
+    chmod +x "$helper"
+
+    log_info "Adding the validated local '$library' cache to Kraken2..."
+    log_info "No genome will be transferred through FTP."
+
+    retry_until_success \
+        "Kraken2 local '$library' library for database '$database'" \
+        run_kraken2_build \
+        --use-ftp \
+        --download-library "$library" \
+        --threads "$threads" \
+        --db "$database" ||
+        download_status=$?
+
+    restore_default_rsync_helper
+
+    if (( download_status != 0 )); then
+        log_error "The local Kraken2 '$library' library could not be prepared."
+        exit "$download_status"
+    fi
+
+    for required_file in \
+        library.fna \
+        manifest.txt \
+        prelim_map.txt
+    do
+        if [[ ! -s "$database/library/$library/$required_file" ]]; then
+            log_error "Required Kraken2 '$library' output is missing or empty:"
+            log_error "  $database/library/$library/$required_file"
+            exit 1
+        fi
+    done
+
+    log_ok "Validated local Kraken2 '$library' library prepared:"
+    log_ok "  $database/library/$library"
+}
+
 add_local_plasmid_library() {
     local database="$1"
     local manifest_destination
@@ -2936,10 +3026,16 @@ build_microbiome_kraken_database() {
     add_local_bacteria_library "$database"
 
     show_progress 55 "Adding RefSeq protozoan genomes"
-    download_kraken2_library_until_success "$database" "protozoa" --use-ftp
+    add_local_cached_refseq_library \
+        "$database" \
+        "protozoa" \
+        "manifest.protozoa.sh"
 
     show_progress 58 "Adding RefSeq fungal genomes"
-    download_kraken2_library_until_success "$database" "fungi" --use-ftp
+    add_local_cached_refseq_library \
+        "$database" \
+        "fungi" \
+        "manifest.fungi.sh"
 
     show_progress 61 "Adding plasmid sequences"
     add_local_plasmid_library "$database"

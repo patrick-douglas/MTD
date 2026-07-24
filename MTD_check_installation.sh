@@ -2082,6 +2082,9 @@ if [[ "$MODE" != "quick" ]]; then
         aux_scripts/manifest_scripts/manifest.bacteria.sh
         aux_scripts/manifest_scripts/manifest.archea.sh
         aux_scripts/manifest_scripts/manifest.plasmid.sh
+        aux_scripts/manifest_scripts/manifest.fungi.sh
+        aux_scripts/manifest_scripts/manifest.protozoa.sh
+        aux_scripts/manifest_scripts/sync_ncbi_cache.py
 
         aux_scripts/Kraken2/build_multi_genome_kraken2_db.sh
         aux_scripts/Kraken2/build_nonredundant_viral_fasta.py
