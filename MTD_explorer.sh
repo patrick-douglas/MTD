@@ -9,6 +9,7 @@ r=$(tput setaf 1 2>/dev/null || true)
 g=$(tput setaf 2 2>/dev/null || true)
 y=$(tput setaf 3 2>/dev/null || true)
 p=$(tput setaf 5 2>/dev/null || true)
+c=$(tput setaf 6 2>/dev/null || true)
 
 ital=$(tput sitm 2>/dev/null || printf '\033[3m')
 noital=$(tput ritm 2>/dev/null || printf '\033[23m')
@@ -18,6 +19,44 @@ echo "${w}"
 die() {
     echo "${r}[ERROR] $*${w}" >&2
     exit 1
+}
+
+print_rule() {
+    printf '%s\n' "============================================================"
+}
+
+show_progress() {
+    local percent="$1"
+    local message="$2"
+    local width=30
+    local filled
+    local empty
+    local filled_bar
+    local empty_bar
+
+    if ! [[ "$percent" =~ ^[0-9]+$ ]] ||
+       (( percent < 0 || percent > 100 )); then
+        die "Invalid analysis progress percentage: $percent"
+    fi
+
+    filled=$((percent * width / 100))
+    empty=$((width - filled))
+
+    printf -v filled_bar '%*s' "$filled" ''
+    printf -v empty_bar '%*s' "$empty" ''
+
+    filled_bar="${filled_bar// /#}"
+    empty_bar="${empty_bar// /-}"
+
+    echo
+    print_rule
+    printf '%sMTD Explorer analysis%s\n' "$p" "$w"
+    printf '[%s%s%s%s] %s%3d%%%s\n' \
+        "$g" "$filled_bar" \
+        "$w" "$empty_bar" \
+        "$c" "$percent" "$w"
+    printf '%s%s%s\n' "$g" "$message" "$w"
+    print_rule
 }
 
 require_file() {
@@ -3564,10 +3603,7 @@ if [[ -n "$metadata" ]]; then
     echo ""
 fi
 
-echo "${g}MTD running  progress:"
-echo ">>                  [10%]"
-
-echo "Raw reads preparation${w}"
+show_progress 10 "Preparing raw reads"
 
 # ------------------------------------------------------------
 # Prepare FASTQ files for the pipeline
@@ -3989,9 +4025,7 @@ echo "${g}============================================${w}"
 column -s $'\t' -t "$PREPARED_FASTQ_MANIFEST" 2>/dev/null || \
     cat "$PREPARED_FASTQ_MANIFEST"
 
-echo "${g}MTD running  progress:"
-echo '>>>>                [20%]'
-echo "Reads classification by kraken2; 1st step for host ${w}"
+show_progress 20 "Classifying host reads with Kraken2"
 echo "Host DB: $DB_host"
 
 if [[ ! -d "$DB_host" ]]; then
@@ -4254,15 +4288,13 @@ echo "$summary_file"
 echo "============================================================"
 column -t "$summary_file"
 
-echo "${g}MTD running  progress:"
-echo '>>>>>               [25%]'
+show_progress 25 "Classifying non-host reads with Kraken2"
 
 # ------------------------------------------------------------
 # Reads classification by Kraken2; 2nd step for non-host reads
 # Microbiome classification using reads not classified as host
 # ------------------------------------------------------------
 
-echo "Reads classification by kraken2; 2nd step for non-host reads ${w}"
 echo "Microbiome DB: $DB_micro"
 
 if [[ ! -d "$DB_micro" ]]; then
@@ -4531,8 +4563,7 @@ echo "$micro_summary"
 echo "============================================================"
 column -s $'\t' -t "$micro_summary"
 
-echo "${g}MTD running  progress:"
-echo '>>>>>>              [30%]'
+show_progress 30 "Creating the global Kraken2 read-composition summary"
 
 # ------------------------------------------------------------
 # Global read composition summary
@@ -4631,12 +4662,9 @@ echo "  unclassified   = reads not classified as host and not classified by DB_m
 echo "  check_pct_sum  = should be close to 100.00"
 echo "============================================================"
 
-echo "${g}MTD running  progress:"
-echo '>>>>>>              [30%]'
+show_progress 30 "Preparing optional contaminant removal"
 mkdir -p "$outputdr/kraken"
 mv kraken_global_read_composition_raw.tsv kraken_host_summary.tsv kraken_nonhost_raw_summary.tsv "$outputdr/kraken/"
-
-echo "Decontamination step${w}"
 
 source "$condapath/etc/profile.d/conda.sh"
 conda activate MTD
@@ -4953,10 +4981,7 @@ if [[ "$valid_contaminant_list" == "1" ]]; then
         fi
     done
 
-    echo "${g}MTD running  progress:"
-    echo '>>>>>>>             [35%]'
-
-    echo "Reads classification by Kraken2; 3rd step for decontaminated non-host reads to get final reports ${w}"
+    show_progress 35 "Reclassifying decontaminated non-host reads with Kraken2"
 
     for i in $lsn; do
         set_microbiome_fastq_paths "$i"
@@ -5253,10 +5278,7 @@ echo "  $outputdr/kraken/reports_micro_raw"
 echo "  $outputdr/kraken/reports_micro_final"
 echo "============================================================"
 
-echo "${g}MTD running  progress:"
-echo '>>>>>>>>            [40%]'
-
-echo "Bracken analysis ${w}"
+show_progress 40 "Running Bracken taxonomic abundance estimation"
 
 # ------------------------------------------------------------
 # Check Bracken read-length distribution file
@@ -5333,9 +5355,7 @@ for i in $lsn; do
         -t "$BRACKEN_THRESHOLD"
 done
 
-echo "${g}MTD running  progress:"
-echo '>>>>>>>>>           [45%]'
-echo "combined .bracken files (table like) into a single outputdr for Deseq2 ${w}"
+show_progress 45 "Combining Bracken outputs for downstream analyses"
 python $MTDIR/Tools/combine_bracken_outputs.py --files *.phylum.bracken -o $outputdr/bracken_phylum_all
 python $MTDIR/Tools/combine_bracken_outputs.py --files *.genus.bracken -o $outputdr/bracken_genus_all
 python $MTDIR/Tools/combine_bracken_outputs.py --files *.species.bracken -o $outputdr/bracken_species_all
@@ -5436,10 +5456,7 @@ else
     conda activate MTD
 fi
 
-echo "${g}MTD running  progress:"
-echo '>>>>>>>>>>          [50%]'
-
-echo "Prepared Bracken/Kraken report files for visualization: GraPhlAn, MPA, Krona ${w}"
+show_progress 50 "Preparing Kraken2 and Bracken visualization outputs"
 
 # ------------------------------------------------------------
 # Important:
@@ -6220,10 +6237,7 @@ echo "  $outputdr/graphlan/outimg.pdf"
 
 cd "$outputdr/temp" || exit 1
 
-echo "${g}MTD running  progress:"
-echo '>>>>>>>>>>>         [55%]'
-
-echo "HUMAnN3${w}"
+show_progress 55 "Running HUMAnN functional profiling"
 
 # ------------------------------------------------------------
 # Prepare universal HUMAnN inputs
@@ -6613,10 +6627,7 @@ conda activate MTD
 # humann_barplot --input $outputdr/hmn_genefamily_abundance_files/humann_genefamilies_cpm_stratified.tsv \
 #     --output $outputdr/hmn_genefamily_abundance_files/humann_genefamilies_barplot.png
 
-echo "${g}MTD running  progress:"
-echo '>>>>>>>>>>>>>       [65%]'
-
-echo "Starting to process the host reads...${w}"
+show_progress 65 "Processing host reads and host expression"
 
 # ------------------------------------------------------------
 # Host alignment
@@ -7312,18 +7323,13 @@ if [[ "$NO_COMPARISON" == "1" ]]; then
     conda deactivate
     conda activate MTD
 
-    echo "${g}"
-    echo 'MTD running  progress:'
-    echo '>>>>>>>>>>>>>>>>>>>>[100%]'
-    echo "MTD exploratory run is finished"
-    echo -e "${w}"
+    show_progress 100 "MTD Explorer exploratory analysis completed successfully"
+    echo
+    echo "${g}[OK] MTD Explorer exploratory run is finished.${w}"
     exit 0
 fi
 
-echo "${g}MTD running  progress:"
-echo '>>>>>>>>>>>>>>>     [75%]'
-
-echo "ssGSEA${w}"
+show_progress 75 "Running ssGSEA pathway enrichment"
 
 require_file "$outputdr/Host_DEG/host_counts_TPM.csv" "Host TPM matrix"
 
@@ -7622,11 +7628,7 @@ if [[ "$RUN_SSGSEA_PLOTS" == "1" ]]; then
 else
     echo "${y}[INFO] RUN_SSGSEA_PLOTS=0; skipping ssGSEA plots.${w}"
 fi
-echo "${g}MTD running  progress:"
-echo '>>>>>>>>>>>>>>>>    [80%]'
-echo "MTD DEG analyses are done. Starting microbiome x host association analyses..."
-
-echo "halla: association analysis${w}"
+show_progress 80 "Running microbiome-host association analyses with HAllA"
 
 conda deactivate
 conda activate halla0820
@@ -7827,12 +7829,7 @@ else
     echo "[INFO] To enable it: RUN_FULL_HALLAGRAM=1 bash $SCRIPT_NAME ..."
 fi
 
-echo "${g}"
-echo 'MTD running  progress:'
-echo '>>>>>>>>>>>>>>>>>>  [90%]'
-
-echo 'Analyzing microbiome x host_pathways associations...'
-echo "${w}"
+show_progress 90 "Analyzing microbiome-host pathway associations"
 
 run_halla_safe "$outputdr/halla/Microbiomes.txt" "$outputdr/halla/Host_score.txt" "$outputdr/halla/pathway" "$pdm" "Microbiomes" "Host_pathway"
 
@@ -7850,8 +7847,6 @@ fi
 conda deactivate
 conda activate MTD
 
-echo "${g}"
-echo 'MTD running  progress:'
-echo '>>>>>>>>>>>>>>>>>>>>[100%]'
-echo "MTD running is finished"
-echo -e "${w}"
+show_progress 100 "MTD Explorer analysis completed successfully"
+echo
+echo "${g}[OK] MTD Explorer analysis is finished.${w}"
