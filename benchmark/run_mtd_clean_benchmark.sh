@@ -28,6 +28,7 @@ Behavior:
   - Clones and validates the current GitHub repository before deleting anything.
   - Preserves the cache while removing the previous MTD/Conda benchmark state.
   - Generates Install_profiled.sh and runs the installation benchmark.
+  - Generates automatic failure diagnostics and focused error context.
   - Does not use the removed -a installer option.
 USAGE
 }
@@ -161,6 +162,7 @@ for required_script in \
     MTD_benchmark_install.sh \
     MTD_make_instrumented_installer.sh \
     MTD_benchmark_merge.py \
+    MTD_benchmark_failure_report.py \
     MTD_fix_profiled_locale.sh; do
     [[ -s "$STAGED_BENCHMARK_DIR/$required_script" ]] || \
         die "Missing benchmark component: $BENCHMARK_SUBDIR/$required_script"
@@ -257,6 +259,7 @@ chmod +x \
     "$BENCHMARK_DIR/MTD_benchmark_install.sh" \
     "$BENCHMARK_DIR/MTD_make_instrumented_installer.sh" \
     "$BENCHMARK_DIR/MTD_benchmark_merge.py" \
+    "$BENCHMARK_DIR/MTD_benchmark_failure_report.py" \
     "$BENCHMARK_DIR/MTD_fix_profiled_locale.sh" \
     "$BENCHMARK_DIR/run_mtd_clean_benchmark.sh"
 
@@ -265,6 +268,7 @@ bash -n "$BENCHMARK_DIR/MTD_benchmark_install.sh"
 bash -n "$BENCHMARK_DIR/MTD_make_instrumented_installer.sh"
 bash -n "$BENCHMARK_DIR/MTD_fix_profiled_locale.sh"
 python3 -m py_compile "$BENCHMARK_DIR/MTD_benchmark_merge.py"
+python3 -m py_compile "$BENCHMARK_DIR/MTD_benchmark_failure_report.py"
 
 rm -f "$MTD_DIR/Install_profiled.sh"
 
@@ -353,6 +357,32 @@ LATEST_BENCHMARK="$(
     cut -d' ' -f2-
 )"
 
+# MTD_BENCHMARK_FAILURE_DIAGNOSTICS_V1
+failure_report_status=0
+
+if [[ -n "$LATEST_BENCHMARK" && -d "$LATEST_BENCHMARK" ]]; then
+    set +e
+
+    python3 \
+        "$BENCHMARK_DIR/MTD_benchmark_failure_report.py" \
+        --run-dir "$LATEST_BENCHMARK" \
+        --exit-status "$benchmark_status"
+
+    failure_report_status=$?
+    set -e
+
+    if (( failure_report_status != 0 )); then
+        printf '[WARN] Failure diagnostic generation failed with exit status %s.\n' \
+            "$failure_report_status" >&2
+        printf '[WARN] The benchmark result and original console.log were preserved.\n' \
+            >&2
+    fi
+else
+    printf '[WARN] Benchmark result directory was not located; diagnostics were not generated.\n' \
+        >&2
+fi
+
+
 echo
 printf '%s\n' "============================================================"
 printf '%s\n' "BENCHMARK FINISHED"
@@ -360,6 +390,21 @@ printf 'Exit status: %s\n' "$benchmark_status"
 
 if [[ -n "$LATEST_BENCHMARK" && -d "$LATEST_BENCHMARK" ]]; then
     printf 'Results: %s\n' "$LATEST_BENCHMARK"
+
+
+if [[ -s "$LATEST_BENCHMARK/failure_report.txt" ]]; then
+    printf 'Diagnostics: %s\n' \
+        "$LATEST_BENCHMARK/failure_report.txt"
+fi
+
+if (( benchmark_status != 0 )) &&
+   [[ -s "$LATEST_BENCHMARK/failure_report.txt" ]]
+then
+    echo
+    echo "Failure diagnosis:"
+    sed -n '1,24p' \
+        "$LATEST_BENCHMARK/failure_report.txt"
+fi
     find "$LATEST_BENCHMARK" -maxdepth 1 -type f -printf '  %f\t%s bytes\n' | sort
 
     if [[ -s "$LATEST_BENCHMARK/summary.tsv" ]]; then
