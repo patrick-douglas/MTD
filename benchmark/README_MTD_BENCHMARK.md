@@ -1,87 +1,113 @@
 # MTD Explorer installation benchmark suite
 
-This package contains three scripts:
+This directory contains the complete benchmark and failure-diagnostic suite used
+to measure clean MTD Explorer installations.
 
-1. `MTD_benchmark_install.sh`  
-   Runs the installer and measures the entire machine during the installation:
-   wall time, CPU, RAM, process-tree RSS, disk I/O, network I/O, temperature,
-   hardware, operating system, Git commit, hashes, logs and watched-directory
-   sizes.
+## Components
 
-2. `MTD_make_instrumented_installer.sh`  
-   Creates `Install_profiled.sh` without changing the original `Install.sh`.
-   It records function-level timings in `steps.tsv`.
+1. `run_mtd_clean_benchmark.sh`
+   Clones the current repository, validates every benchmark component, generates
+   and validates `Install_profiled.sh`, and only then asks for destructive cleanup
+   confirmation. The persistent installation cache is preserved.
 
-3. `MTD_benchmark_merge.py`  
-   Combines runs from multiple machines into article-ready TSV tables.
+2. `MTD_make_instrumented_installer.sh`
+   Creates `Install_profiled.sh` without modifying `Install.sh`. It supports both
+   the current software-before-databases installer layout and historical snapshots
+   containing `prepare_installation_cache()`.
 
-## 1. Place the scripts in the MTD Explorer repository
+3. `MTD_fix_profiled_locale.sh`
+   Repairs older generated profilers that parse a locale-formatted
+   `EPOCHREALTIME` value with a decimal comma.
+
+4. `MTD_benchmark_install.sh`
+   Runs the installer in the foreground while collecting wall time, CPU, RAM,
+   process-tree RSS and swap, disk and network I/O, temperatures, hardware,
+   software versions, Git state, logs, and watched-path sizes.
+
+5. `MTD_benchmark_failure_report.py`
+   Produces a compact failure diagnosis, contextual log extracts, and stable
+   failure metrics that remain mergeable with successful runs.
+
+6. `MTD_benchmark_merge.py`
+   Combines benchmark runs from one or more machines into article-ready TSV
+   tables and function-level timing summaries.
+
+7. `README_MTD_BENCHMARK.md`
+   This guide.
+
+## Safety change after installer reorganization
+
+The current installer separates these stages:
+
+```text
+prepare_installation_cache_structure
+validate_all_software_before_databases
+download_database_caches
+```
+
+The benchmark generator now recognizes that layout. More importantly, the clean
+runner creates and validates the instrumented installer **before** displaying the
+`Type DELETE` prompt. If instrumentation becomes incompatible with a future
+`Install.sh`, the runner exits while the existing MTD and Conda installation are
+still untouched.
+
+## Recommended clean benchmark command
+
+Keep the runner outside the repository because the clean workflow removes and
+replaces `~/MTD-Explorer`:
+
+```bash
+cp ~/MTD-Explorer/benchmark/run_mtd_clean_benchmark.sh ~/
+chmod +x ~/run_mtd_clean_benchmark.sh
+
+bash ~/run_mtd_clean_benchmark.sh \
+    -n mauro \
+    -o /media/mago/MTD_Install_cach/MTD_install_cache
+```
+
+The runner detects whether the persistent cache is cold or warm and generates a
+label ending in `_r2`.
+
+## Manual profiled-installer generation
 
 ```bash
 cd ~/MTD-Explorer
-cp /path/to/MTD_benchmark_suite/* .
-chmod +x \
-    benchmark/MTD_benchmark_install.sh \
-    benchmark/MTD_make_instrumented_installer.sh \
-    benchmark/MTD_fix_profiled_locale.sh \
-    benchmark/run_mtd_clean_benchmark.sh
+
+bash benchmark/MTD_make_instrumented_installer.sh \
+    --input Install.sh \
+    --output Install_profiled.sh
+
+bash benchmark/MTD_fix_profiled_locale.sh Install_profiled.sh
+bash -n Install_profiled.sh
 ```
 
-## 2. Create the profiled installer
+For the reorganized installer, the generator should report:
 
-```bash
-bash ./benchmark/MTD_make_instrumented_installer.sh \
-    --input ./Install.sh \
-    --output ./Install_profiled.sh
+```text
+[OK] Installer layout detected: software-before-databases-v2
+[OK] Profiler insertion point: main "$@"
 ```
 
-Validate both scripts:
+## Manual benchmark wrapper
 
 ```bash
-bash -n ./Install.sh
-bash -n ./Install_profiled.sh
-```
+cd ~/MTD-Explorer
 
-The original `Install.sh` is not modified.
-
-## 3. Run a clean installation benchmark
-
-Example for the master machine:
-
-```bash
-bash ./benchmark/MTD_benchmark_install.sh \
-    --label master_cold_native_r1 \
-    --interval 5 \
-    --output-root "$HOME/MTD_benchmarks" \
-    --watch-path "$HOME/miniconda3" \
-    --watch-path "/media/me/MTD_install_cache" \
-    --watch-path "$HOME/MTD-Explorer" \
-    -- \
-    bash ./Install_profiled.sh \
-        -o "/media/me/MTD_install_cache"
-```
-
-Example for the independent lower-performance machine:
-
-```bash
-bash ./benchmark/MTD_benchmark_install.sh \
-    --label secondary_cold_native_r1 \
+bash benchmark/MTD_benchmark_install.sh \
+    --label master_warm_native_r2 \
     --interval 5 \
     --output-root "$HOME/MTD_benchmarks" \
     --watch-path "$HOME/miniconda3" \
     --watch-path "/path/to/MTD_install_cache" \
     --watch-path "$HOME/MTD-Explorer" \
     -- \
-    bash ./Install_profiled.sh \
-        -o "/path/to/MTD_install_cache"
+    bash ./Install_profiled.sh -o "/path/to/MTD_install_cache"
 ```
 
-Do not pass a password through `Install.sh -w` during a benchmark because the
-executed command is recorded in the metadata. Let `sudo` prompt normally.
+Do not pass passwords in command-line arguments. The benchmark records the
+executed command in metadata; allow `sudo` to prompt normally.
 
-## 4. Output of each run
-
-A run directory contains:
+## Output from each run
 
 ```text
 console.log
@@ -95,22 +121,25 @@ steps.tsv
 summary.tsv
 watch_paths_before.tsv
 watch_paths_after.tsv
+failure_report.txt
+failure_report.tsv
+failure_context.log
+console_tail.log
+diagnostic_matches.tsv
+failed_steps.tsv
 ```
 
-`summary.tsv` contains whole-installation metrics.  
-`resource_samples.csv` contains one resource sample every few seconds.  
-`steps.tsv` contains function-level timings from the profiled installer.
+Failure files are generated after both successful and failed clean-runner
+executions. For a failure, inspect `failure_report.txt` and
+`failure_context.log` first.
 
-Nested function durations overlap. For stage reporting, inspect
-`parent_function`, `call_depth`, and the major installation functions rather
-than summing every row blindly.
+Nested function durations overlap. Use `parent_function`, `call_depth`, and the
+major installation-stage functions rather than summing every row blindly.
 
-## 5. Merge results from both machines
-
-Copy both benchmark root directories to one machine, then run:
+## Merge benchmark runs
 
 ```bash
-python3 ./benchmark/MTD_benchmark_merge.py \
+python3 benchmark/MTD_benchmark_merge.py \
     --input "$HOME/MTD_benchmarks_master" \
     --input "$HOME/MTD_benchmarks_secondary" \
     --output "$HOME/MTD_benchmark_merged"
@@ -125,58 +154,12 @@ steps_long.tsv
 steps_summary.tsv
 ```
 
-`runs_article.tsv` is the compact hardware/performance table intended for the
-paper. `runs_wide.tsv` preserves every collected metric.
-
-## 6. Recommended labels
-
-```text
-master_cold_native_r1
-secondary_cold_native_r1
-
-master_warm_native_r1
-secondary_warm_native_r1
-
-master_warm_t8_r1
-master_warm_t8_r2
-master_warm_t8_r3
-
-secondary_warm_t8_r1
-secondary_warm_t8_r2
-secondary_warm_t8_r3
-```
-
-- `cold`: no Miniconda and no populated MTD cache.
-- `warm`: downloaded inputs are already present in the persistent cache.
-- `native`: the installer uses the machine's normal thread count.
-- `t8`: both machines use eight threads after the installer gains a controlled
-  thread option or `MTD_THREADS` environment variable.
-
-## 7. Fair-run checklist
-
-Before each timed run:
-
-- use the same Git commit;
-- record whether the cache is empty or populated;
-- reboot the machine;
-- stop unrelated analyses, backups and cloud synchronization;
-- use the same network type;
-- avoid running both large downloads simultaneously on the same connection;
-- keep the machine connected to AC power;
-- preserve every run directory, including failed runs;
-- run `MTD_check_installation.sh --deep` after a successful installation.
-
-The clean installation on each machine demonstrates reproducibility.
-Repeated warm-cache component benchmarks provide the statistical performance
-comparison.
-
-
-## Important path rule
+## Path rule
 
 Do not quote a path beginning with a literal tilde:
 
 ```bash
-# Wrong: the shell passes "~" literally
+# Wrong
 -o "~/MTD_install_cache"
 
 # Correct
@@ -186,16 +169,15 @@ Do not quote a path beginning with a literal tilde:
 -o ~/MTD_install_cache
 ```
 
-The benchmark wrapper now stops immediately if it detects a literal `~` path.
+## Fair-run checklist
 
-## Locale hotfix for profiler versions generated before this correction
+Before each timed run:
 
-Some locales format Bash `EPOCHREALTIME` with a decimal comma. If an older
-`Install_profiled.sh` reports `value too great for base`, run:
-
-```bash
-bash ./benchmark/MTD_fix_profiled_locale.sh ./Install_profiled.sh
-```
-
-Alternatively, replace the suite scripts and regenerate `Install_profiled.sh`
-from the unchanged original `Install.sh`.
+- use the same Git commit;
+- record whether the persistent cache is cold or warm;
+- reboot the machine when practical;
+- stop unrelated analyses, backups, and cloud synchronization;
+- use the same network type;
+- keep the machine connected to AC power;
+- preserve successful and failed run directories;
+- run `MTD_check_installation.sh --deep` after a successful installation.

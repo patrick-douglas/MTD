@@ -67,8 +67,21 @@ grep -q '^#!/usr/bin/env bash' "$input" ||
     die "The input does not look like the expected Bash installer."
 grep -q 'install_miniconda[[:space:]]*()' "$input" ||
     die "The input does not contain the expected install_miniconda() function."
-grep -q 'prepare_installation_cache[[:space:]]*()' "$input" ||
-    die "The input does not contain prepare_installation_cache()."
+# MTD_BENCHMARK_INSTALLER_LAYOUT_V3
+# Accept both the reorganized installer and older installer snapshots. The
+# current software-before-databases layout is detected by its three explicit
+# stages; the legacy layout remains supported for historical benchmark runs.
+installer_layout=""
+if grep -q 'prepare_installation_cache_structure[[:space:]]*()' "$input" &&
+   grep -q 'download_database_caches[[:space:]]*()' "$input" &&
+   grep -q 'validate_all_software_before_databases[[:space:]]*()' "$input"
+then
+    installer_layout="software-before-databases-v2"
+elif grep -q 'prepare_installation_cache[[:space:]]*()' "$input"; then
+    installer_layout="legacy-single-cache-stage"
+else
+    die "The input contains neither the reorganized cache/database stages nor the legacy prepare_installation_cache() function."
+fi
 
 if grep -q 'BEGIN MTD FUNCTION PROFILER' "$input"; then
     die "The input is already instrumented."
@@ -76,25 +89,45 @@ fi
 
 mkdir -p "$(dirname "$output")"
 
-# The current MTD installer defines its functions and then starts the workflow
-# with a bare init_colors call. Use the final exact call, never the function
-# definition. A parse_arguments fallback is retained for future reorganizations.
+# Insert the profiler after all function definitions and immediately before
+# the top-level workflow entry point. The current installer uses main "$@".
+# Exact top-level legacy fallbacks are retained for historical snapshots.
+insertion_line=""
+insertion_anchor=""
+
 insertion_line="$(
-    grep -nE '^[[:space:]]*init_colors[[:space:]]*$' "$input" |
+    grep -nE '^main[[:space:]]+"\$@"[[:space:]]*$' "$input" |
     tail -n 1 |
     cut -d: -f1 || true
 )"
+if [[ -n "$insertion_line" ]]; then
+    insertion_anchor='main "$@"'
+fi
 
 if [[ -z "$insertion_line" ]]; then
     insertion_line="$(
-        grep -nE '^[[:space:]]*parse_arguments[[:space:]]+"\$@"[[:space:]]*$' "$input" |
+        grep -nE '^init_colors[[:space:]]*$' "$input" |
         tail -n 1 |
         cut -d: -f1 || true
     )"
+    if [[ -n "$insertion_line" ]]; then
+        insertion_anchor='init_colors'
+    fi
+fi
+
+if [[ -z "$insertion_line" ]]; then
+    insertion_line="$(
+        grep -nE '^parse_arguments[[:space:]]+"\$@"[[:space:]]*$' "$input" |
+        tail -n 1 |
+        cut -d: -f1 || true
+    )"
+    if [[ -n "$insertion_line" ]]; then
+        insertion_anchor='parse_arguments "$@"'
+    fi
 fi
 
 [[ -n "$insertion_line" ]] ||
-    die "Could not identify where the installation workflow starts."
+    die "Could not identify a top-level installer workflow entry point."
 
 tmp="$(mktemp "${TMPDIR:-/tmp}/mtd-profiled-installer.XXXXXX")"
 trap 'rm -f "$tmp"' EXIT
@@ -319,13 +352,15 @@ bash -n "$tmp" || die "The generated installer did not pass bash -n."
 cp -f "$tmp" "$output"
 chmod --reference="$input" "$output" 2>/dev/null || chmod +x "$output"
 
+printf '[OK] Installer layout detected: %s\n' "$installer_layout"
+printf '[OK] Profiler insertion point: %s (line %s)\n' "$insertion_anchor" "$insertion_line"
 printf '[OK] Instrumented installer created:\n'
 printf '  %s\n' "$(readlink -f "$output")"
 printf '[OK] Original installer was not modified:\n'
 printf '  %s\n' "$(readlink -f "$input")"
 printf '\nRun it through the system benchmark wrapper, for example:\n\n'
 printf '  bash ./benchmark/MTD_benchmark_install.sh \\\n'
-printf '    --label master_cold_native_r1 \\\n'
+printf '    --label master_warm_native_r2 \\\n'
 printf '    --watch-path "$HOME/miniconda3" \\\n'
 printf '    --watch-path "/path/to/cache" \\\n'
 printf '    -- bash ./Install_profiled.sh -o "/path/to/cache"\n'

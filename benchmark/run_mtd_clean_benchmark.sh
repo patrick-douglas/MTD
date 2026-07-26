@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# MTD_BENCHMARK_PREDELETE_PROFILE_CHECK_V3
 
 set -Eeuo pipefail
 
@@ -112,7 +113,7 @@ else
     CACHE_MODE="cold"
 fi
 
-BENCHMARK_LABEL="${MACHINE_SAFE}_${CACHE_MODE}_cache_auto_tos_r1"
+BENCHMARK_LABEL="${MACHINE_SAFE}_${CACHE_MODE}_cache_auto_tos_r2"
 
 STAGING_ROOT="$(mktemp -d "$HOME/.mtd_clone_staging.XXXXXX")"
 STAGED_REPO="$STAGING_ROOT/$REPO_NAME"
@@ -158,21 +159,61 @@ if printf '%s\n' "$HELP_OUTPUT" | grep -Eq '(^|[[:space:]])-a([[:space:]]|$)'; t
     die "The cloned Install.sh still advertises the removed -a option. Nothing was deleted."
 fi
 
-for required_script in \
-    MTD_benchmark_install.sh \
-    MTD_make_instrumented_installer.sh \
-    MTD_benchmark_merge.py \
-    MTD_benchmark_failure_report.py \
-    MTD_fix_profiled_locale.sh; do
-    [[ -s "$STAGED_BENCHMARK_DIR/$required_script" ]] || \
-        die "Missing benchmark component: $BENCHMARK_SUBDIR/$required_script"
+required_benchmark_files=(
+    MTD_benchmark_install.sh
+    MTD_make_instrumented_installer.sh
+    MTD_benchmark_merge.py
+    MTD_benchmark_failure_report.py
+    MTD_fix_profiled_locale.sh
+    run_mtd_clean_benchmark.sh
+    README_MTD_BENCHMARK.md
+)
+
+for required_file in "${required_benchmark_files[@]}"; do
+    [[ -s "$STAGED_BENCHMARK_DIR/$required_file" ]] ||
+        die "Missing benchmark component: $BENCHMARK_SUBDIR/$required_file"
 done
+
+# Validate every benchmark component and generate the profiled installer while
+# the old installation is still untouched. Any incompatibility therefore stops
+# the runner before the destructive confirmation is offered.
+bash -n "$STAGED_BENCHMARK_DIR/MTD_benchmark_install.sh"
+bash -n "$STAGED_BENCHMARK_DIR/MTD_make_instrumented_installer.sh"
+bash -n "$STAGED_BENCHMARK_DIR/MTD_fix_profiled_locale.sh"
+bash -n "$STAGED_BENCHMARK_DIR/run_mtd_clean_benchmark.sh"
+python3 -m py_compile "$STAGED_BENCHMARK_DIR/MTD_benchmark_merge.py"
+python3 -m py_compile "$STAGED_BENCHMARK_DIR/MTD_benchmark_failure_report.py"
+
+STAGED_PROFILED_INSTALLER="$STAGED_REPO/Install_profiled.sh"
+rm -f -- "$STAGED_PROFILED_INSTALLER"
+
+bash "$STAGED_BENCHMARK_DIR/MTD_make_instrumented_installer.sh" \
+    --input "$INSTALLER" \
+    --output "$STAGED_PROFILED_INSTALLER"
+
+bash "$STAGED_BENCHMARK_DIR/MTD_fix_profiled_locale.sh" \
+    "$STAGED_PROFILED_INSTALLER"
+
+bash -n "$STAGED_PROFILED_INSTALLER" ||
+    die "The staged Install_profiled.sh failed Bash syntax validation. Nothing was deleted."
+
+grep -q 'BEGIN MTD FUNCTION PROFILER' "$STAGED_PROFILED_INSTALLER" ||
+    die "Function profiler marker was not found before cleanup. Nothing was deleted."
+
+grep -Eq '^[[:space:]]*export[[:space:]]+CONDA_PLUGINS_AUTO_ACCEPT_TOS=(yes|1|true)[[:space:]]*$' "$STAGED_PROFILED_INSTALLER" ||
+    die "The staged profiled installer lost Conda ToS autoaccept. Nothing was deleted."
+
+if grep -qE 'accept_required_conda_tos|accept_conda_tos|Accept the Anaconda Terms of Service\?' "$STAGED_PROFILED_INSTALLER"; then
+    die "The staged profiled installer contains the retired interactive ToS code. Nothing was deleted."
+fi
 
 CLONED_COMMIT="$(git -C "$STAGED_REPO" rev-parse HEAD)"
 printf '[PASS] Repository validated before cleanup.\n'
 printf '[INFO] Commit: %s\n' "$CLONED_COMMIT"
 printf '[PASS] Embedded Conda ToS autoaccept detected.\n'
 printf '[PASS] Retired -a option and interactive ToS prompt are absent.\n'
+printf '[PASS] Benchmark suite syntax and Python compilation checks passed.\n'
+printf '[PASS] Install_profiled.sh was generated and validated before cleanup.\n'
 
 echo
 printf '%s\n' "The following installation state will be removed:"
@@ -267,18 +308,15 @@ bash -n "$MTD_DIR/Install.sh"
 bash -n "$BENCHMARK_DIR/MTD_benchmark_install.sh"
 bash -n "$BENCHMARK_DIR/MTD_make_instrumented_installer.sh"
 bash -n "$BENCHMARK_DIR/MTD_fix_profiled_locale.sh"
+bash -n "$BENCHMARK_DIR/run_mtd_clean_benchmark.sh"
 python3 -m py_compile "$BENCHMARK_DIR/MTD_benchmark_merge.py"
 python3 -m py_compile "$BENCHMARK_DIR/MTD_benchmark_failure_report.py"
 
-rm -f "$MTD_DIR/Install_profiled.sh"
-
-bash "$BENCHMARK_DIR/MTD_make_instrumented_installer.sh" \
-    --input "$MTD_DIR/Install.sh" \
-    --output "$MTD_DIR/Install_profiled.sh"
-
-bash "$BENCHMARK_DIR/MTD_fix_profiled_locale.sh" \
-    "$MTD_DIR/Install_profiled.sh"
-bash -n ./Install_profiled.sh
+# Install_profiled.sh was already generated and validated in the staging area,
+# before any previous installation state was removed. Revalidate the moved copy.
+[[ -s "$MTD_DIR/Install_profiled.sh" ]] ||
+    die "The prevalidated Install_profiled.sh was not moved into the repository."
+bash -n "$MTD_DIR/Install_profiled.sh"
 
 grep -q 'BEGIN MTD FUNCTION PROFILER' ./Install_profiled.sh || \
     die "Function profiler marker was not found in Install_profiled.sh."
