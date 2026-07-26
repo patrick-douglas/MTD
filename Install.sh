@@ -2444,7 +2444,7 @@ create_conda_environments() {
     safe_conda_deactivate
 
     run_required_command \
-        "Creating MTD-fastp environment" \
+        "Creating MTD_fastp environment" \
         conda env create -f "$dir/Installation/MTD_fastp.yml"
 
     run_required_command \
@@ -3490,10 +3490,13 @@ install_r412_and_annotation_packages() {
 }
 
 validate_all_software_before_databases() {
+    # MTD_FASTP_ENV_NAME_FIX_V1
+    # Installation/MTD_fastp.yml creates MTD_fastp; keep every
+    # validation and conda run call consistent with that exact name.
     log_info "Validating all software before biological database installation..."
     log_info "Database downloads and builds will not start unless every check passes."
 
-    require_env_command MTD-fastp fastp
+    require_env_command MTD_fastp fastp
 
     require_env_command MTD Rscript
     require_env_command MTD hisat2-build
@@ -3545,7 +3548,7 @@ validate_all_software_before_databases() {
 
     run_required_command \
         "Checking fastp execution" \
-        conda run -n MTD-fastp \
+        conda run -n MTD_fastp \
         fastp --version
 
     run_required_command \
