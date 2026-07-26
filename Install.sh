@@ -7,8 +7,10 @@ export CONDA_PLUGINS_AUTO_ACCEPT_TOS=yes
 # ==============================================================================
 # MTD installer
 # ==============================================================================
-# This version reorganizes the original installer into functions while preserving
-# the execution order and the local Kraken2 helper-script workflow.
+# MTD_SOFTWARE_BEFORE_DATABASES_V2
+# This installer completes and validates every software environment before
+# downloading or constructing biological databases. Expensive database work is
+# therefore blocked whenever a package, executable, or Conda environment fails.
 #
 # Deliberately not using `set -e` here. The original installer continues after
 # some non-critical commands fail, and enabling it would change existing behavior.
@@ -1462,8 +1464,8 @@ prepare_virushost_release_cache() {
     log_info "  $VIRUSHOST_MIRROR_TAG"
 }
 
-prepare_installation_cache() {
-    log_info "Preparing persistent MTD installation cache:"
+prepare_installation_cache_structure() {
+    log_info "Preparing persistent MTD installation cache structure:"
     log_info "  $offline_files_folder"
 
     if ! mkdir -p \
@@ -1483,12 +1485,19 @@ prepare_installation_cache() {
         exit 1
     fi
 
+    log_ok "Persistent installation cache structure is ready."
+}
+
+download_database_caches() {
+    log_info "Downloading and validating biological database caches:"
+    log_info "  $offline_files_folder"
+
     prepare_virushost_release_cache
 
     ensure_cached_file \
-    "HUMAnN utility mapping database" \
-    "https://huttenhower.sph.harvard.edu/humann_data/full_mapping_v201901b.tar.gz" \
-    "$offline_files_folder/HUMAnN/full_mapping_v201901b.tar.gz"
+        "HUMAnN utility mapping database" \
+        "https://huttenhower.sph.harvard.edu/humann_data/full_mapping_v201901b.tar.gz" \
+        "$offline_files_folder/HUMAnN/full_mapping_v201901b.tar.gz"
 
     ensure_cached_file \
         "HUMAnN UniRef90 annotated database" \
@@ -1502,7 +1511,7 @@ prepare_installation_cache() {
 
     prepare_humann_metaphlan_cache
 
-    log_ok "Persistent installation cache is ready."
+    log_ok "Biological database caches are complete and validated."
 }
 
 # ------------------------------------------------------------------------------
@@ -2474,10 +2483,6 @@ create_conda_environments() {
 
     safe_conda_deactivate
 
-        run_required_command \
-        "Creating initial R412 environment" \
-        conda env create -f "$dir/Installation/R412.yml"
-
     # ----------------------------------------------------------
     # Dedicated environment for custom OrgDb construction
     # ----------------------------------------------------------
@@ -3081,39 +3086,39 @@ build_microbiome_kraken_database() {
 
     viral_library="$offline_files_folder/Kraken2DB_micro/library/viral/viral_genomes_combined_nonredundant.fna"
 
-    show_progress 40 "Preparing microbiome manifests"
+    show_progress 60 "Preparing microbiome manifests"
     prepare_microbiome_manifests
 
     chmod +x "$KRAKEN_AUX_DIR/kraken2-build-download-taxonomy"
 
-    show_progress 42 "Preparing the shared NCBI taxonomy"
+    show_progress 62 "Preparing the shared NCBI taxonomy"
     install_shared_kraken2_taxonomy "$database"
 
-    show_progress 45 "Adding archaeal genomes to the microbiome database"
+    show_progress 65 "Adding archaeal genomes to the microbiome database"
     add_local_archaea_library "$database"
 
-    show_progress 49 "Adding bacterial genomes to the microbiome database"
+    show_progress 68 "Adding bacterial genomes to the microbiome database"
     add_local_bacteria_library "$database"
 
-    show_progress 55 "Adding RefSeq protozoan genomes"
+    show_progress 72 "Adding RefSeq protozoan genomes"
     add_local_cached_refseq_library \
         "$database" \
         "protozoa" \
         "manifest.protozoa.sh"
 
-    show_progress 58 "Adding RefSeq fungal genomes"
+    show_progress 75 "Adding RefSeq fungal genomes"
     add_local_cached_refseq_library \
         "$database" \
         "fungi" \
         "manifest.fungi.sh"
 
-    show_progress 61 "Adding plasmid sequences"
+    show_progress 78 "Adding plasmid sequences"
     add_local_plasmid_library "$database"
 
-    show_progress 64 "Adding the UniVec_Core library"
+    show_progress 80 "Adding the UniVec_Core library"
     download_kraken2_library_until_success "$database" "UniVec_Core" --use-ftp
 
-    show_progress 66 "Adding the nonredundant viral collection"
+    show_progress 82 "Adding the nonredundant viral collection"
 
     if [[ ! -s "$viral_library" ]]; then
         log_error "The nonredundant viral library is missing or empty:"
@@ -3128,11 +3133,11 @@ build_microbiome_kraken_database() {
     --threads "$threads" \
     --db "$database"
 
-    show_progress 67 "Checking taxonomy freshness and reference mappings"
+    show_progress 84 "Checking taxonomy freshness and reference mappings"
 
     prepare_kraken2_database_mapping "$database"
 
-    show_progress 68 "Building the final Kraken2 microbiome database"
+    show_progress 86 "Building the final Kraken2 microbiome database"
 
 run_required_command \
     "Building the final Kraken2 microbiome database" \
@@ -3142,7 +3147,7 @@ run_required_command \
 validate_built_kraken2_database \
     "$database"
 
-show_progress 72 "Kraken2 microbiome database completed"
+show_progress 88 "Kraken2 microbiome database completed"
 }
 
 build_bracken_database() {
@@ -3428,55 +3433,53 @@ install_humann_databases() {
 install_r412_and_annotation_packages() {
     safe_conda_deactivate
 
-    conda install -n py2 -y -c conda-forge pkg-config
+    run_required_command \
+        "Installing pkg-config in py2" \
+        conda install -n py2 -y -c conda-forge pkg-config
+
+    # R412 is intentionally created only here. Keeping it out of
+    # create_conda_environments() avoids creating and deleting the same
+    # environment twice during a clean installation.
+    if [[ -d "$condapath/envs/R412" ]]; then
+        log_warning "Removing a pre-existing R412 environment before clean creation."
+
+        run_required_command \
+            "Removing the pre-existing R412 environment" \
+            conda env remove -n R412 -y
+
+        rm -rf -- "$condapath/envs/R412"
+    fi
+
+    run_required_command \
+        "Setting Conda channel priority to strict for R412 creation" \
+        conda config --set channel_priority strict
+
+    run_required_command \
+        "Creating the R412 environment" \
+        conda env create -f "$dir/Installation/R412.yml"
+
     activate_required_env R412
+
     run_required_command \
         "Installing pkg-config in R412" \
         conda install -n R412 -y -c conda-forge pkg-config
 
-    # Preserved libcurl troubleshooting step from the original installer.
-    wget \
-        -T 300 \
-        -t 5 \
-        -N \
-        --no-if-modified-since \
-        https://cran.r-project.org/src/contrib/Archive/curl/curl_4.3.2.tar.gz
+    run_required_script \
+        "$dir/update_fix/Install.R.packages.R412_optimized.sh"
 
-    if [[ -f /usr/lib/x86_64-linux-gnu/pkgconfig/libcurl.pc ]]; then
-        locate_lib=/usr/lib/x86_64-linux-gnu/pkgconfig
-    else
-        locate_lib="$(dirname "$(locate libcurl 2>/dev/null | grep '\.pc' | head -n 1)")"
-    fi
-
-    # `locate_lib` is intentionally retained for compatibility with the old
-    # troubleshooting block, although it is not consumed later in this script.
-    : "${locate_lib:=}"
-
-    cd "$dir" || exit 1
-    safe_conda_deactivate
-
-    conda env remove -n R412 -y
-    rm -rf "$condapath/envs/R412"
-    rm -rf "$condapath/pkgs/r-base-4.1.2-hde4fec0_0"
-    rm -f "$condapath"/pkgs/r-base-4.1.2-hde4fec0_0*.tar.bz2
-    rm -f "$condapath"/pkgs/r-base-4.1.2-hde4fec0_0*.conda
-
-    conda clean --packages --tarballs -y
     run_required_command \
-        "Setting Conda channel priority to strict for R412 recreation" \
-        conda config --set channel_priority strict
-    run_required_command \
-        "Recreating R412 environment" \
-        conda env create -f "$dir/Installation/R412.yml"
-    activate_required_env R412
-
-    run_required_script "$dir/update_fix/Install.R.packages.R412_optimized.sh"
-
-    Rscript -e \
+        "Installing and validating UCSC.utils in R412" \
+        Rscript -e \
         'install.packages("https://bioconductor.org/packages/3.19/bioc/src/contrib/UCSC.utils_1.0.0.tar.gz", repos=NULL, type="source", dependencies=FALSE); library(UCSC.utils); packageVersion("UCSC.utils")'
 
-    run_required_script "$dir/update_fix/check_R_pkg.R412.sh"
+    run_required_script \
+        "$dir/update_fix/check_R_pkg.R412.sh"
+
     safe_conda_deactivate
+
+    run_required_command \
+        "Restoring the original Conda channel priority" \
+        conda config --set channel_priority "$ORIGINAL_CHANNEL_PRIORITY"
 
     log_info "OrgDb annotation packages are managed by the dedicated MTD_orgdb environment."
 
@@ -3486,6 +3489,84 @@ install_r412_and_annotation_packages() {
         Rscript "$dir/Installation/check_MTD_orgdb.R"
 }
 
+validate_all_software_before_databases() {
+    log_info "Validating all software before biological database installation..."
+    log_info "Database downloads and builds will not start unless every check passes."
+
+    require_env_command MTD-fastp fastp
+
+    require_env_command MTD Rscript
+    require_env_command MTD hisat2-build
+    require_env_command MTD makeblastdb
+    require_env_command MTD datasets
+    require_env_command MTD emapper.py
+    require_env_command MTD diamond
+
+    validate_humann_environment
+
+    require_env_command py2 python
+
+    require_env_command halla0820 python
+    require_env_command halla0820 R
+    require_env_command halla0820 halla
+
+    require_env_command R412 Rscript
+
+    require_env_command MTD_orgdb Rscript
+    require_env_command MTD_orgdb jq
+    require_env_command MTD_orgdb yq
+
+    ensure_kraken2_environment
+
+    run_required_command \
+        "Checking R packages in the MTD environment" \
+        conda run -n MTD \
+        bash "$dir/update_fix/check_R_pkg.MTD.sh"
+
+    run_required_command \
+        "Checking R packages in the R412 environment" \
+        conda run -n R412 \
+        bash "$dir/update_fix/check_R_pkg.R412.sh"
+
+    run_required_command \
+        "Checking R packages in the halla0820 environment" \
+        conda run -n halla0820 \
+        bash "$dir/update_fix/check_R_pkg.halla0820.sh"
+
+    run_required_command \
+        "Validating the HAllA Matplotlib compatibility patch" \
+        conda run -n halla0820 \
+        python "$dir/update_fix/patch_halla_matplotlib.py" --check
+
+    run_required_command \
+        "Checking MTD_orgdb R packages" \
+        conda run -n MTD_orgdb \
+        Rscript "$dir/Installation/check_MTD_orgdb.R"
+
+    run_required_command \
+        "Checking fastp execution" \
+        conda run -n MTD-fastp \
+        fastp --version
+
+    run_required_command \
+        "Checking NCBI Datasets CLI execution" \
+        conda run -n MTD \
+        datasets --version
+
+    run_required_command \
+        "Checking eggNOG-mapper execution" \
+        conda run -n MTD \
+        emapper.py --version
+
+    run_required_command \
+        "Checking DIAMOND execution" \
+        conda run -n MTD \
+        diamond version
+
+    log_ok "All software environments and critical packages passed validation."
+    log_ok "Biological database installation is now authorized to start."
+}
+
 show_r_package_versions() {
     echo "${g}"
     echo "*********************************"
@@ -3493,9 +3574,20 @@ show_r_package_versions() {
     echo "*********************************"
     echo "${w}"
 
-    conda run -n MTD "$dir/update_fix/check_R_pkg.MTD.sh"
-    conda run -n R412 "$dir/update_fix/check_R_pkg.R412.sh"
-    conda run -n halla0820 "$dir/update_fix/check_R_pkg.halla0820.sh"
+    run_required_command \
+        "Reporting MTD R package versions" \
+        conda run -n MTD \
+        bash "$dir/update_fix/check_R_pkg.MTD.sh"
+
+    run_required_command \
+        "Reporting R412 R package versions" \
+        conda run -n R412 \
+        bash "$dir/update_fix/check_R_pkg.R412.sh"
+
+    run_required_command \
+        "Reporting halla0820 R package versions" \
+        conda run -n halla0820 \
+        bash "$dir/update_fix/check_R_pkg.halla0820.sh"
 
     echo
     echo "${g}MTD_orgdb environment:${w}"
@@ -3505,7 +3597,6 @@ show_r_package_versions() {
         conda run -n MTD_orgdb \
         Rscript "$dir/Installation/check_MTD_orgdb.R"
 }
-
 # ------------------------------------------------------------------------------
 # Main installation sequence
 # ------------------------------------------------------------------------------
@@ -3525,35 +3616,42 @@ main() {
     configure_paths_and_options
     initialize_installation
 
-    show_progress 8 "Preparing the persistent installation cache"
-    prepare_installation_cache
+    show_progress 8 "Preparing persistent cache directories"
+    prepare_installation_cache_structure
 
-    show_progress 12 "Creating the MTD Conda environments"
+    show_progress 12 "Creating the core MTD Conda environments"
     create_conda_environments
 
     show_progress 27 "Installing HAllA dependencies"
     install_halla_dependencies
 
-    show_progress 34 "Installing MTD tools and preparing virome files"
+    show_progress 34 "Installing and configuring MTD command-line tools"
     install_mtd_extra_tools
-    prepare_virome_files
     install_default_kraken_helpers
+
+    show_progress 40 "Installing R412 and annotation packages"
+    install_r412_and_annotation_packages
+
+    show_progress 48 "Validating all software before database installation"
+    validate_all_software_before_databases
+
+    show_progress 52 "Downloading and validating biological database caches"
+    download_database_caches
+
+    show_progress 58 "Preparing viral and taxonomy resources"
+    prepare_virome_files
 
     build_microbiome_kraken_database
 
-    show_progress 72 "Building the Bracken database"
+    show_progress 90 "Building the Bracken database"
+    run_required_command \
+        "Building the Bracken database" \
+        build_bracken_database
 
-run_required_command \
-    "Building the Bracken database" \
-    build_bracken_database
-
-    show_progress 82 "Installing and configuring HUMAnN databases"
+    show_progress 94 "Installing and configuring HUMAnN databases"
     install_humann_databases
 
-    show_progress 90 "Installing R412 and annotation packages"
-    install_r412_and_annotation_packages
-
-    show_progress 98 "Validating installed R packages"
+    show_progress 98 "Running final R package validation"
     show_r_package_versions
 
     show_progress 100 "MTD Explorer installation completed successfully"
