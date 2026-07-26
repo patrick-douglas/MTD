@@ -39,6 +39,32 @@ show_progress() {
         die "Invalid analysis progress percentage: $percent"
     fi
 
+
+    # Optional pipeline benchmark stage timestamp.
+    # Normal MTD Explorer runs are unchanged because this variable is empty
+    # unless benchmark/run_mtd_pipeline_benchmark.sh exports it.
+    if [[ -n "${MTD_PIPELINE_BENCHMARK_STEPS_TSV:-}" ]]; then
+        local benchmark_message="$message"
+        local benchmark_steps_dir=""
+
+        benchmark_message="${benchmark_message//$'\t'/ }"
+        benchmark_message="${benchmark_message//$'\n'/ }"
+        benchmark_steps_dir="$(dirname -- "$MTD_PIPELINE_BENCHMARK_STEPS_TSV")"
+
+        mkdir -p -- "$benchmark_steps_dir"
+
+        if [[ ! -s "$MTD_PIPELINE_BENCHMARK_STEPS_TSV" ]]; then
+            printf 'timestamp_utc\tepoch_ns\tpercent\tmessage\n' \
+                > "$MTD_PIPELINE_BENCHMARK_STEPS_TSV"
+        fi
+
+        printf '%s\t%s\t%s\t%s\n' \
+            "$(date -u '+%Y-%m-%dT%H:%M:%S.%NZ')" \
+            "$(date +%s%N)" \
+            "$percent" \
+            "$benchmark_message" \
+            >> "$MTD_PIPELINE_BENCHMARK_STEPS_TSV"
+    fi
     filled=$((percent * width / 100))
     empty=$((width - filled))
 
