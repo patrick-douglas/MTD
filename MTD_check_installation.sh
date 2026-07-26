@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # MTD Explorer installation checker
-# Version: 2026.07.25-r10
+# Version: 2026.07.26-r11
 #
 # Current installation architecture:
 #   - repository location is detected from this checker, never assumed as ~/MTD;
@@ -11,13 +11,14 @@
 #   - NCBI library caches carry remote-catalog freshness/integrity metadata;
 #   - NCBI taxonomy is cached once and copied with a remote checksum manifest;
 #   - unmappable plasmid records may only be removed through the audited filter;
-#   - predefined host databases are not required; custom hosts are checked when present.
+#   - the virome is a custom nonredundant RefSeq + Virus-Host DB + SIV collection;
+#   - custom-host caches are not mistaken for installed kraken2DB_<TaxID> databases.
 #
 # The checker is read-only except for its report directory and temporary files.
 # ==============================================================================
 set -uo pipefail
 
-CHECKER_VERSION="2026.07.25-r10"
+CHECKER_VERSION="2026.07.26-r11"
 
 SCRIPT_DIR="$(
     cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &&
@@ -747,6 +748,10 @@ check_source_tree() {
         Installation/mask_low_complexity.sh
         Installation/filter_kraken2_unmapped_plasmids.py
         Installation/report_kraken2_unmapped.py
+        Installation/M33262_SIVMM239.fa
+        aux_scripts/Kraken2/build_nonredundant_viral_fasta.py
+        aux_scripts/Kraken2/build_refseq_viral_taxid_map.py
+        aux_scripts/Kraken2/build_virushost_taxid_map.py
         aux_scripts/manifest_scripts/sync_ncbi_cache.py
     )
 
@@ -791,6 +796,9 @@ check_source_tree() {
     for relative in \
         Installation/filter_kraken2_unmapped_plasmids.py \
         Installation/report_kraken2_unmapped.py \
+        aux_scripts/Kraken2/build_nonredundant_viral_fasta.py \
+        aux_scripts/Kraken2/build_refseq_viral_taxid_map.py \
+        aux_scripts/Kraken2/build_virushost_taxid_map.py \
         aux_scripts/manifest_scripts/sync_ncbi_cache.py
     do
         check_python_syntax "$relative" "$MTD_DIR/$relative"
@@ -821,6 +829,12 @@ check_source_tree() {
         "$INSTALL_SH" 'MTD_KRAKEN2_PLASMID_UNMAPPED_FILTER_V1'
     check_text_marker "Installer contract" "eukaryote HTTPS cache" \
         "$INSTALL_SH" 'MTD_NCBI_EUKARYOTE_HTTPS_CACHE_V1'
+    check_text_marker "Installer contract" "Virus-Host DB pinned mirror" \
+        "$INSTALL_SH" 'VIRUSHOST_MIRROR_TAG='
+    check_text_marker "Installer contract" "nonredundant virome output" \
+        "$INSTALL_SH" 'viral_genomes_combined_nonredundant.fna'
+    check_text_marker "Installer contract" "custom virome Kraken insertion" \
+        "$INSTALL_SH" '--add-to-library "$viral_library"'
     check_text_marker "Installer contract" "cache path record" \
         "$INSTALL_SH" 'offlineCachePath'
     check_text_marker "Installer contract" "Conda path record" \
@@ -846,15 +860,35 @@ check_source_tree() {
 
     while IFS= read -r -d '' script_path; do
         relative="${script_path#"$MTD_DIR/"}"
-        if grep -Fq 'sync_ncbi_cache.py' "$script_path" &&
-           grep -Fq 'MTD_OFFLINE_FILES_FOLDER' "$script_path"
+
+        if ! grep -Fq 'sync_ncbi_cache.py' "$script_path" ||
+           ! grep -Fq 'MTD_MANIFEST_HELPER' "$script_path"
         then
-            record PASS "Manifest contract" "$relative" \
-                "uses shared synchronizer and runtime cache path"
-        else
             record FAIL "Manifest contract" "$relative" \
-                "must use sync_ncbi_cache.py and MTD_OFFLINE_FILES_FOLDER"
+                "must use the shared sync_ncbi_cache.py helper"
+            continue
         fi
+
+        case "$(basename "$script_path")" in
+            manifest.plasmid.sh)
+                if grep -Fq 'MTD_KRAKEN2_PLASMID_CACHE' "$script_path"; then
+                    record PASS "Manifest contract" "$relative" \
+                        "uses shared synchronizer and dedicated plasmid cache path"
+                else
+                    record FAIL "Manifest contract" "$relative" \
+                        "must use MTD_KRAKEN2_PLASMID_CACHE"
+                fi
+                ;;
+            *)
+                if grep -Fq 'MTD_OFFLINE_FILES_FOLDER' "$script_path"; then
+                    record PASS "Manifest contract" "$relative" \
+                        "uses shared synchronizer and installation cache root"
+                else
+                    record FAIL "Manifest contract" "$relative" \
+                        "must use MTD_OFFLINE_FILES_FOLDER"
+                fi
+                ;;
+        esac
     done < <(
         find "$MTD_DIR/aux_scripts/manifest_scripts" \
             -maxdepth 1 -type f \
@@ -1098,6 +1132,143 @@ check_kraken_library() {
     done
 }
 
+read_virome_summary_metric() {
+    local summary="$1"
+    local metric="$2"
+    awk -F '\t' -v wanted="$metric" '
+        NR > 1 && $1 == wanted {
+            print $2
+            exit
+        }
+    ' "$summary" 2>/dev/null
+}
+
+check_virome_collection() {
+    local database="$1"
+    local viral_cache=""
+    local virushost_cache=""
+    local combined=""
+    local summary=""
+    local details=""
+    local metric=""
+    local value=""
+    local sample_header=""
+    local sample_token=""
+    local sample_id=""
+    local -a required_zero_metrics=(
+        records_without_accession
+        records_without_taxid
+    )
+    local -a required_positive_metrics=(
+        records_seen
+        records_written
+        refseq_viral_records_seen
+        virushostdb_records_seen
+        extra_1_records_seen
+    )
+
+    record PASS "Virome architecture" "Kraken library layout" \
+        "custom nonredundant collection; database/library/viral is not expected"
+
+    if [[ -z "$OFFLINE_DIR" ]]; then
+        record SKIP "Virome source" "persistent collection" \
+            "offline cache path unavailable"
+        return
+    fi
+
+    viral_cache="$OFFLINE_DIR/Kraken2DB_micro/library/viral"
+    virushost_cache="$OFFLINE_DIR/Ref_genomes/MTD_virus/official_current"
+    combined="$viral_cache/viral_genomes_combined_nonredundant.fna"
+    summary="$viral_cache/viral_genomes_combined_nonredundant.summary.tsv"
+    details="$viral_cache/viral_genomes_combined_nonredundant.details.tsv"
+
+    check_required_file "Virome source" "combined nonredundant FASTA" "$combined"
+    check_required_file "Virome source" "combination summary" "$summary"
+    check_required_file "Virome source" "combination details" "$details"
+    check_required_file "Virome source" "RefSeq viral aggregate" \
+        "$viral_cache/all_viral_genomes.fna"
+    check_required_file "Virome source" "RefSeq viral assembly summary" \
+        "$viral_cache/assembly_summary_viral.txt"
+    check_required_file "Virome source" "RefSeq viral TaxID map" \
+        "$viral_cache/refseq_viral_accession2taxid.tsv"
+    check_required_file "Virome source" "Virus-Host DB FASTA" \
+        "$virushost_cache/virushostdb.genomic.fna.gz"
+    check_required_file "Virome source" "Virus-Host DB release" \
+        "$virushost_cache/dbrel.txt"
+    check_required_file "Virome source" "Virus-Host DB non-segmented list" \
+        "$virushost_cache/non-segmented_virus_list.tsv"
+    check_required_file "Virome source" "Virus-Host DB segmented list" \
+        "$virushost_cache/segmented_virus_list.tsv"
+    check_required_file "Virome source" "Virus-Host DB TaxID map" \
+        "$virushost_cache/virushostdb_accession2taxid.tsv"
+    check_required_file "Virome source" "additional SIV FASTA" \
+        "$MTD_DIR/Installation/M33262_SIVMM239.fa"
+
+    if [[ -s "$summary" ]]; then
+        if head -n 1 "$summary" | grep -q $'^metric\tvalue$'; then
+            record PASS "Virome validation" "summary header" "valid"
+        else
+            record FAIL "Virome validation" "summary header" \
+                "expected metric<TAB>value: $summary"
+        fi
+
+        for metric in "${required_zero_metrics[@]}"; do
+            value="$(read_virome_summary_metric "$summary" "$metric")"
+            if [[ "$value" == "0" ]]; then
+                record PASS "Virome validation" "$metric" "$value"
+            elif [[ "$value" =~ ^[0-9]+$ ]]; then
+                record FAIL "Virome validation" "$metric" \
+                    "$value record(s); expected 0"
+            else
+                record FAIL "Virome validation" "$metric" \
+                    "metric missing or invalid in $summary"
+            fi
+        done
+
+        for metric in "${required_positive_metrics[@]}"; do
+            value="$(read_virome_summary_metric "$summary" "$metric")"
+            if [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
+                record PASS "Virome composition" "$metric" "$value"
+            elif [[ "$value" == "0" ]]; then
+                record FAIL "Virome composition" "$metric" \
+                    "0; expected at least one input/written record"
+            else
+                record FAIL "Virome composition" "$metric" \
+                    "metric missing or invalid in $summary"
+            fi
+        done
+    fi
+
+    if [[ -s "$combined" && -s "$database/seqid2taxid.map" ]]; then
+        sample_header="$(grep -m 1 '^>' "$combined" 2>/dev/null || true)"
+        sample_token="$(
+            printf '%s\n' "$sample_header" |
+                sed -E -e 's/^>//' -e 's/[[:space:]].*$//'
+        )"
+        sample_id="$(
+            printf '%s\n' "$sample_token" |
+                sed -E -e 's/^kraken:taxid\|[0-9]+\|//'
+        )"
+        if [[ -z "$sample_token" ]]; then
+            record FAIL "Virome validation" "Kraken mapping sample" \
+                "could not extract a sequence ID from the combined FASTA"
+        elif awk -v token="$sample_token" -v id="$sample_id" '
+                $1 == token || $1 == id {found=1; exit}
+                END {exit !found}
+            ' "$database/seqid2taxid.map"
+        then
+            record PASS "Virome validation" "Kraken mapping sample" \
+                "$sample_id is represented in seqid2taxid.map"
+        else
+            record WARN "Virome validation" "Kraken mapping sample" \
+                "sample ID was not recognized in seqid2taxid.map: $sample_id"
+        fi
+    elif [[ -s "$combined" ]]; then
+        record FAIL "Virome validation" "Kraken mapping sample" \
+            "missing or empty: $database/seqid2taxid.map"
+    fi
+}
+
 check_taxonomy_manifest_alignment() {
     local database="$1"
     local cache_manifest=""
@@ -1233,9 +1404,10 @@ check_kraken_database() {
     check_kraken_core "$database" "microbiome"
     check_taxonomy_dir "Kraken taxonomy" "microbiome" "$database/taxonomy"
 
-    for library in bacteria archaea protozoa fungi plasmid viral UniVec_Core; do
+    for library in bacteria archaea protozoa fungi plasmid UniVec_Core; do
         check_kraken_library "$database" "$library" FAIL
     done
+    check_virome_collection "$database"
 
     check_required_file "Bracken DB" "read length $READ_LEN distribution" \
         "$database/database${READ_LEN}mers.kmer_distrib"
@@ -1617,47 +1789,31 @@ check_humann_databases() {
 
 check_one_custom_host() {
     local taxid="$1"
-    local found=0
     local path=""
     local candidate=""
 
     for candidate in \
         "$MTD_DIR/kraken2DB_${taxid}" \
-        "$MTD_DIR/kraken2DB_host_${taxid}" \
-        "$MTD_DIR/Customized_hosts/$taxid" \
-        "$OFFLINE_DIR/Customized_hosts/$taxid"
+        "$MTD_DIR/kraken2DB_host_${taxid}"
     do
-        [[ -n "$candidate" ]] || continue
         if [[ -d "$candidate" ]]; then
-            found=1
             path="$candidate"
             break
         fi
     done
 
-    if (( found == 0 )); then
+    if [[ -z "$path" ]]; then
         record WARN "Custom host" "TaxID $taxid" \
-            "no installed custom-host directory was found"
+            "no installed kraken2DB_${taxid} database was found in $MTD_DIR"
         return
     fi
 
     record PASS "Custom host" "TaxID $taxid directory" "$path"
-    if [[ -s "$path/hash.k2d" ]]; then
-        check_kraken_core "$path" "host TaxID $taxid"
-    else
-        local index_count=0
-        index_count="$(find "$path" -type f \
-            \( -name '*.ht2' -o -name '*.ht2l' -o -name '*.nin' \
-               -o -name '*.ndb' -o -name '*.nhr' -o -name '*.nsq' \) \
-            2>/dev/null | awk 'END {print NR + 0}')"
-        if (( index_count > 0 )); then
-            record PASS "Custom host" "TaxID $taxid indexes" \
-                "$index_count index file(s)"
-        else
-            record WARN "Custom host" "TaxID $taxid indexes" \
-                "no Kraken/HISAT2/BLAST index was recognized"
-        fi
-    fi
+    check_kraken_core "$path" "host TaxID $taxid"
+    check_required_file "Custom host" "TaxID $taxid genome FASTA" \
+        "$path/genome_${taxid}.fa"
+    check_required_file "Custom host" "TaxID $taxid inspect summary" \
+        "$path/kraken2_inspect_summary.txt"
 }
 
 check_installed_custom_hosts() {
@@ -1666,9 +1822,6 @@ check_installed_custom_hosts() {
     local path=""
     local base=""
 
-    record SKIP "Host databases" "predefined human/mouse/rhesus" \
-        "not part of the current default installation"
-
     if [[ -n "$HOST_TAXID" ]]; then
         check_one_custom_host "$HOST_TAXID"
         return
@@ -1676,14 +1829,17 @@ check_installed_custom_hosts() {
 
     while IFS= read -r -d '' path; do
         base="$(basename "$path")"
-        if [[ "$base" =~ ([1-9][0-9]{2,}) ]]; then
+        if [[ "$base" =~ ^kraken2DB_([1-9][0-9]*)$ ]]; then
+            taxid="${BASH_REMATCH[1]}"
+            seen["$taxid"]=1
+        elif [[ "$base" =~ ^kraken2DB_host_([1-9][0-9]*)$ ]]; then
             taxid="${BASH_REMATCH[1]}"
             seen["$taxid"]=1
         fi
     done < <(
-        find "$MTD_DIR" "${OFFLINE_DIR:-/nonexistent}" \
-            -maxdepth 3 -type d \
-            \( -name 'kraken2DB_*' -o -name '[1-9][0-9]*' \) \
+        find "$MTD_DIR" -mindepth 1 -maxdepth 1 -type d \
+            \( -name 'kraken2DB_[1-9]*' \
+               -o -name 'kraken2DB_host_[1-9]*' \) \
             -print0 2>/dev/null
     )
 
@@ -1693,9 +1849,9 @@ check_installed_custom_hosts() {
         return
     fi
 
-    for taxid in "${!seen[@]}"; do
+    while IFS= read -r taxid; do
         check_one_custom_host "$taxid"
-    done
+    done < <(printf '%s\n' "${!seen[@]}" | sort -n)
 }
 
 write_summary() {
