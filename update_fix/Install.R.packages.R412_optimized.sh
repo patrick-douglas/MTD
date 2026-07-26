@@ -3,7 +3,7 @@ set -Eeo pipefail
 
 # ============================================================
 # MTD - R 4.1.2 / Bioconductor 3.14 package installer
-# Version: FINAL v7 - Maaslin2/Seurat dependency completion fixed
+# Version: FINAL v11 - Bioconductor failover and locale-safe TMB ABI validation
 # ============================================================
 #
 # Assumptions:
@@ -22,6 +22,10 @@ set -Eeo pipefail
 #   - patches cplm before installing Maaslin2
 #   - validates cplm in a fresh R process to avoid stale namespace/cache state
 #   - pins sctransform 0.3.5 before installing Seurat
+#   - probes official Bioconductor mirrors before package installation
+#   - retries failed Bioconductor installs across healthy mirrors
+#   - caches directly downloaded Bioconductor source tarballs
+#   - supports BIOC_SMOKE_TEST_ONLY=1 for a focused recovery test
 #
 # Usage:
 #   bash update_fix/Install.R.packages.R412_optimized.sh.sh
@@ -36,6 +40,11 @@ set -Eeo pipefail
 #   CONDA_ENSURE=0
 #   CRAN_REPO=https://packagemanager.posit.co/cran/2022-05-15
 #   CRAN_ARCHIVE_REPO=https://cran.r-project.org
+#   BIOC_MIRRORS=https://bioconductor.org,https://bioconductor.posit.co,...
+#   BIOC_RETRY_ATTEMPTS=3
+#   BIOC_RETRY_SLEEP=10
+#   BIOC_SMOKE_TEST_ONLY=0
+#   BIOC_CACHE_DIR=/path/to/persistent/cache
 # ============================================================
 
 ENV_NAME="${ENV_NAME:-R412}"
@@ -47,6 +56,10 @@ INSTALL_LOCAL_PATCHES="${INSTALL_LOCAL_PATCHES:-1}"
 CONDA_ENSURE="${CONDA_ENSURE:-0}"
 CRAN_REPO="${CRAN_REPO:-https://packagemanager.posit.co/cran/2022-05-15}"
 CRAN_ARCHIVE_REPO="${CRAN_ARCHIVE_REPO:-https://cran.r-project.org}"
+BIOC_MIRRORS="${BIOC_MIRRORS:-https://bioconductor.org,https://bioconductor.posit.co,https://bioconductor.statistik.tu-dortmund.de,https://ftp.gwdg.de/pub/misc/bioconductor}"
+BIOC_RETRY_ATTEMPTS="${BIOC_RETRY_ATTEMPTS:-3}"
+BIOC_RETRY_SLEEP="${BIOC_RETRY_SLEEP:-10}"
+BIOC_SMOKE_TEST_ONLY="${BIOC_SMOKE_TEST_ONLY:-0}"
 CONDA_SH="${CONDA_SH:-$HOME/miniconda3/etc/profile.d/conda.sh}"
 
 log() {
@@ -80,7 +93,9 @@ fi
 
 PATCH_DIR="${PATCH_DIR:-$MTD_DIR/update_fix/pvr_pkg}"
 LOGDIR="${LOGDIR:-$MTD_DIR/update_fix/R412_post_recreate_logs}"
-mkdir -p "$LOGDIR"
+BIOC_CACHE_DIR="${BIOC_CACHE_DIR:-$MTD_DIR/update_fix/bioc_tarball_cache/$BIOC_VERSION}"
+BIOC_ACTIVE_MIRROR_FILE="${BIOC_ACTIVE_MIRROR_FILE:-$LOGDIR/bioc_active_mirror.txt}"
+mkdir -p "$LOGDIR" "$BIOC_CACHE_DIR"
 
 log "MTD directory: $MTD_DIR"
 log "Patch directory: $PATCH_DIR"
@@ -89,6 +104,11 @@ log "Conda env: $ENV_NAME"
 log "Bioconductor version: $BIOC_VERSION"
 log "CRAN repo/snapshot: $CRAN_REPO"
 log "CRAN archive repo: $CRAN_ARCHIVE_REPO"
+log "Bioconductor mirrors: $BIOC_MIRRORS"
+log "Bioconductor retry attempts: $BIOC_RETRY_ATTEMPTS"
+log "Bioconductor retry base sleep: $BIOC_RETRY_SLEEP seconds"
+log "Bioconductor tarball cache: $BIOC_CACHE_DIR"
+log "Bioconductor smoke-test only: $BIOC_SMOKE_TEST_ONLY"
 log "Threads: $THREADS"
 log "CONDA_ENSURE: $CONDA_ENSURE"
 
@@ -224,6 +244,28 @@ bioc_version <- Sys.getenv("BIOC_VERSION", "3.14")
 patch_dir <- path.expand(Sys.getenv("PATCH_DIR", "~/MTD/update_fix/pvr_pkg"))
 install_seurat <- identical(Sys.getenv("INSTALL_SEURAT", "1"), "1")
 install_local_patches <- identical(Sys.getenv("INSTALL_LOCAL_PATCHES", "1"), "1")
+bioc_smoke_test_only <- identical(Sys.getenv("BIOC_SMOKE_TEST_ONLY", "0"), "1")
+bioc_cache_dir <- path.expand(Sys.getenv("BIOC_CACHE_DIR", file.path(tempdir(), "mtd_bioc_cache")))
+bioc_active_mirror_file <- path.expand(Sys.getenv("BIOC_ACTIVE_MIRROR_FILE", file.path(tempdir(), "mtd_bioc_active_mirror.txt")))
+bioc_retry_attempts <- suppressWarnings(as.integer(Sys.getenv("BIOC_RETRY_ATTEMPTS", "3")))
+bioc_retry_sleep <- suppressWarnings(as.numeric(Sys.getenv("BIOC_RETRY_SLEEP", "10")))
+if (is.na(bioc_retry_attempts) || bioc_retry_attempts < 1L) bioc_retry_attempts <- 3L
+if (is.na(bioc_retry_sleep) || bioc_retry_sleep < 0) bioc_retry_sleep <- 10
+bioc_mirrors <- trimws(strsplit(
+  Sys.getenv(
+    "BIOC_MIRRORS",
+    paste(c(
+      "https://bioconductor.org",
+      "https://bioconductor.posit.co",
+      "https://bioconductor.statistik.tu-dortmund.de",
+      "https://ftp.gwdg.de/pub/misc/bioconductor"
+    ), collapse = ",")
+  ),
+  ",", fixed = TRUE
+)[[1]])
+bioc_mirrors <- unique(sub("/+$", "", bioc_mirrors[nzchar(bioc_mirrors)]))
+dir.create(bioc_cache_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(dirname(bioc_active_mirror_file), recursive = TRUE, showWarnings = FALSE)
 
 options(
   timeout = max(1000, getOption("timeout")),
@@ -235,15 +277,169 @@ Sys.setenv(MAKEFLAGS = paste0("-j", threads))
 msg <- function(...) cat("\n==== ", sprintf(...), " ====\n", sep = "")
 warn <- function(...) warning(sprintf(...), call. = FALSE)
 
-bioc_repos <- c(
-  BioCsoft = sprintf("https://bioconductor.org/packages/%s/bioc", bioc_version),
-  BioCann = sprintf("https://bioconductor.org/packages/%s/data/annotation", bioc_version),
-  BioCexp = sprintf("https://bioconductor.org/packages/%s/data/experiment", bioc_version),
-  BioCworkflows = sprintf("https://bioconductor.org/packages/%s/workflows", bioc_version),
-  CRAN = cran_repo
-)
+make_bioc_repos <- function(root) {
+  root <- sub("/+$", "", root)
+  c(
+    BioCsoft = sprintf("%s/packages/%s/bioc", root, bioc_version),
+    BioCann = sprintf("%s/packages/%s/data/annotation", root, bioc_version),
+    BioCexp = sprintf("%s/packages/%s/data/experiment", root, bioc_version),
+    BioCworkflows = sprintf("%s/packages/%s/workflows", root, bioc_version),
+    CRAN = cran_repo
+  )
+}
 
-options(repos = bioc_repos)
+bioc_repos <- make_bioc_repos(bioc_mirrors[[1]])
+active_bioc_mirror <- bioc_mirrors[[1]]
+healthy_bioc_mirrors <- NULL
+options(repos = bioc_repos, BioC_mirror = paste0(active_bioc_mirror, "/"))
+
+probe_bioc_mirror <- function(root) {
+  repo <- unname(make_bioc_repos(root)["BioCsoft"])
+  urls <- c(
+    sprintf("%s/src/contrib/PACKAGES.gz", repo),
+    sprintf("%s/src/contrib/PACKAGES", repo)
+  )
+
+  for (url in urls) {
+    for (attempt in seq_len(bioc_retry_attempts)) {
+      tmp <- tempfile("bioc_packages_", fileext = if (grepl("\\.gz$", url)) ".gz" else ".txt")
+      curl_bin <- Sys.which("curl")
+      if (!nzchar(curl_bin)) stop("curl was not found while probing Bioconductor mirrors")
+      status <- tryCatch(
+        system2(
+          curl_bin,
+          args = c(
+            "-L", "--fail", "--silent", "--show-error",
+            "--connect-timeout", "15", "--max-time", "90",
+            "--output", tmp, url
+          ),
+          stdout = FALSE,
+          stderr = FALSE
+        ),
+        error = function(e) {
+          warn("Mirror probe failed for %s: %s", url, conditionMessage(e))
+          1L
+        }
+      )
+
+      ok <- isTRUE(status == 0L) && file.exists(tmp) && isTRUE(file.info(tmp)$size > 20)
+      unlink(tmp, force = TRUE)
+      if (ok) return(TRUE)
+
+      if (attempt < bioc_retry_attempts && bioc_retry_sleep > 0) {
+        Sys.sleep(bioc_retry_sleep * attempt)
+      }
+    }
+  }
+
+  FALSE
+}
+
+discover_bioc_mirrors <- function(refresh = FALSE) {
+  if (!refresh && !is.null(healthy_bioc_mirrors)) return(healthy_bioc_mirrors)
+
+  msg("Probing Bioconductor %s software repositories", bioc_version)
+  healthy <- character()
+  for (root in bioc_mirrors) {
+    msg("Probing Bioconductor mirror: %s", root)
+    if (probe_bioc_mirror(root)) {
+      msg("Bioconductor mirror is healthy: %s", root)
+      healthy <- c(healthy, root)
+    } else {
+      warn("Bioconductor mirror is unavailable for release %s: %s", bioc_version, root)
+    }
+  }
+
+  healthy_bioc_mirrors <<- unique(healthy)
+  if (!length(healthy_bioc_mirrors)) {
+    stop(
+      "No configured Bioconductor mirror exposes the ", bioc_version,
+      " software repository. Checked: ", paste(bioc_mirrors, collapse = ", ")
+    )
+  }
+
+  healthy_bioc_mirrors
+}
+
+activate_bioc_mirror <- function(root) {
+  active_bioc_mirror <<- sub("/+$", "", root)
+  bioc_repos <<- make_bioc_repos(active_bioc_mirror)
+  options(repos = bioc_repos, BioC_mirror = paste0(active_bioc_mirror, "/"))
+  writeLines(active_bioc_mirror, bioc_active_mirror_file)
+  msg("Active Bioconductor mirror: %s", active_bioc_mirror)
+  invisible(bioc_repos)
+}
+
+download_with_retries <- function(url, dest) {
+  part <- paste0(dest, ".part")
+  unlink(part, force = TRUE)
+
+  for (attempt in seq_len(bioc_retry_attempts)) {
+    msg("Downloading [%d/%d]: %s", attempt, bioc_retry_attempts, url)
+    status <- tryCatch(
+      suppressWarnings(utils::download.file(
+        url,
+        part,
+        mode = "wb",
+        quiet = FALSE,
+        method = "libcurl"
+      )),
+      error = function(e) {
+        warn("Download failed for %s: %s", url, conditionMessage(e))
+        1L
+      }
+    )
+
+    if (isTRUE(status == 0L) && file.exists(part) && isTRUE(file.info(part)$size > 0)) {
+      if (file.rename(part, dest)) return(TRUE)
+      if (file.copy(part, dest, overwrite = TRUE)) {
+        unlink(part, force = TRUE)
+        return(TRUE)
+      }
+    }
+
+    unlink(part, force = TRUE)
+    if (attempt < bioc_retry_attempts && bioc_retry_sleep > 0) {
+      Sys.sleep(bioc_retry_sleep * attempt)
+    }
+  }
+
+  FALSE
+}
+
+install_bioc_tarball <- function(pkg, version, force = FALSE) {
+  if (!force && pkg_ok(pkg)) {
+    msg("%s %s already installed", pkg, pkg_ver(pkg))
+    return(invisible(TRUE))
+  }
+
+  filename <- sprintf("%s_%s.tar.gz", pkg, version)
+  cached <- file.path(bioc_cache_dir, filename)
+
+  if (!file.exists(cached) || file.info(cached)$size <= 0) {
+    mirrors <- discover_bioc_mirrors()
+    downloaded <- FALSE
+    for (root in mirrors) {
+      url <- sprintf(
+        "%s/packages/%s/bioc/src/contrib/%s",
+        sub("/+$", "", root), bioc_version, filename
+      )
+      if (download_with_retries(url, cached)) {
+        activate_bioc_mirror(root)
+        downloaded <- TRUE
+        break
+      }
+    }
+    if (!downloaded) stop("Could not download Bioconductor tarball: ", filename)
+  } else {
+    msg("Using cached Bioconductor tarball: %s", cached)
+  }
+
+  msg("Installing cached Bioconductor tarball: %s", cached)
+  install.packages(cached, repos = NULL, type = "source", dependencies = FALSE)
+  if (!pkg_ok(pkg)) stop("Bioconductor tarball installed but package is unavailable: ", pkg)
+  invisible(TRUE)
+}
 
 pkg_ok <- function(pkg) requireNamespace(pkg, quietly = TRUE)
 pkg_ver <- function(pkg) {
@@ -280,6 +476,59 @@ fresh_load_ok <- function(pkg) {
   TRUE
 }
 
+# MTD_R412_TMB_MATRIX_ABI_V10
+strict_fresh_load_ok <- function(pkg, expected_version) {
+  # Matrix/TMB binary incompatibility is reported as a warning during package
+  # loading. For this stack a warning is a failed validation, not a soft notice.
+  # The exact-version check also prevents R's automatic restoration of an older
+  # package from being mistaken for a successful source rebuild.
+  expr <- sprintf(
+    paste(
+      "options(warn = 2)",
+      "pkg <- %s",
+      "expected <- %s",
+      "suppressPackageStartupMessages(library(pkg, character.only = TRUE))",
+      "actual <- as.character(packageVersion(pkg))",
+      "if (!identical(actual, expected)) {",
+      "  stop(sprintf('Unexpected %%s version: expected %%s, found %%s', pkg, expected, actual))",
+      "}",
+      "cat(sprintf('MTD_STRICT_LOAD_OK:%%s:%%s\\n', pkg, actual))",
+      sep = "; "
+    ),
+    encodeString(pkg, quote = "\""),
+    encodeString(expected_version, quote = "\"")
+  )
+
+  out <- tempfile(sprintf("%s_strict_load_", pkg), fileext = ".log")
+  status <- system2(
+    file.path(R.home("bin"), "Rscript"),
+    args = c("-e", shQuote(expr)),
+    stdout = out,
+    stderr = out
+  )
+
+  txt <- if (file.exists(out)) readLines(out, warn = FALSE) else character()
+  expected_marker <- sprintf(
+    "MTD_STRICT_LOAD_OK:%s:%s",
+    pkg,
+    expected_version
+  )
+  marker_count <- sum(txt == expected_marker)
+
+  if (!identical(status, 0L) || marker_count != 1L) {
+    cat(sprintf("\n==== Strict fresh R load check failed for %s ====\n", pkg))
+    cat(paste(txt, collapse = "\n"), "\n")
+    return(FALSE)
+  }
+
+  msg(
+    "Strict fresh R load check OK for %s: %s",
+    pkg,
+    expected_version
+  )
+  TRUE
+}
+
 install_cran <- function(pkgs, force = FALSE) {
   pkgs <- unique(pkgs)
   todo <- if (force) pkgs else pkgs[!vapply(pkgs, pkg_ok, logical(1))]
@@ -301,23 +550,63 @@ install_bioc <- function(pkgs, force = FALSE) {
     install.packages("BiocManager", dependencies = c("Depends", "Imports", "LinkingTo"))
   }
 
-  options(repos = bioc_repos)
-
   todo <- if (force) pkgs else pkgs[!vapply(pkgs, pkg_ok, logical(1))]
   if (!length(todo)) {
     msg("Bioconductor packages already installed: %s", paste(pkgs, collapse = ", "))
     return(invisible(TRUE))
   }
 
-  msg("Installing Bioconductor packages: %s", paste(todo, collapse = ", "))
+  mirrors <- discover_bioc_mirrors()
+  last_errors <- character()
 
-  BiocManager::install(
-    todo,
-    version = bioc_version,
-    ask = FALSE,
-    update = FALSE,
-    force = force,
-    Ncpus = threads
+  for (round in seq_len(bioc_retry_attempts)) {
+    for (root in mirrors) {
+      activate_bioc_mirror(root)
+      msg(
+        "Installing Bioconductor packages (round %d/%d): %s",
+        round, bioc_retry_attempts, paste(todo, collapse = ", ")
+      )
+
+      tryCatch(
+        BiocManager::install(
+          todo,
+          version = bioc_version,
+          ask = FALSE,
+          update = FALSE,
+          force = force,
+          Ncpus = threads
+        ),
+        error = function(e) {
+          last_errors <<- c(
+            last_errors,
+            sprintf("%s: %s", root, conditionMessage(e))
+          )
+          warn("Bioconductor installation failed through %s: %s", root, conditionMessage(e))
+        }
+      )
+
+      todo <- pkgs[!vapply(pkgs, pkg_ok, logical(1))]
+      if (!length(todo)) {
+        msg("Bioconductor package installation completed successfully")
+        return(invisible(TRUE))
+      }
+
+      warn("Packages still missing after mirror %s: %s", root, paste(todo, collapse = ", "))
+    }
+
+    if (round < bioc_retry_attempts && bioc_retry_sleep > 0) {
+      delay <- bioc_retry_sleep * round
+      msg("Waiting %.0f seconds before the next Bioconductor retry round", delay)
+      Sys.sleep(delay)
+      mirrors <- discover_bioc_mirrors(refresh = TRUE)
+    }
+  }
+
+  details <- if (length(last_errors)) paste(unique(last_errors), collapse = " | ") else "no R exception was raised"
+  stop(
+    "Bioconductor packages still missing after mirror failover: ",
+    paste(todo, collapse = ", "),
+    ". Errors: ", details
   )
 }
 
@@ -474,7 +763,29 @@ msg("Bootstrap remotes/BiocManager")
 install_cran(c("remotes", "BiocManager"))
 
 msg("Setting Bioconductor %s", bioc_version)
-BiocManager::install(version = bioc_version, ask = FALSE, update = FALSE)
+activate_bioc_mirror(discover_bioc_mirrors()[[1]])
+tryCatch(
+  BiocManager::install(version = bioc_version, ask = FALSE, update = FALSE),
+  error = function(e) warn("Bioconductor version bootstrap failed: %s", conditionMessage(e))
+)
+if (!pkg_ok("BiocVersion")) install_bioc("BiocVersion")
+
+if (bioc_smoke_test_only) {
+  msg("Running focused Bioconductor recovery smoke test")
+  install_bioc(c("BiocVersion", "lpsymphony"))
+
+  smoke_pkgs <- c("BiocVersion", "lpsymphony")
+  missing_smoke <- smoke_pkgs[!vapply(smoke_pkgs, pkg_ok, logical(1))]
+  if (length(missing_smoke)) {
+    stop("Smoke-test packages are still missing: ", paste(missing_smoke, collapse = ", "))
+  }
+  if (!fresh_load_ok("lpsymphony")) {
+    stop("lpsymphony installed, but a fresh R process could not load it")
+  }
+
+  msg("Bioconductor recovery smoke test completed successfully")
+  quit(save = "no", status = 0L)
+}
 
 # ------------------------------------------------------------
 # Verify R core/recommended packages from YAML/Conda
@@ -537,7 +848,7 @@ cran_foundation <- c(
   "numDeriv", "coda", "biglm", "tweedie",
   "robustbase", "pcaPP", "pbapply", "chemometrics", "hash", "pscl",
   "minqa", "nloptr", "statmod", "lme4", "lmerTest",
-  "TMB", "glmmTMB", "car", "carData",
+  "car", "carData",
 
   # Seurat stack
   "progressr", "future", "future.apply", "globals", "listenv",
@@ -549,7 +860,7 @@ cran_foundation <- c(
   "uwot", "spam",
 
   # MTD/other
-  "ade4", "vegan", "biomformat", "TMB", "processx", "promises",
+  "ade4", "vegan", "processx", "promises",
   "miniUI", "shiny", "htmltools", "fastmap", "plyr", "prettydoc",
   "pacman", "doParallel", "foreach", "iterators",
   "R.methodsS3", "R.oo", "R.utils", "gson", "conflicted", "logging",
@@ -561,6 +872,44 @@ install_cran(cran_foundation)
 # Force lme4 new enough for pbkrtest 0.5.2. The 2022 snapshot may provide 1.1-29.
 if (!pkg_version_ge("lme4", "1.1.31")) {
   install_archive("lme4", "1.1-35.1", force = TRUE)
+}
+
+# MTD_R412_DEPENDENCY_CLEANUP_V9
+# MTD_R412_TMB_MATRIX_ABI_V10
+# TMB contains compiled code tied to the Matrix binary interface. The
+# 2022-05-15 CRAN snapshot provides TMB 1.8.1, which cannot be compiled against
+# Matrix 1.6-5 in this R412 stack (undefined GET_SLOT). Pin TMB 1.9.7 from the
+# official CRAN Archive, then rebuild the MTD-compatible glmmTMB 1.1.3 release.
+tmb_version <- "1.9.7"
+glmmtmb_version <- "1.1.3"
+
+msg(
+  "Installing TMB %s from CRAN Archive against Matrix %s",
+  tmb_version,
+  pkg_ver("Matrix")
+)
+install_archive("TMB", tmb_version, force = TRUE)
+if (!strict_fresh_load_ok("TMB", tmb_version)) {
+  stop(
+    "TMB ", tmb_version,
+    " was not installed cleanly against Matrix ", pkg_ver("Matrix"),
+    ". Refusing to continue with a restored or ABI-incompatible TMB package."
+  )
+}
+
+msg(
+  "Installing glmmTMB %s from CRAN Archive against TMB %s and Matrix %s",
+  glmmtmb_version,
+  tmb_version,
+  pkg_ver("Matrix")
+)
+install_archive("glmmTMB", glmmtmb_version, force = TRUE)
+if (!strict_fresh_load_ok("glmmTMB", glmmtmb_version)) {
+  stop(
+    "glmmTMB ", glmmtmb_version,
+    " was not installed cleanly against TMB ", tmb_version,
+    " and Matrix ", pkg_ver("Matrix")
+  )
 }
 
 if (install_local_patches && file.exists(file.path(patch_dir, "pbkrtest_0.5.2.tar.gz"))) {
@@ -586,9 +935,16 @@ if (install_local_patches && file.exists(file.path(patch_dir, "ggfun_0.1.6.tar.g
 
 # Optional local CRAN/helper patches, applied after normal CRAN install.
 if (install_local_patches) {
+  incompatible_ggnewscale <- file.path(patch_dir, "ggnewscale_0.5.2.tar.gz")
+  if (file.exists(incompatible_ggnewscale)) {
+    msg(
+      "Skipping local ggnewscale 0.5.2 because it requires ggplot2 >= 3.5.0; MTD R412 uses ggplot2 %s",
+      pkg_ver("ggplot2")
+    )
+  }
+
   local_patches <- c(
     "gtable_0.3.6.tar.gz",
-    "ggnewscale_0.5.2.tar.gz",
     "gson_0.1.0.tar.gz",
     "R.methodsS3_1.8.2.tar.gz",
     "R.oo_1.27.0.tar.gz",
@@ -612,6 +968,10 @@ if (install_local_patches) {
   for (x in local_patches) {
     if (file.exists(file.path(patch_dir, x))) install_local_tarball(x)
   }
+}
+
+if (!fresh_load_ok("ggnewscale")) {
+  stop("The CRAN-snapshot ggnewscale installation is missing or incompatible")
 }
 
 # ------------------------------------------------------------
@@ -665,9 +1025,9 @@ if (length(missing_maaslin2_deps)) {
 install_patched_cplm("0.7-10", force = TRUE)
 
 # Install Maaslin2 directly after patched cplm is present, so BiocManager does not try to reinstall cplm.
-install_url_safe(
-  sprintf("https://bioconductor.org/packages/%s/bioc/src/contrib/Maaslin2_1.8.0.tar.gz", bioc_version),
+install_bioc_tarball(
   pkg = "Maaslin2",
+  version = "1.8.0",
   force = TRUE
 )
 
@@ -696,11 +1056,12 @@ if (install_seurat) {
 
 important_versions <- c(
   "Rcpp", "RcppArmadillo", "Matrix", "MASS", "lattice",
-  "ggplot2", "ggfun", "yulab.utils", "tidytree", "treeio",
+  "ggplot2", "ggnewscale", "ggfun", "yulab.utils", "tidytree", "treeio",
   "DOSE", "fgsea", "DESeq2", "phyloseq", "microbiome", "mia",
   "ANCOMBC", "cplm", "Maaslin2", "Rgraphviz", "hdf5r",
   "cytolib", "flowCore", "cmapR",
-  "lme4", "pbkrtest", "sctransform", "SeuratObject", "Seurat"
+  "lme4", "pbkrtest", "TMB", "glmmTMB",
+  "sctransform", "SeuratObject", "Seurat"
 )
 
 msg("Important package versions before ggtree patch")
@@ -712,10 +1073,80 @@ THREADS="$THREADS" \
 CRAN_REPO="$CRAN_REPO" \
 CRAN_ARCHIVE_REPO="$CRAN_ARCHIVE_REPO" \
 BIOC_VERSION="$BIOC_VERSION" \
+BIOC_MIRRORS="$BIOC_MIRRORS" \
+BIOC_RETRY_ATTEMPTS="$BIOC_RETRY_ATTEMPTS" \
+BIOC_RETRY_SLEEP="$BIOC_RETRY_SLEEP" \
+BIOC_SMOKE_TEST_ONLY="$BIOC_SMOKE_TEST_ONLY" \
+BIOC_CACHE_DIR="$BIOC_CACHE_DIR" \
+BIOC_ACTIVE_MIRROR_FILE="$BIOC_ACTIVE_MIRROR_FILE" \
 PATCH_DIR="$PATCH_DIR" \
 INSTALL_SEURAT="$INSTALL_SEURAT" \
 INSTALL_LOCAL_PATCHES="$INSTALL_LOCAL_PATCHES" \
 Rscript "$R_INSTALL_SCRIPT" 2>&1 | tee "$LOGDIR/03_R_install_phase1.log"
+
+if [[ "$BIOC_SMOKE_TEST_ONLY" == "1" ]]; then
+  log "Focused Bioconductor recovery smoke test passed"
+  log "Active mirror: $(cat "$BIOC_ACTIVE_MIRROR_FILE" 2>/dev/null || printf 'unknown')"
+  log "Log: $LOGDIR/03_R_install_phase1.log"
+  exit 0
+fi
+
+# ------------------------------------------------------------
+# Bioconductor source tarball download with mirror failover
+# ------------------------------------------------------------
+download_bioc_tarball() {
+  local package="$1"
+  local version="$2"
+  local output="$3"
+  local filename="${package}_${version}.tar.gz"
+  local cached="$BIOC_CACHE_DIR/$filename"
+  local mirror url attempt part
+  local -a mirrors
+
+  mkdir -p "$BIOC_CACHE_DIR" "$(dirname "$output")"
+
+  if [[ -s "$cached" ]] && tar -tzf "$cached" >/dev/null 2>&1; then
+    log "Using cached Bioconductor tarball: $cached"
+    cp -f "$cached" "$output"
+    return 0
+  fi
+  rm -f "$cached" "$cached.part"
+
+  IFS=',' read -r -a mirrors <<< "$BIOC_MIRRORS"
+  for mirror in "${mirrors[@]}"; do
+    mirror="${mirror%/}"
+    [[ -n "$mirror" ]] || continue
+    url="$mirror/packages/$BIOC_VERSION/bioc/src/contrib/$filename"
+
+    for ((attempt = 1; attempt <= BIOC_RETRY_ATTEMPTS; attempt++)); do
+      part="$cached.part"
+      rm -f "$part"
+      log "Downloading $filename from $mirror (attempt $attempt/$BIOC_RETRY_ATTEMPTS)"
+
+      if curl -L --fail --show-error \
+        --connect-timeout 30 --max-time 1800 \
+        --retry 2 --retry-delay 3 --retry-all-errors \
+        "$url" -o "$part"; then
+        if [[ -s "$part" ]] && tar -tzf "$part" >/dev/null 2>&1; then
+          mv -f "$part" "$cached"
+          cp -f "$cached" "$output"
+          printf '%s
+' "$mirror" > "$BIOC_ACTIVE_MIRROR_FILE"
+          log "Downloaded and cached: $cached"
+          return 0
+        fi
+        warn "Downloaded file is not a valid source tarball: $url"
+      fi
+
+      rm -f "$part"
+      if (( attempt < BIOC_RETRY_ATTEMPTS && BIOC_RETRY_SLEEP > 0 )); then
+        sleep $((BIOC_RETRY_SLEEP * attempt))
+      fi
+    done
+  done
+
+  die "Could not download $filename from any configured Bioconductor mirror"
+}
 
 # ------------------------------------------------------------
 # ggtree compatibility patch
@@ -727,9 +1158,7 @@ patch_ggtree() {
   workdir="$(mktemp -d /tmp/ggtree_patch_XXXXXX)"
   local tarball="$workdir/ggtree_3.2.1.tar.gz"
 
-  curl -L --retry 3 --fail \
-    "https://bioconductor.org/packages/3.14/bioc/src/contrib/ggtree_3.2.1.tar.gz" \
-    -o "$tarball"
+  download_bioc_tarball "ggtree" "3.2.1" "$tarball"
 
   tar -xzf "$tarball" -C "$workdir"
 
@@ -806,46 +1235,98 @@ cat > "$R_PHASE2_SCRIPT" <<'RSCRIPT'
 threads <- as.integer(Sys.getenv("THREADS", "1"))
 cran_repo <- Sys.getenv("CRAN_REPO", "https://packagemanager.posit.co/cran/2022-05-15")
 bioc_version <- Sys.getenv("BIOC_VERSION", "3.14")
+bioc_retry_attempts <- suppressWarnings(as.integer(Sys.getenv("BIOC_RETRY_ATTEMPTS", "3")))
+bioc_retry_sleep <- suppressWarnings(as.numeric(Sys.getenv("BIOC_RETRY_SLEEP", "10")))
+if (is.na(bioc_retry_attempts) || bioc_retry_attempts < 1L) bioc_retry_attempts <- 3L
+if (is.na(bioc_retry_sleep) || bioc_retry_sleep < 0) bioc_retry_sleep <- 10
+bioc_mirrors <- trimws(strsplit(Sys.getenv("BIOC_MIRRORS", "https://bioconductor.org,https://bioconductor.posit.co,https://bioconductor.statistik.tu-dortmund.de,https://ftp.gwdg.de/pub/misc/bioconductor"), ",", fixed = TRUE)[[1]])
+bioc_mirrors <- unique(sub("/+$", "", bioc_mirrors[nzchar(bioc_mirrors)]))
+active_mirror_file <- path.expand(Sys.getenv("BIOC_ACTIVE_MIRROR_FILE", file.path(tempdir(), "mtd_bioc_active_mirror.txt")))
 
-options(
-  repos = c(
-    BioCsoft = sprintf("https://bioconductor.org/packages/%s/bioc", bioc_version),
-    BioCann = sprintf("https://bioconductor.org/packages/%s/data/annotation", bioc_version),
-    BioCexp = sprintf("https://bioconductor.org/packages/%s/data/experiment", bioc_version),
-    BioCworkflows = sprintf("https://bioconductor.org/packages/%s/workflows", bioc_version),
-    CRAN = cran_repo
-  ),
-  timeout = max(1000, getOption("timeout")),
-  Ncpus = threads
-)
-
+options(timeout = max(1000, getOption("timeout")), Ncpus = threads)
 Sys.setenv(MAKEFLAGS = paste0("-j", threads))
 
 msg <- function(...) cat("\n==== ", sprintf(...), " ====\n", sep = "")
+warn <- function(...) warning(sprintf(...), call. = FALSE)
 pkg_ok <- function(pkg) requireNamespace(pkg, quietly = TRUE)
 pkg_ver <- function(pkg) if (pkg_ok(pkg)) as.character(packageVersion(pkg)) else "MISSING"
 
+make_repos <- function(root) {
+  root <- sub("/+$", "", root)
+  c(
+    BioCsoft = sprintf("%s/packages/%s/bioc", root, bioc_version),
+    BioCann = sprintf("%s/packages/%s/data/annotation", root, bioc_version),
+    BioCexp = sprintf("%s/packages/%s/data/experiment", root, bioc_version),
+    BioCworkflows = sprintf("%s/packages/%s/workflows", root, bioc_version),
+    CRAN = cran_repo
+  )
+}
+
+probe <- function(root) {
+  url <- sprintf("%s/src/contrib/PACKAGES.gz", unname(make_repos(root)["BioCsoft"]))
+  for (attempt in seq_len(bioc_retry_attempts)) {
+    tmp <- tempfile(fileext = ".gz")
+    curl_bin <- Sys.which("curl")
+    if (!nzchar(curl_bin)) stop("curl was not found while probing Bioconductor mirrors")
+    status <- tryCatch(
+      system2(
+        curl_bin,
+        args = c(
+          "-L", "--fail", "--silent", "--show-error",
+          "--connect-timeout", "15", "--max-time", "90",
+          "--output", tmp, url
+        ),
+        stdout = FALSE,
+        stderr = FALSE
+      ),
+      error = function(e) 1L
+    )
+    ok <- isTRUE(status == 0L) && file.exists(tmp) && isTRUE(file.info(tmp)$size > 20)
+    unlink(tmp, force = TRUE)
+    if (ok) return(TRUE)
+    if (attempt < bioc_retry_attempts && bioc_retry_sleep > 0) Sys.sleep(bioc_retry_sleep * attempt)
+  }
+  FALSE
+}
+
 if (!pkg_ok("BiocManager")) {
+  options(repos = c(CRAN = cran_repo))
   install.packages("BiocManager", dependencies = c("Depends", "Imports", "LinkingTo"))
 }
 
 msg("Checking ggtree before installing enrichplot/clusterProfiler")
 print(sapply(c("ggplot2", "treeio", "tidytree", "ggtree", "DOSE"), pkg_ver))
+if (!pkg_ok("ggtree")) stop("ggtree is missing before phase 2. The ggtree patch probably failed.")
 
-if (!pkg_ok("ggtree")) {
-  stop("ggtree is missing before phase 2. The ggtree patch probably failed.")
+targets <- c("enrichplot", "clusterProfiler")
+missing <- targets
+healthy <- bioc_mirrors[vapply(bioc_mirrors, probe, logical(1))]
+if (!length(healthy)) stop("No healthy Bioconductor mirror found for phase 2")
+
+for (round in seq_len(bioc_retry_attempts)) {
+  for (root in healthy) {
+    options(repos = make_repos(root), BioC_mirror = paste0(root, "/"))
+    writeLines(root, active_mirror_file)
+    msg("Installing phase-2 packages through %s", root)
+    tryCatch(
+      BiocManager::install(
+        missing,
+        version = bioc_version,
+        ask = FALSE,
+        update = FALSE,
+        force = TRUE,
+        Ncpus = threads
+      ),
+      error = function(e) warn("Phase-2 installation failed through %s: %s", root, conditionMessage(e))
+    )
+    missing <- targets[!vapply(targets, pkg_ok, logical(1))]
+    if (!length(missing)) break
+  }
+  if (!length(missing)) break
+  if (round < bioc_retry_attempts && bioc_retry_sleep > 0) Sys.sleep(bioc_retry_sleep * round)
 }
 
-msg("Installing enrichplot and clusterProfiler")
-BiocManager::install(
-  c("enrichplot", "clusterProfiler"),
-  version = bioc_version,
-  ask = FALSE,
-  update = FALSE,
-  force = TRUE,
-  Ncpus = threads
-)
-
+if (length(missing)) stop("Phase-2 Bioconductor packages still missing: ", paste(missing, collapse = ", "))
 msg("Phase 2 versions")
 print(sapply(c("ggplot2", "ggtree", "DOSE", "enrichplot", "clusterProfiler"), pkg_ver))
 RSCRIPT
@@ -854,6 +1335,10 @@ log "Running R package installation phase 2"
 THREADS="$THREADS" \
 CRAN_REPO="$CRAN_REPO" \
 BIOC_VERSION="$BIOC_VERSION" \
+BIOC_MIRRORS="$BIOC_MIRRORS" \
+BIOC_RETRY_ATTEMPTS="$BIOC_RETRY_ATTEMPTS" \
+BIOC_RETRY_SLEEP="$BIOC_RETRY_SLEEP" \
+BIOC_ACTIVE_MIRROR_FILE="$BIOC_ACTIVE_MIRROR_FILE" \
 Rscript "$R_PHASE2_SCRIPT" 2>&1 | tee "$LOGDIR/06_R_install_phase2_enrich_clusterProfiler.log"
 
 # ------------------------------------------------------------
@@ -862,24 +1347,34 @@ Rscript "$R_PHASE2_SCRIPT" 2>&1 | tee "$LOGDIR/06_R_install_phase2_enrich_cluste
 VALIDATION_SCRIPT="$LOGDIR/validate_R412_MTD.R"
 
 cat > "$VALIDATION_SCRIPT" <<'RSCRIPT'
+bioc_version <- Sys.getenv("BIOC_VERSION", "3.14")
+cran_repo <- Sys.getenv("CRAN_REPO", "https://packagemanager.posit.co/cran/2022-05-15")
+active_mirror_file <- path.expand(Sys.getenv("BIOC_ACTIVE_MIRROR_FILE", ""))
+bioc_root <- "https://bioconductor.org"
+if (nzchar(active_mirror_file) && file.exists(active_mirror_file)) {
+  candidate <- trimws(readLines(active_mirror_file, n = 1L, warn = FALSE))
+  if (length(candidate) && nzchar(candidate)) bioc_root <- sub("/+$", "", candidate)
+}
+
 options(
   repos = c(
-    BioCsoft = "https://bioconductor.org/packages/3.14/bioc",
-    BioCann = "https://bioconductor.org/packages/3.14/data/annotation",
-    BioCexp = "https://bioconductor.org/packages/3.14/data/experiment",
-    BioCworkflows = "https://bioconductor.org/packages/3.14/workflows",
-    CRAN = Sys.getenv("CRAN_REPO", "https://packagemanager.posit.co/cran/2022-05-15")
-  )
+    BioCsoft = sprintf("%s/packages/%s/bioc", bioc_root, bioc_version),
+    BioCann = sprintf("%s/packages/%s/data/annotation", bioc_root, bioc_version),
+    BioCexp = sprintf("%s/packages/%s/data/experiment", bioc_root, bioc_version),
+    BioCworkflows = sprintf("%s/packages/%s/workflows", bioc_root, bioc_version),
+    CRAN = cran_repo
+  ),
+  BioC_mirror = paste0(bioc_root, "/")
 )
 
 pkgs <- c(
   "lattice", "MASS", "Matrix", "mgcv", "nlme", "survival",
-  "ggplot2", "ggfun", "yulab.utils", "tidytree", "treeio", "ggtree",
+  "ggplot2", "ggnewscale", "ggfun", "yulab.utils", "tidytree", "treeio", "ggtree",
   "DOSE", "enrichplot", "clusterProfiler", "fgsea",
   "DESeq2", "phyloseq", "microbiome", "mia", "ANCOMBC",
   "cplm", "Maaslin2", "flowCore", "cytolib", "cmapR", "tximeta",
   "hdf5r", "Rgraphviz", "pathview",
-  "lme4", "pbkrtest",
+  "lme4", "pbkrtest", "TMB", "glmmTMB",
   "sctransform", "SeuratObject", "Seurat"
 )
 
@@ -893,6 +1388,33 @@ versions <- sapply(pkgs, function(p) {
 
 cat("\n==== Package versions ====\n")
 print(versions)
+
+# MTD_R412_TMB_MATRIX_ABI_V11_FINAL_GUARD
+# The TMB/glmmTMB stack is pinned because both packages contain compiled code
+# tied to the Matrix ABI. Refuse to validate a silently restored or downgraded
+# package even when require() itself returns TRUE.
+expected_abi_versions <- c(
+  Matrix = "1.6.5",
+  TMB = "1.9.7",
+  glmmTMB = "1.1.3"
+)
+
+abi_mismatch <- names(expected_abi_versions)[
+  versions[names(expected_abi_versions)] != expected_abi_versions
+]
+
+if (length(abi_mismatch)) {
+  details <- paste(
+    sprintf(
+      "%s expected=%s found=%s",
+      abi_mismatch,
+      expected_abi_versions[abi_mismatch],
+      versions[abi_mismatch]
+    ),
+    collapse = "; "
+  )
+  stop("Matrix/TMB ABI version guard failed: ", details)
+}
 
 load_status <- sapply(pkgs, function(p) {
   suppressPackageStartupMessages(
@@ -909,13 +1431,23 @@ if (length(failed)) {
 }
 
 cat("\n==== BiocManager::valid() ====\n")
-print(BiocManager::valid())
+valid_result <- tryCatch(
+  BiocManager::valid(),
+  error = function(e) {
+    warning("BiocManager::valid() could not complete its online check: ", conditionMessage(e), call. = FALSE)
+    NA
+  }
+)
+print(valid_result)
 
 cat("\nValidation completed successfully.\n")
 RSCRIPT
 
 log "Running final validation"
-CRAN_REPO="$CRAN_REPO" Rscript "$VALIDATION_SCRIPT" 2>&1 | tee "$LOGDIR/07_validation.log"
+CRAN_REPO="$CRAN_REPO" \
+BIOC_VERSION="$BIOC_VERSION" \
+BIOC_ACTIVE_MIRROR_FILE="$BIOC_ACTIVE_MIRROR_FILE" \
+Rscript "$VALIDATION_SCRIPT" 2>&1 | tee "$LOGDIR/07_validation.log"
 
 log "Done. Logs are in: $LOGDIR"
 
