@@ -1431,8 +1431,7 @@ species_from_taxid=$(
     awk -F',' -v id="$taxid" '
         NR == 1 {
             for (i = 1; i <= NF; i++) {
-                gsub(/
-/, "", $i)
+                gsub(/\n/, "", $i)
                 if ($i == "Taxon_ID") tax_col = i
                 if ($i == "Scientific_name") sci_col = i
             }
@@ -1440,8 +1439,7 @@ species_from_taxid=$(
             next
         }
         {
-            gsub(/
-/, "", $0)
+            gsub(/\n/, "", $0)
             tax_id = $tax_col
             sci_name = $sci_col
             gsub(/^[ 	]+|[ 	]+$/, "", tax_id)
