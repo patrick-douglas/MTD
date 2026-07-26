@@ -3,7 +3,7 @@ set -Eeo pipefail
 
 # ============================================================
 # MTD - R 4.1.2 / Bioconductor 3.14 package installer
-# Version: FINAL v11 - Bioconductor failover and locale-safe TMB ABI validation
+# Version: FINAL v12 - fresh-process Bioconductor validation and checker cleanup
 # ============================================================
 #
 # Assumptions:
@@ -437,7 +437,12 @@ install_bioc_tarball <- function(pkg, version, force = FALSE) {
 
   msg("Installing cached Bioconductor tarball: %s", cached)
   install.packages(cached, repos = NULL, type = "source", dependencies = FALSE)
-  if (!pkg_ok(pkg)) stop("Bioconductor tarball installed but package is unavailable: ", pkg)
+  if (!fresh_pkg_ok(pkg)) {
+    stop(
+      "Bioconductor tarball installed but package is unavailable in a fresh R process: ",
+      pkg
+    )
+  }
   invisible(TRUE)
 }
 
@@ -529,6 +534,94 @@ strict_fresh_load_ok <- function(pkg, expected_version) {
   TRUE
 }
 
+# MTD_R412_FRESH_BIOC_VALIDATION_V12
+# Matrix and other low-level packages are upgraded inside this installer.
+# The parent R process may retain stale namespaces and incorrectly report newly
+# installed Bioconductor packages as missing. Validate the complete package set
+# in a brand-new Rscript process after every installation round.
+fresh_pkg_status <- function(pkgs) {
+  pkgs <- unique(as.character(pkgs))
+  if (!length(pkgs)) return(setNames(logical(), character()))
+
+  child_script <- tempfile('mtd_fresh_pkg_status_', fileext = '.R')
+  result_file <- tempfile('mtd_fresh_pkg_status_', fileext = '.tsv')
+  child_log <- tempfile('mtd_fresh_pkg_status_', fileext = '.log')
+  on.exit(unlink(c(child_script, result_file, child_log), force = TRUE), add = TRUE)
+
+  writeLines(c(
+    'args <- commandArgs(trailingOnly = TRUE)',
+    'result_file <- args[[1L]]',
+    'pkgs <- args[-1L]',
+    'status <- vapply(pkgs, function(pkg) {',
+    '  tryCatch({',
+    '    suppressWarnings(suppressPackageStartupMessages(loadNamespace(pkg)))',
+    '    TRUE',
+    '  }, error = function(e) {',
+    '    message(sprintf("MTD_FRESH_PKG_FAIL\\t%s\\t%s", pkg, conditionMessage(e)))',
+    '    FALSE',
+    '  })',
+    '}, logical(1))',
+    'write.table(',
+    '  data.frame(package = pkgs, ok = status, stringsAsFactors = FALSE),',
+    '  file = result_file, sep = "\\t", quote = FALSE, row.names = FALSE',
+    ')',
+    'quit(save = "no", status = 0L, runLast = FALSE)'
+  ), child_script)
+
+  status <- system2(
+    file.path(R.home('bin'), 'Rscript'),
+    args = c(
+      '--vanilla',
+      shQuote(child_script),
+      shQuote(result_file),
+      vapply(pkgs, shQuote, character(1))
+    ),
+    stdout = child_log,
+    stderr = child_log
+  )
+
+  log_lines <- if (file.exists(child_log)) readLines(child_log, warn = FALSE) else character()
+  if (!identical(status, 0L) || !file.exists(result_file)) {
+    cat('\n==== Fresh package validation process failed ====\n')
+    cat(paste(log_lines, collapse = '\n'), '\n')
+    stop('Could not validate installed packages in a fresh R process')
+  }
+
+  result <- read.delim(result_file, stringsAsFactors = FALSE, check.names = FALSE)
+  if (
+    !identical(names(result), c('package', 'ok')) ||
+    nrow(result) != length(pkgs) ||
+    anyDuplicated(result$package) ||
+    !setequal(result$package, pkgs)
+  ) {
+    cat('\n==== Invalid fresh package validation output ====\n')
+    print(result)
+    cat(paste(log_lines, collapse = '\n'), '\n')
+    stop('Fresh package validation returned an invalid package inventory')
+  }
+
+  answer <- as.logical(result$ok[match(pkgs, result$package)])
+  names(answer) <- pkgs
+
+  failed_lines <- grep('^MTD_FRESH_PKG_FAIL\\t', log_lines, value = TRUE)
+  if (length(failed_lines)) {
+    cat('\n==== Fresh package load failures ====\n')
+    cat(paste(failed_lines, collapse = '\n'), '\n')
+  }
+
+  answer
+}
+
+fresh_missing_pkgs <- function(pkgs) {
+  status <- fresh_pkg_status(pkgs)
+  names(status)[!status]
+}
+
+fresh_pkg_ok <- function(pkg) {
+  status <- fresh_pkg_status(pkg)
+  isTRUE(unname(status[[pkg]]))
+}
+
 install_cran <- function(pkgs, force = FALSE) {
   pkgs <- unique(pkgs)
   todo <- if (force) pkgs else pkgs[!vapply(pkgs, pkg_ok, logical(1))]
@@ -545,14 +638,20 @@ install_cran <- function(pkgs, force = FALSE) {
 install_bioc <- function(pkgs, force = FALSE) {
   pkgs <- unique(pkgs)
 
-  if (!pkg_ok("BiocManager")) {
+  if (!pkg_ok('BiocManager')) {
     options(repos = c(CRAN = cran_repo))
-    install.packages("BiocManager", dependencies = c("Depends", "Imports", "LinkingTo"))
+    install.packages(
+      'BiocManager',
+      dependencies = c('Depends', 'Imports', 'LinkingTo')
+    )
   }
 
-  todo <- if (force) pkgs else pkgs[!vapply(pkgs, pkg_ok, logical(1))]
+  todo <- if (force) pkgs else fresh_missing_pkgs(pkgs)
   if (!length(todo)) {
-    msg("Bioconductor packages already installed: %s", paste(pkgs, collapse = ", "))
+    msg(
+      'Bioconductor packages already installed and fresh-loadable: %s',
+      paste(pkgs, collapse = ', ')
+    )
     return(invisible(TRUE))
   }
 
@@ -563,8 +662,10 @@ install_bioc <- function(pkgs, force = FALSE) {
     for (root in mirrors) {
       activate_bioc_mirror(root)
       msg(
-        "Installing Bioconductor packages (round %d/%d): %s",
-        round, bioc_retry_attempts, paste(todo, collapse = ", ")
+        'Installing Bioconductor packages (round %d/%d): %s',
+        round,
+        bioc_retry_attempts,
+        paste(todo, collapse = ', ')
       )
 
       tryCatch(
@@ -579,34 +680,52 @@ install_bioc <- function(pkgs, force = FALSE) {
         error = function(e) {
           last_errors <<- c(
             last_errors,
-            sprintf("%s: %s", root, conditionMessage(e))
+            sprintf('%s: %s', root, conditionMessage(e))
           )
-          warn("Bioconductor installation failed through %s: %s", root, conditionMessage(e))
+          warn(
+            'Bioconductor installation failed through %s: %s',
+            root,
+            conditionMessage(e)
+          )
         }
       )
 
-      todo <- pkgs[!vapply(pkgs, pkg_ok, logical(1))]
+      # Never inspect just-installed packages in this parent R session.
+      todo <- fresh_missing_pkgs(pkgs)
       if (!length(todo)) {
-        msg("Bioconductor package installation completed successfully")
+        msg(
+          'Bioconductor package installation completed and passed fresh-process validation'
+        )
         return(invisible(TRUE))
       }
 
-      warn("Packages still missing after mirror %s: %s", root, paste(todo, collapse = ", "))
+      warn(
+        'Packages still unavailable in a fresh R process after mirror %s: %s',
+        root,
+        paste(todo, collapse = ', ')
+      )
     }
 
     if (round < bioc_retry_attempts && bioc_retry_sleep > 0) {
       delay <- bioc_retry_sleep * round
-      msg("Waiting %.0f seconds before the next Bioconductor retry round", delay)
+      msg('Waiting %.0f seconds before the next Bioconductor retry round', delay)
       Sys.sleep(delay)
       mirrors <- discover_bioc_mirrors(refresh = TRUE)
     }
   }
 
-  details <- if (length(last_errors)) paste(unique(last_errors), collapse = " | ") else "no R exception was raised"
+  details <- if (length(last_errors)) {
+    paste(unique(last_errors), collapse = ' | ')
+  } else {
+    'no R exception was raised'
+  }
+
   stop(
-    "Bioconductor packages still missing after mirror failover: ",
-    paste(todo, collapse = ", "),
-    ". Errors: ", details
+    'Bioconductor packages still unavailable after mirror failover and ',
+    'fresh-process validation: ',
+    paste(todo, collapse = ', '),
+    '. Errors: ',
+    details
   )
 }
 
@@ -775,7 +894,7 @@ if (bioc_smoke_test_only) {
   install_bioc(c("BiocVersion", "lpsymphony"))
 
   smoke_pkgs <- c("BiocVersion", "lpsymphony")
-  missing_smoke <- smoke_pkgs[!vapply(smoke_pkgs, pkg_ok, logical(1))]
+  missing_smoke <- fresh_missing_pkgs(smoke_pkgs)
   if (length(missing_smoke)) {
     stop("Smoke-test packages are still missing: ", paste(missing_smoke, collapse = ", "))
   }

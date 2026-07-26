@@ -18,7 +18,7 @@
 # ==============================================================================
 set -uo pipefail
 
-CHECKER_VERSION="2026.07.26-r11"
+CHECKER_VERSION="2026.07.26-r12"
 
 SCRIPT_DIR="$(
     cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &&
@@ -709,6 +709,8 @@ check_repo_r_checker() {
     local label="$2"
     local script_path="$3"
     local tmp="$TMP_WORK/rcheck_${env_name}_${label//[^A-Za-z0-9_.-]/_}.txt"
+    local status=0
+
     if [[ ! -f "$script_path" ]]; then
         record SKIP "R/$env_name" "$label" "checker script absent"
         return
@@ -717,15 +719,29 @@ check_repo_r_checker() {
         record FAIL "R/$env_name" "$label" "environment is unavailable"
         return
     fi
+
+    # MTD_R_CHECKER_WARNING_CLASSIFICATION_V12
+    # Package checkers may return success while reporting BUILD_WARN/LOAD_WARN.
+    # Surface that state as WARN. A nonzero package-checker status remains FAIL.
     if capture_command "$tmp" "$CONDA_PATH/bin/conda" run -n "$env_name" \
         bash "$script_path"
     then
-        record PASS "R/$env_name" "$label" "$(compact_output "$tmp" 8)"
+        status=0
     else
+        status=$?
+    fi
+
+    if (( status != 0 )); then
         record FAIL "R/$env_name" "$label" "$(compact_output "$tmp" 30)"
+    elif grep -Eq \
+        'BUILD_WARN:[[:space:]]*[1-9][0-9]*|LOAD_WARN:[[:space:]]*[1-9][0-9]*|\|[[:space:]]*(BUILD_WARN|LOAD_WARN)[[:space:]]*\|' \
+        "$tmp"
+    then
+        record WARN "R/$env_name" "$label" "$(compact_output "$tmp" 12)"
+    else
+        record PASS "R/$env_name" "$label" "$(compact_output "$tmp" 8)"
     fi
 }
-
 check_source_tree() {
     local source_file=""
     local script_path=""

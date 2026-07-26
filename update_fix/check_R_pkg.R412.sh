@@ -174,7 +174,11 @@ pkgs <- c(
   "tidyselect", "rlang", "vctrs", "cli", "purrr", "tibble",
   "cmapR", "dplyr", "dbplyr", "tidyr", "ggpubr",
   "pbkrtest", "car", "Maaslin2", "promises", "httpuv",
-  "miniUI", "shiny", "fastmap", "rgeos", "SeuratObject",
+  # MTD_R412_OPTIONAL_LEGACY_SPATIAL_V12
+  # rgeos is retired and is not used by the current MTD Explorer workflow.
+  # Do not fail the installation checker when this optional legacy package
+  # cannot link against a modern system GEOS installation.
+  "miniUI", "shiny", "fastmap", "SeuratObject",
   "Seurat", "tximeta", "plyr", "BiocGenerics", "S4Vectors",
   "IRanges", "UCSC.utils", "GenomeInfoDbData", "GenomeInfoDb",
   "matrixStats", "lambda.r", "futile.options",
