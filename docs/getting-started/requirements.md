@@ -2,11 +2,16 @@
 
 This page describes the operating system, hardware, storage, and network requirements for installing and running MTD Explorer.
 
-!!! warning "Requirements under validation"
+!!! info "Benchmark-based requirements"
 
-```
-The minimum and recommended hardware requirements are currently being validated using clean installations and benchmark runs on different computer configurations.
-```
+    These requirements are based on a complete warm-cache installation benchmark
+    performed with the full default database set. The benchmark completed
+    successfully on a 20-thread x86-64 computer with 128 GiB of RAM and NVMe
+    storage.
+
+    The installation reached approximately 116.6 GiB of process-tree resident
+    memory and 20.2 GiB of swap usage. Systems close to the minimum requirements
+    must therefore have properly configured swap space.
 
 ## Supported operating systems
 
@@ -26,19 +31,51 @@ Windows users may be able to use a Linux server, virtual machine, or WSL2, but t
 
 ## Hardware requirements
 
-| Resource            |          Minimum |      Recommended | Notes                                                              |
-| ------------------- | ---------------: | ---------------: | ------------------------------------------------------------------ |
-| CPU architecture    |           x86-64 |           x86-64 | ARM64 is not currently validated                                   |
-| CPU threads         | Under validation |       16 or more | More threads reduce installation and analysis time                 |
-| RAM                 | Under validation | Under validation | Database construction is one of the most memory-intensive steps    |
-| Free storage        |  1TB             | 2TB              | Depends on databases, cache, host references, and analysis outputs |
-| Internet connection |         Required | Stable broadband | Large reference databases are downloaded during installation       |
+The following values apply to a complete MTD Explorer installation, including
+construction of the default Kraken2 and Bracken databases.
 
-!!! note "Minimum versus recommended"
+| Resource | Minimum | Recommended | Notes |
+| --- | ---: | ---: | --- |
+| CPU architecture | x86-64 | x86-64 | ARM64 is not currently validated |
+| CPU threads | 8 | 20 or more | Fewer threads substantially increase installation and analysis time |
+| RAM | 128 GB | 192 GB or more | 256 GB is preferred for additional headroom during large database builds |
+| Swap | 32 GB | 64 GB | Swap should preferably be located on SSD or NVMe storage |
+| Free storage | 1.5 TB | 2 TB or more | Includes the installation, databases, Conda environments, and reusable cache |
+| Installation drive | SSD | NVMe SSD | Database construction performs several terabytes of disk I/O |
+| Internet connection | Required | Stable broadband | Used for packages, reference metadata, and database updates |
 
-```
-A computer may be able to run MTD Explorer with less memory or fewer CPU threads, but installation and analysis may take considerably longer.
-```
+!!! warning "RAM and swap"
+
+    A full database installation was successfully completed with 128 GiB of RAM,
+    but the benchmark reached approximately 116.6 GiB of resident memory and
+    used approximately 20.2 GiB of swap.
+
+    A system with 128 GB of RAM should therefore have at least 32 GB of available
+    swap. Systems without swap may fail during the most memory-intensive Kraken2
+    or Bracken construction steps.
+
+!!! note "Storage layout"
+
+    The benchmark produced approximately:
+
+    * 740 GiB for the MTD Explorer installation and generated databases;
+    * 18 GiB for the Conda installation and environments;
+    * 373 GiB for the reusable installation cache.
+
+    When the cache and installation are stored on the same filesystem, at least
+    1.5 TB of free space should be available before installation. A minimum of
+    2 TB is recommended when input data, temporary files, and analysis outputs
+    will also be stored on that filesystem.
+
+    The reusable cache may instead be placed on a separate disk. In that
+    configuration, plan for approximately 1 TB on the installation disk and
+    at least 500 GB on the cache disk.
+
+!!! note "Installation versus analysis"
+
+    These values describe installation of the complete default database set.
+    Resource requirements for individual analyses depend on the number of
+    samples, FASTQ file sizes, selected databases, and enabled analysis modules.
 
 ## Storage planning
 
