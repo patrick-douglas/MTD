@@ -483,18 +483,145 @@ The point size represents prevalence.
 
 Larger points indicate taxa detected in a larger percentage of samples.
 
-### How the score is used
+### Ranked table and importance-score formula
 
-The score is a descriptive ranking designed to combine taxon-level properties
-such as prevalence and abundance.
+The complete ranking used by the importance plot is written to:
 
-It helps prioritize taxa for inspection.
+```text
+detected_microbiome_species_ranked_by_importance.tsv
+```
 
-It is not a statistical p-value.
+When another taxonomic rank is selected, `species` is replaced by the
+corresponding rank name.
 
-It is not a false-discovery-rate-adjusted result.
+The table ranks every detected taxon using a composite exploratory score. With
+the default MTD Explorer weights, the formula is:
 
-It is not a differential abundance test.
+```text
+importance_score =
+    0.45 * prevalence_score
+  + 0.30 * mean_abundance_score
+  + 0.15 * max_abundance_score
+  + 0.10 * total_abundance_score
+```
+
+The score components are calculated as follows:
+
+```text
+prevalence_score = prevalence_percent / 100
+
+mean_abundance_score =
+    minmax01(log10(mean_abundance + 1))
+
+max_abundance_score =
+    minmax01(log10(max_abundance + 1))
+
+total_abundance_score =
+    minmax01(log10(total_abundance + 1))
+```
+
+For each abundance component, `minmax01` performs min-max scaling across all
+taxa in the corresponding table:
+
+```text
+scaled_value =
+    (value - minimum_value) /
+    (maximum_value - minimum_value)
+```
+
+If all taxa have the same value for an abundance component, that normalized
+component is set to zero.
+
+The `log10(x + 1)` transformation reduces the influence of an extremely
+abundant taxon before normalization. The default weighting gives the greatest
+contribution to prevalence, followed by mean abundance, maximum abundance, and
+total abundance.
+
+| Component | Default weight | Contribution |
+| --- | ---: | ---: |
+| Prevalence | `0.45` | 45% |
+| Mean abundance | `0.30` | 30% |
+| Maximum abundance | `0.15` | 15% |
+| Total abundance | `0.10` | 10% |
+
+The script normalizes the weights internally if custom values are supplied and
+their sum differs from 1.
+
+Consequently, taxa detected consistently across samples generally receive a
+higher priority, while taxa with strong mean, maximum, or cumulative abundance
+can also move upward in the ranking.
+
+### Main columns in the ranked table
+
+The main columns in
+`detected_microbiome_species_ranked_by_importance.tsv` are:
+
+| Column | Meaning |
+| --- | --- |
+| `rank_position` | Final position in the importance ranking |
+| `taxon` | Detected taxon name |
+| `rank` | Taxonomic rank used in the analysis |
+| `n_samples` | Total number of samples evaluated |
+| `prevalence_n` | Number of samples in which the taxon was detected |
+| `prevalence_percent` | Percentage of samples containing the taxon |
+| `mean_abundance` | Mean abundance across samples |
+| `median_abundance` | Median abundance across samples |
+| `max_abundance` | Highest abundance observed in one sample |
+| `total_abundance` | Abundance summed across samples |
+| `prevalence_class` | Descriptive prevalence category |
+| `importance_interpretation` | Descriptive classification based on prevalence and abundance patterns |
+| `importance_score` | Final composite score used for ranking |
+| `prevalence_score` | Prevalence component expressed from 0 to 1 |
+| `mean_abundance_score` | Normalized mean-abundance component |
+| `max_abundance_score` | Normalized maximum-abundance component |
+| `total_abundance_score` | Normalized total-abundance component |
+
+### Importance interpretation categories
+
+With the default core-prevalence threshold of 75%, the
+`importance_interpretation` column uses these descriptive rules:
+
+| Value | Rule |
+| --- | --- |
+| `consistent_and_abundant` | Prevalence is at least 75% and normalized mean abundance is at least `0.50` |
+| `consistent_low_abundance` | Prevalence is at least 75%, but normalized mean abundance is below `0.50` |
+| `sample_specific_high_abundance` | Prevalence is below 50% and normalized maximum abundance is at least `0.75` |
+| `rare_low_abundance` | Prevalence is below 25% and normalized mean abundance is below `0.25` |
+| `intermediate_priority` | The taxon does not match one of the preceding patterns |
+
+When a custom core-prevalence threshold is supplied, it replaces the default
+75% threshold in the first two categories.
+
+### Ranking order
+
+The table is ordered first by decreasing `importance_score`. Ties are resolved
+using:
+
+1. decreasing `prevalence_percent`;
+2. decreasing `mean_abundance`;
+3. decreasing `max_abundance`;
+4. alphabetical taxon name.
+
+The pipeline also creates abbreviated versions containing the first 20 and
+first 50 taxa:
+
+```text
+top20_detected_microbiome_species_by_importance.tsv
+top50_detected_microbiome_species_by_importance.tsv
+```
+
+!!! important "How to interpret the importance score"
+
+    The importance score is a descriptive and dataset-specific prioritization
+    index. It is not a p-value, a false-discovery-rate-adjusted result, a
+    differential-abundance statistic, evidence of causality, or a
+    machine-learning feature-importance estimate.
+
+    Because the abundance components are normalized relative to the taxa
+    present in each table, importance scores should primarily be compared
+    within the same analysis, taxonomic rank, and abundance mode. Scores from
+    different datasets, or from absolute and relative abundance tables, are
+    not necessarily directly comparable.
 
 ### What this plot is useful for
 
