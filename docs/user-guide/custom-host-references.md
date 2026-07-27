@@ -148,6 +148,22 @@ When automatic mode is used, MTD Explorer:
 8. creates reference-matched functional host resources;
 9. optionally builds a custom [OrgDb][orgdb] package.
 
+!!! note "Approximate build time"
+
+    The time required to build a custom host reference varies according to the
+    complexity of the selected organism and its reference files. Important
+    factors include genome size and fragmentation, the number of annotated genes
+    and proteins, available CPU and memory, storage performance, network speed,
+    and whether the required files are already available in the persistent cache.
+
+    As a practical example, a complete custom host reference for
+    *Biomphalaria glabrata* (NCBI Taxon ID `6526`) was built in approximately
+    **1 hour and 4 minutes** (`01:03:33`) on a workstation with an Intel Core
+    i9-10900K processor and 20 logical CPUs. In this benchmark, the species
+    reference files, Kraken 2 taxonomy, eggNOG database, and NCBI gene mapping
+    cache were already available. A first-time build that requires downloading
+    these resources may take considerably longer.
+
 The persistent cache is normally read from:
 
 ```bash
