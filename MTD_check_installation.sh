@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # MTD Explorer installation checker
-# Version: 2026.07.26-r11
+# Version: 2026.07.27-r12
 #
 # Current installation architecture:
 #   - repository location is detected from this checker, never assumed as ~/MTD;
@@ -18,7 +18,7 @@
 # ==============================================================================
 set -uo pipefail
 
-CHECKER_VERSION="2026.07.26-r12"
+CHECKER_VERSION="2026.07.27-r12"
 
 SCRIPT_DIR="$(
     cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &&
@@ -972,7 +972,7 @@ check_conda_stack() {
     fi
     check_conda_env MTD_orgdb "$expect_orgdb"
 
-    check_env_version MTD_fastp fastp 1.3.3 WARN
+    check_env_version MTD_fastp fastp 1.3.6 WARN
     check_env_version MTD r-base 4.0.3 WARN
     check_env_version MTD hisat2 2.2.1 WARN
     check_env_version MTD_kraken2 kraken2 2.17.1 FAIL
