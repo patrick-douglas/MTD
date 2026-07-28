@@ -1708,45 +1708,263 @@ data.alpha<-estimate_richness(data.adj, measures = c("Observed", "Shannon", "Sim
   message("[INFO] Number of phyla in data: ", length(PhylaPalette_data))
   message("[INFO] Number of phyla in data_sam: ", length(PhylaPalette_sam))
 
+#### BEGIN BLOCK: readable phylum composition bar plots ####
+  #
+  # Large phylum legends are placed below the plotting panel instead
+  # of beside it. This prevents the legend from compressing the bars.
+  # Figure width scales with the number of samples, while figure height
+  # scales with the number of legend rows.
+
+  phylum_legend_columns <- function(number_of_phyla) {
+    min(
+      6L,
+      max(
+        1L,
+        ceiling(
+          sqrt(
+            max(
+              1L,
+              number_of_phyla
+            )
+          )
+        )
+      )
+    )
+  }
+
+  phylum_plot_width <- function(physeq_object) {
+    sample_number <- phyloseq::nsamples(
+      physeq_object
+    )
+
+    max(
+      12,
+      min(
+        30,
+        7 + 0.55 * sample_number
+      )
+    )
+  }
+
+  phylum_plot_height <- function(number_of_phyla) {
+    legend_columns <- phylum_legend_columns(
+      number_of_phyla
+    )
+
+    legend_rows <- ceiling(
+      number_of_phyla /
+        legend_columns
+    )
+
+    max(
+      8,
+      min(
+        14,
+        7 + 0.45 * legend_rows
+      )
+    )
+  }
+
+  phylum_bar_theme <- function() {
+    theme_bw(
+      base_size = 10
+    ) +
+      theme(
+        axis.text.x = element_text(
+          angle = 45,
+          hjust = 1,
+          vjust = 1,
+          size = 8
+        ),
+        axis.title.x = element_text(
+          margin = ggplot2::margin(
+            t = 8
+          )
+        ),
+        strip.text.x = element_text(
+          size = 9,
+          face = "bold"
+        ),
+        legend.position = "bottom",
+        legend.direction = "horizontal",
+        legend.box = "vertical",
+        legend.title = element_text(
+          size = 9
+        ),
+        legend.text = element_text(
+          size = 7
+        ),
+        legend.key.height = grid::unit(
+          0.30,
+          "cm"
+        ),
+        legend.key.width = grid::unit(
+          0.30,
+          "cm"
+        ),
+        panel.grid.major.x = element_blank(),
+        plot.margin = ggplot2::margin(
+          t = 8,
+          r = 8,
+          b = 8,
+          l = 8
+        )
+      )
+  }
+
+  phylum_bar_guide <- function(number_of_phyla) {
+    ggplot2::guides(
+      fill = ggplot2::guide_legend(
+        ncol = phylum_legend_columns(
+          number_of_phyla
+        ),
+        byrow = TRUE,
+        title.position = "top"
+      )
+    )
+  }
+
   # phyloseq bar plot: all samples
   try({
-    p_bar_phy <- plot_bar(data, fill = "Phylum") +
-      scale_fill_manual(values = PhylaPalette_data, drop = FALSE)
+    p_bar_phy <- plot_bar(
+      data,
+      fill = "Phylum"
+    ) +
+      scale_fill_manual(
+        values = PhylaPalette_data,
+        drop = FALSE
+      ) +
+      labs(
+        x = "Sample",
+        y = "Abundance",
+        fill = "Phylum"
+      ) +
+      phylum_bar_theme() +
+      phylum_bar_guide(
+        length(
+          PhylaPalette_data
+        )
+      )
 
-    ggsave("Bar_phy.pdf", plot = p_bar_phy, limitsize = FALSE)
+    ggsave(
+      "Bar_phy.pdf",
+      plot = p_bar_phy,
+      width = phylum_plot_width(
+        data
+      ),
+      height = phylum_plot_height(
+        length(
+          PhylaPalette_data
+        )
+      ),
+      units = "in",
+      limitsize = FALSE
+    )
   }, silent = FALSE)
 
   # phyloseq bar plot: grouped/faceted
   try({
-    p_bar_group_phy <- plot_bar(data_sam, fill = "Phylum", facet_grid = ~Groups) +
-      scale_fill_manual(values = PhylaPalette_sam, drop = FALSE)
+    p_bar_group_phy <- plot_bar(
+      data_sam,
+      fill = "Phylum"
+    ) +
+      facet_grid(
+        ~Groups,
+        scales = "free_x",
+        space = "free_x"
+      ) +
+      scale_fill_manual(
+        values = PhylaPalette_sam,
+        drop = FALSE
+      ) +
+      labs(
+        x = "Sample",
+        y = "Abundance",
+        fill = "Phylum"
+      ) +
+      phylum_bar_theme() +
+      phylum_bar_guide(
+        length(
+          PhylaPalette_sam
+        )
+      )
 
-    ggsave("Bar_group_phy.pdf", plot = p_bar_group_phy, limitsize = FALSE)
+    ggsave(
+      "Bar_group_phy.pdf",
+      plot = p_bar_group_phy,
+      width = phylum_plot_width(
+        data_sam
+      ),
+      height = phylum_plot_height(
+        length(
+          PhylaPalette_sam
+        )
+      ),
+      units = "in",
+      limitsize = FALSE
+    )
   }, silent = FALSE)
 
   # relative abundance bar plot
-  data_sam_relabund <- transform_sample_counts(data_sam, function(x) {
-    if (sum(x) == 0) {
-      return(x)
-    } else {
-      return(x / sum(x))
+  data_sam_relabund <- transform_sample_counts(
+    data_sam,
+    function(x) {
+      if (sum(x) == 0) {
+        return(x)
+      }
+
+      x / sum(x)
     }
-  })
+  )
 
-  data_sam_relabund <- fix_tax_rank(data_sam_relabund, rank = "Phylum")
-  PhylaPalette_relabund <- make_tax_palette(data_sam_relabund, rank = "Phylum")
+  data_sam_relabund <- fix_tax_rank(
+    data_sam_relabund,
+    rank = "Phylum"
+  )
 
-  theme_set(theme_grey())
+  PhylaPalette_relabund <- make_tax_palette(
+    data_sam_relabund,
+    rank = "Phylum"
+  )
 
   try({
-    p_bar_relative_phy <- plot_bar(data_sam_relabund, fill = "Phylum") +
-      geom_bar(stat = "identity", position = "stack") +
-      labs(x = "", y = "Relative Abundance\n") +
-      theme(panel.background = element_blank()) +
-      scale_fill_manual(values = PhylaPalette_relabund, drop = FALSE)
+    p_bar_relative_phy <- plot_bar(
+      data_sam_relabund,
+      fill = "Phylum"
+    ) +
+      scale_fill_manual(
+        values = PhylaPalette_relabund,
+        drop = FALSE
+      ) +
+      labs(
+        x = "Sample",
+        y = "Relative Abundance",
+        fill = "Phylum"
+      ) +
+      phylum_bar_theme() +
+      phylum_bar_guide(
+        length(
+          PhylaPalette_relabund
+        )
+      )
 
-    ggsave("Bar_relative_phy.pdf", plot = p_bar_relative_phy)
+    ggsave(
+      "Bar_relative_phy.pdf",
+      plot = p_bar_relative_phy,
+      width = phylum_plot_width(
+        data_sam_relabund
+      ),
+      height = phylum_plot_height(
+        length(
+          PhylaPalette_relabund
+        )
+      ),
+      units = "in",
+      limitsize = FALSE
+    )
   }, silent = FALSE)
+
+  #### END BLOCK: readable phylum composition bar plots ####
 
   # alpha diversity box plot
   theme_set(theme_bw())
