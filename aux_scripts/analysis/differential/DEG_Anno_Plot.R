@@ -2465,33 +2465,304 @@ for ( i in 1:nrow(gph.tree)){
 write.table(gph.tree,paste0(dirname(args[1]),"/graphlan/tree.txt"),
             col.names = F, row.names = F, quote = F)
 
+#### BEGIN BLOCK: optimized GraPhlAn annotation matching ####
+#
+# The previous implementation repeated strsplit() and grep() across
+# the complete annotation vector for every annotation-row/species
+# combination. Large GraPhlAn annotation files could therefore
+# require billions of string comparisons.
+#
+# Species components and annotation-hit counts are now prepared once.
+# Annotation rows are matched only against species sharing the same
+# terminal name. Ambiguous terminal names retain the original genus
+# check across the preceding 30 annotation rows.
+
 start_time <- Sys.time()
-sp.replace<-gsub(" ","_",sp.name)
-for (i in 31:nrow(gph.anno)){
-  for ( n in 1:length(sp.name)){
-    sp.name1<-tail(strsplit(sp.name," ")[[n]],1)
-    sp.name1<-gsub("-","_",sp.name1) # To match the graphlan anno style
-    sp.name2<-head(strsplit(sp.name," ")[[n]],1)
-    if (length(grep(sp.name1,gph.anno[[1]])) > 1){
-      # check if names match in both of species and genus level
-      if (gph.anno[i,1]==sp.name1 & TRUE %in% grepl(sp.name2,gph.anno[(i-30):(i-1),1])){
-        gph.anno[i,3]<-gsub(" ","_",gph.anno[i,3])
-        if (grepl(gph.anno[i,1],gph.anno[i,3])){
-          gph.anno[i,3]<-sub(gph.anno[i,1],sp.replace[n],gph.anno[i,3])
-        }
-        gph.anno[i,1]<-sp.replace[n]
+
+message(
+  "[GRAPHLAN] Starting optimized annotation-name matching"
+)
+
+sp.replace <- gsub(
+  " ",
+  "_",
+  sp.name
+)
+
+sp.name.parts <- strsplit(
+  sp.name,
+  " ",
+  fixed = TRUE
+)
+
+sp.name.last <- vapply(
+  sp.name.parts,
+  function(parts) {
+    tail(parts, 1L)
+  },
+  character(1)
+)
+
+sp.name.last <- gsub(
+  "-",
+  "_",
+  sp.name.last
+)
+
+sp.name.first <- vapply(
+  sp.name.parts,
+  function(parts) {
+    head(parts, 1L)
+  },
+  character(1)
+)
+
+annotation.names <- as.character(
+  gph.anno[[1]]
+)
+
+unique.last.names <- unique(
+  sp.name.last
+)
+
+# Initial occurrence counts preserve the original grep() matching
+# behaviour, including substring/regular-expression matching.
+annotation.match.count <- setNames(
+  vapply(
+    unique.last.names,
+    function(last.name) {
+      length(
+        grep(
+          last.name,
+          annotation.names
+        )
+      )
+    },
+    integer(1)
+  ),
+  unique.last.names
+)
+
+# Exact lookup used by the original equality test:
+# gph.anno[i, 1] == sp.name1
+species.by.last.name <- split(
+  seq_along(sp.name),
+  sp.name.last
+)
+
+annotation.rows <- if (
+  nrow(gph.anno) >= 31L
+) {
+  seq.int(
+    31L,
+    nrow(gph.anno)
+  )
+} else {
+  integer(0)
+}
+
+message(
+  "[GRAPHLAN] Annotation rows: ",
+  length(annotation.rows)
+)
+
+message(
+  "[GRAPHLAN] Bracken taxa: ",
+  length(sp.name)
+)
+
+replacements.made <- 0L
+
+for (
+  row.number in seq_along(
+    annotation.rows
+  )
+) {
+
+  i <- annotation.rows[[row.number]]
+
+  if (
+    row.number == 1L ||
+    row.number %% 250L == 0L ||
+    row.number == length(annotation.rows)
+  ) {
+    message(
+      "[GRAPHLAN] Annotation progress: ",
+      row.number,
+      "/",
+      length(annotation.rows),
+      " | replacements: ",
+      replacements.made,
+      " | elapsed: ",
+      round(
+        as.numeric(
+          difftime(
+            Sys.time(),
+            start_time,
+            units = "secs"
+          )
+        ),
+        1
+      ),
+      " s"
+    )
+
+    flush.console()
+  }
+
+  current.name <- as.character(
+    gph.anno[i, 1]
+  )
+
+  if (
+    is.na(current.name) ||
+    !nzchar(current.name)
+  ) {
+    next
+  }
+
+  candidates <- species.by.last.name[[current.name]]
+
+  if (is.null(candidates)) {
+    next
+  }
+
+  for (n in candidates) {
+
+    last.name <- sp.name.last[[n]]
+    first.name <- sp.name.first[[n]]
+
+    ambiguous.last.name <- (
+      annotation.match.count[[last.name]] > 1L
+    )
+
+    if (ambiguous.last.name) {
+
+      previous.names <- as.character(
+        gph.anno[
+          (i - 30L):(i - 1L),
+          1
+        ]
+      )
+
+      genus.matched <- any(
+        grepl(
+          first.name,
+          previous.names
+        )
+      )
+
+      if (!genus.matched) {
+        next
       }
-    } else {
-      if (gph.anno[i,1]==sp.name1){
-        if (grepl(gph.anno[i,1],gph.anno[i,3])){
-          gph.anno[i,3]<-sub(gph.anno[i,1],sp.replace[n],gph.anno[i,3])
-        }
-        gph.anno[i,1]<-sp.replace[n]
+
+      gph.anno[i, 3] <- gsub(
+        " ",
+        "_",
+        as.character(
+          gph.anno[i, 3]
+        )
+      )
+    }
+
+    old.name <- as.character(
+      gph.anno[i, 1]
+    )
+
+    new.name <- sp.replace[[n]]
+
+    annotation.text <- as.character(
+      gph.anno[i, 3]
+    )
+
+    if (
+      is.na(annotation.text)
+    ) {
+      annotation.text <- ""
+    }
+
+    if (
+      grepl(
+        old.name,
+        annotation.text
+      )
+    ) {
+      annotation.text <- sub(
+        old.name,
+        new.name,
+        annotation.text
+      )
+    }
+
+    gph.anno[i, 3] <- annotation.text
+    gph.anno[i, 1] <- new.name
+
+    replacements.made <- (
+      replacements.made + 1L
+    )
+
+    # The original code recalculated grep() counts after every
+    # replacement because gph.anno[, 1] was modified in place.
+    # Update the cached counts to preserve that behaviour.
+    for (
+      pattern.name in unique.last.names
+    ) {
+
+      matched.before <- grepl(
+        pattern.name,
+        old.name
+      )
+
+      matched.after <- grepl(
+        pattern.name,
+        new.name
+      )
+
+      if (
+        matched.before != matched.after
+      ) {
+        annotation.match.count[[pattern.name]] <- (
+          annotation.match.count[[pattern.name]] +
+          as.integer(matched.after) -
+          as.integer(matched.before)
+        )
       }
     }
+
+    # After replacement, the annotation row no longer contains
+    # the original terminal name as an exact value. No additional
+    # candidate can be selected for this row.
+    break
   }
 }
-Sys.time() - start_time
+
+graphlan.annotation.elapsed <- as.numeric(
+  difftime(
+    Sys.time(),
+    start_time,
+    units = "secs"
+  )
+)
+
+message(
+  "[GRAPHLAN] Annotation-name matching completed"
+)
+
+message(
+  "[GRAPHLAN] Replacements made: ",
+  replacements.made
+)
+
+message(
+  "[GRAPHLAN] Annotation matching time: ",
+  round(
+    graphlan.annotation.elapsed,
+    2
+  ),
+  " seconds"
+)
+
+#### END BLOCK: optimized GraPhlAn annotation matching ####
 
 # add rings to graphlan
 ring.list<-list() # make a list for ring color of each group
