@@ -85,6 +85,16 @@ show_progress() {
     print_rule
 }
 
+show_sample_progress() {
+    local tool="$1"
+    local current="$2"
+    local total="$3"
+    local sample="$4"
+
+    printf '[%s] [%d/%d] Processing %s\n' \
+        "$tool" "$current" "$total" "$sample"
+}
+
 require_file() {
     local f="$1"
     local label="${2:-file}"
@@ -3396,8 +3406,12 @@ if [[ -z "$lsn" ]]; then
     die "No sample names were found in samplesheet: $samplesheet_file"
 fi
 
+read -r -a pipeline_samples <<< "$lsn"
+total_samples="${#pipeline_samples[@]}"
+
 echo "[INFO] Samples detected from samplesheet:"
 echo "  $lsn"
+echo "  Total: $total_samples"
 
 # ------------------------------------------------------------
 # Detect and validate FASTQ layout for all samples
@@ -3892,7 +3906,11 @@ else
 
     mkdir -p "$outputdr/fastp"
 
+    sample_index=0
     for i in $lsn; do
+        sample_index=$((sample_index + 1))
+        show_sample_progress "fastp" "$sample_index" "$total_samples" "$i"
+
         load_fastq_manifest_row "$i"
 
         fastp_report_base="Trimmed_${i}"
@@ -4077,7 +4095,11 @@ echo -e "sample\thost_classified_reads\thost_classified_pct\thost_unclassified_r
 # Threshold for warning about low host classification.
 HOST_LOW_WARN=50
 
+sample_index=0
 for i in $lsn; do
+    sample_index=$((sample_index + 1))
+    show_sample_progress "Kraken2" "$sample_index" "$total_samples" "$i"
+
     load_prepared_fastq_manifest_row "$i"
 
     report="Report_host_${i}.txt"
@@ -4347,7 +4369,10 @@ printf 'sample\tmicro_classified_reads\tmicro_classified_pct\tmicro_unclassified
 # among the reads that were not classified as host.
 MICRO_HIGH_WARN=20
 
+sample_index=0
 for i in $lsn; do
+    sample_index=$((sample_index + 1))
+    show_sample_progress "Kraken2" "$sample_index" "$total_samples" "$i"
 
     report="Report_non-host.raw_${i}.txt"
     kraken_output="Report_non-host_raw_${i}.kraken"
@@ -5009,7 +5034,11 @@ if [[ "$valid_contaminant_list" == "1" ]]; then
 
     show_progress 35 "Reclassifying decontaminated non-host reads with Kraken2"
 
+    sample_index=0
     for i in $lsn; do
+        sample_index=$((sample_index + 1))
+        show_sample_progress "Kraken2" "$sample_index" "$total_samples" "$i"
+
         set_microbiome_fastq_paths "$i"
 
         if [[ "$READ_LAYOUT" == "pe" ]]; then
@@ -5345,7 +5374,11 @@ echo "${g}[OK] Bracken distribution file found:${w} $BRACKEN_DIST"
 
 echo "Bracken threshold: $BRACKEN_THRESHOLD"
 
+sample_index=0
 for i in $lsn; do
+    sample_index=$((sample_index + 1))
+    show_sample_progress "Bracken" "$sample_index" "$total_samples" "$i"
+
     echo "============================================================"
     echo "[BRACKEN] Sample: $i"
     echo "Input report: Report_non-host_${i}.txt"
@@ -6397,7 +6430,11 @@ column -s $'\t' -t "$HUMANN_INPUT_MANIFEST" 2>/dev/null || \
 
 echo "${g}Run HUMAnN3${w}"
 
+sample_index=0
 for i in $lsn; do
+    sample_index=$((sample_index + 1))
+    show_sample_progress "MetaPhlAn/HUMAnN" "$sample_index" "$total_samples" "$i"
+
     humann_input="$HUMANN_INPUT_DIR/${i}.fq"
 
     require_file \
