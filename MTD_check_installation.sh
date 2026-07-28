@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # MTD Explorer installation checker
-# Version: 2026.07.27-r12
+# Version: 2026.07.28-r13
 #
 # Current installation architecture:
 #   - repository location is detected from this checker, never assumed as ~/MTD;
@@ -18,7 +18,7 @@
 # ==============================================================================
 set -uo pipefail
 
-CHECKER_VERSION="2026.07.27-r12"
+CHECKER_VERSION="2026.07.28-r13"
 
 SCRIPT_DIR="$(
     cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &&
@@ -39,6 +39,7 @@ STRICT=0
 KEEP_TEMP=0
 HOST_TAXID=""
 NETWORK_CHECK=1
+INSTALLED_CUSTOM_HOST_TAXIDS=()
 
 PASS_COUNT=0
 WARN_COUNT=0
@@ -1733,6 +1734,57 @@ check_remote_cache_freshness() {
     fi
 }
 
+detect_installed_custom_hosts() {
+    local -A seen=()
+    local taxid=""
+    local path=""
+    local base=""
+
+    INSTALLED_CUSTOM_HOST_TAXIDS=()
+
+    while IFS= read -r -d '' path; do
+        base="$(basename "$path")"
+        if [[ "$base" =~ ^kraken2DB_([1-9][0-9]*)$ ]]; then
+            taxid="${BASH_REMATCH[1]}"
+            seen["$taxid"]=1
+        elif [[ "$base" =~ ^kraken2DB_host_([1-9][0-9]*)$ ]]; then
+            taxid="${BASH_REMATCH[1]}"
+            seen["$taxid"]=1
+        fi
+    done < <(
+        find "$MTD_DIR" -mindepth 1 -maxdepth 1 -type d \
+            \( -name 'kraken2DB_[1-9]*' \
+               -o -name 'kraken2DB_host_[1-9]*' \) \
+            -print0 2>/dev/null
+    )
+
+    if (( ${#seen[@]} == 0 )); then
+        return
+    fi
+
+    while IFS= read -r taxid; do
+        INSTALLED_CUSTOM_HOST_TAXIDS+=("$taxid")
+    done < <(printf '%s\n' "${!seen[@]}" | sort -n)
+}
+
+check_eggnog_cache() {
+    local path="$OFFLINE_DIR/eggNOG/emapperdb-5.0.2"
+
+    if (( ${#INSTALLED_CUSTOM_HOST_TAXIDS[@]} > 0 )); then
+        check_required_dir "Installation cache" "eggNOG cache" "$path"
+        return
+    fi
+
+    if [[ -d "$path" ]] &&
+       find "$path" -mindepth 1 -print -quit 2>/dev/null | grep -q .
+    then
+        record PASS "Installation cache" "eggNOG cache" "$path"
+    else
+        record SKIP "Installation cache" "eggNOG cache" \
+            "not initialized; created by the first custom-host build: $path"
+    fi
+}
+
 check_installation_cache() {
     local library=""
     if [[ -z "$OFFLINE_DIR" ]]; then
@@ -1754,8 +1806,7 @@ check_installation_cache() {
         "$OFFLINE_DIR/Kraken2_taxonomy_cache"
     check_required_dir "Installation cache" "HUMAnN cache" \
         "$OFFLINE_DIR/HUMAnN"
-    check_required_dir "Installation cache" "eggNOG cache" \
-        "$OFFLINE_DIR/eggNOG/emapperdb-5.0.2"
+    check_eggnog_cache
 }
 
 check_humann_databases() {
@@ -1833,41 +1884,22 @@ check_one_custom_host() {
 }
 
 check_installed_custom_hosts() {
-    local -A seen=()
     local taxid=""
-    local path=""
-    local base=""
 
     if [[ -n "$HOST_TAXID" ]]; then
         check_one_custom_host "$HOST_TAXID"
         return
     fi
 
-    while IFS= read -r -d '' path; do
-        base="$(basename "$path")"
-        if [[ "$base" =~ ^kraken2DB_([1-9][0-9]*)$ ]]; then
-            taxid="${BASH_REMATCH[1]}"
-            seen["$taxid"]=1
-        elif [[ "$base" =~ ^kraken2DB_host_([1-9][0-9]*)$ ]]; then
-            taxid="${BASH_REMATCH[1]}"
-            seen["$taxid"]=1
-        fi
-    done < <(
-        find "$MTD_DIR" -mindepth 1 -maxdepth 1 -type d \
-            \( -name 'kraken2DB_[1-9]*' \
-               -o -name 'kraken2DB_host_[1-9]*' \) \
-            -print0 2>/dev/null
-    )
-
-    if (( ${#seen[@]} == 0 )); then
+    if (( ${#INSTALLED_CUSTOM_HOST_TAXIDS[@]} == 0 )); then
         record SKIP "Custom host" "installed references" \
             "none detected; create them separately when needed"
         return
     fi
 
-    while IFS= read -r taxid; do
+    for taxid in "${INSTALLED_CUSTOM_HOST_TAXIDS[@]}"; do
         check_one_custom_host "$taxid"
-    done < <(printf '%s\n' "${!seen[@]}" | sort -n)
+    done
 }
 
 write_summary() {
@@ -1936,6 +1968,7 @@ main() {
     check_conda_stack
     check_kraken_helpers
     check_kraken_database
+    detect_installed_custom_hosts
 
     if [[ "$MODE" != "quick" ]]; then
         check_installation_cache
