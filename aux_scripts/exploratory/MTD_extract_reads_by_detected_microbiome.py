@@ -6,7 +6,15 @@ import os
 import re
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+
+# Microbiome-read extraction is highly I/O intensive because every
+# KrakenTools subprocess reads Kraken and FASTA/FASTQ files. Keep the
+# internal concurrency conservative to avoid saturating the storage
+# device or opening too many large files simultaneously.
+MAX_PARALLEL_EXTRACTION_JOBS = 5
 
 
 KNOWN_RANKING_COLUMNS = {
@@ -380,6 +388,27 @@ def main():
 
     selected_rows = select_ranked_rows(ranked_rows, args.top_n)
 
+    available_cpus = os.cpu_count() or 1
+
+    parallel_jobs = max(
+        1,
+        min(
+            MAX_PARALLEL_EXTRACTION_JOBS,
+            len(sample_cols),
+            available_cpus,
+        ),
+    )
+
+    planned_operations = sum(
+        1
+        for selected_row in selected_rows
+        for sample in sample_cols
+        if to_float(
+            selected_row.get(sample, "0"),
+            default=0.0,
+        ) > args.min_abundance
+    )
+
     summary_file = output_dir / "extraction_summary.tsv"
 
     summary_fields = [
@@ -413,6 +442,8 @@ def main():
     print("Samples detected:", ", ".join(samples))
     print("Sample columns used:", ", ".join(sample_cols))
     print("Selected taxa:", len(selected_rows))
+    print("Parallel sample jobs:", parallel_jobs)
+    print("Planned taxon-sample operations:", planned_operations)
     print("============================================================")
 
     all_summary_rows = []
@@ -451,20 +482,47 @@ def main():
         sample_output_files_r2 = []
         sample_output_format = None
 
+        sample_work_items = []
+
+        # Prepare and validate all sample-level work first. Immediate
+        # results such as missing inputs or existing outputs are stored
+        # together with extraction tasks so the final summary retains
+        # the original samplesheet order.
         for sample in sample_cols:
-            abundance = to_float(row.get(sample, "0"), default=0.0)
+            abundance = to_float(
+                row.get(sample, "0"),
+                default=0.0,
+            )
 
             if abundance <= args.min_abundance:
                 continue
 
-            kraken_file = temp_dir / f"Report_non-host_{sample}.kraken"
-            report_file = temp_dir / f"Report_non-host_{sample}.txt"
+            kraken_file = (
+                temp_dir
+                / f"Report_non-host_{sample}.kraken"
+            )
+
+            report_file = (
+                temp_dir
+                / f"Report_non-host_{sample}.txt"
+            )
 
             if args.read_layout == "pe":
-                seq_file1 = temp_dir / f"{sample}_non-host_1.fq"
-                seq_file2 = temp_dir / f"{sample}_non-host_2.fq"
+                seq_file1 = (
+                    temp_dir
+                    / f"{sample}_non-host_1.fq"
+                )
+
+                seq_file2 = (
+                    temp_dir
+                    / f"{sample}_non-host_2.fq"
+                )
             else:
-                seq_file1 = temp_dir / f"{sample}_non-host.fq"
+                seq_file1 = (
+                    temp_dir
+                    / f"{sample}_non-host.fq"
+                )
+
                 seq_file2 = None
 
             required_paths = [
@@ -474,87 +532,146 @@ def main():
             ]
 
             if seq_file2 is not None:
-                required_paths.append(seq_file2)
+                required_paths.append(
+                    seq_file2
+                )
 
             missing = [
-                str(path)
-                for path in required_paths
-                if not path.exists() or path.stat().st_size == 0
+                str(required_path)
+                for required_path in required_paths
+                if (
+                    not required_path.exists()
+                    or required_path.stat().st_size == 0
+                )
             ]
 
             if missing:
-                all_summary_rows.append({
-                    "rank_position": rank_position,
-                    "taxon": taxon,
-                    "taxid": taxid,
-                    "sample": sample,
-                    "abundance": abundance,
-                    "seq_format": "NA",
-                    "output_file": "NA",
-                    "extracted_reads": "0",
-                    "status": "missing_input",
-                    "message": "Missing: " + ";".join(missing),
-                    "layout": args.read_layout,
-                    "output_file_r2": "NA",
-                    "extracted_reads_r2": "0",
-                    "pair_count_match": "NA",
-                })
+                sample_work_items.append(
+                    {
+                        "summary_row": {
+                            "rank_position": rank_position,
+                            "taxon": taxon,
+                            "taxid": taxid,
+                            "sample": sample,
+                            "abundance": abundance,
+                            "seq_format": "NA",
+                            "output_file": "NA",
+                            "extracted_reads": "0",
+                            "status": "missing_input",
+                            "message": (
+                                "Missing: "
+                                + ";".join(missing)
+                            ),
+                            "layout": args.read_layout,
+                            "output_file_r2": "NA",
+                            "extracted_reads_r2": "0",
+                            "pair_count_match": "NA",
+                        },
+                        "usable_output": False,
+                    }
+                )
+
                 continue
 
-            seq_format = detect_sequence_format(seq_file1)
+            seq_format = detect_sequence_format(
+                seq_file1
+            )
 
             if seq_format == "unknown":
-                all_summary_rows.append({
-                    "rank_position": rank_position,
-                    "taxon": taxon,
-                    "taxid": taxid,
-                    "sample": sample,
-                    "abundance": abundance,
-                    "seq_format": seq_format,
-                    "output_file": "NA",
-                    "extracted_reads": "0",
-                    "status": "unknown_sequence_format",
-                    "message": f"Could not detect FASTA/FASTQ format: {seq_file1}",
-                    "layout": args.read_layout,
-                    "output_file_r2": "NA",
-                    "extracted_reads_r2": "0",
-                    "pair_count_match": "NA",
-                })
+                sample_work_items.append(
+                    {
+                        "summary_row": {
+                            "rank_position": rank_position,
+                            "taxon": taxon,
+                            "taxid": taxid,
+                            "sample": sample,
+                            "abundance": abundance,
+                            "seq_format": seq_format,
+                            "output_file": "NA",
+                            "extracted_reads": "0",
+                            "status": (
+                                "unknown_sequence_format"
+                            ),
+                            "message": (
+                                "Could not detect "
+                                "FASTA/FASTQ format: "
+                                f"{seq_file1}"
+                            ),
+                            "layout": args.read_layout,
+                            "output_file_r2": "NA",
+                            "extracted_reads_r2": "0",
+                            "pair_count_match": "NA",
+                        },
+                        "usable_output": False,
+                    }
+                )
+
                 continue
 
             if args.read_layout == "pe":
-                seq_format2 = detect_sequence_format(seq_file2)
+                seq_format2 = detect_sequence_format(
+                    seq_file2
+                )
 
                 if seq_format2 != seq_format:
-                    all_summary_rows.append({
-                        "rank_position": rank_position,
-                        "taxon": taxon,
-                        "taxid": taxid,
-                        "sample": sample,
-                        "abundance": abundance,
-                        "seq_format": seq_format,
-                        "output_file": "NA",
-                        "extracted_reads": "0",
-                        "status": "mate_format_mismatch",
-                        "message": (
-                            f"R1 format is {seq_format}; "
-                            f"R2 format is {seq_format2}"
-                        ),
-                        "layout": args.read_layout,
-                        "output_file_r2": "NA",
-                        "extracted_reads_r2": "0",
-                        "pair_count_match": "NA",
-                    })
+                    sample_work_items.append(
+                        {
+                            "summary_row": {
+                                "rank_position": (
+                                    rank_position
+                                ),
+                                "taxon": taxon,
+                                "taxid": taxid,
+                                "sample": sample,
+                                "abundance": abundance,
+                                "seq_format": seq_format,
+                                "output_file": "NA",
+                                "extracted_reads": "0",
+                                "status": (
+                                    "mate_format_mismatch"
+                                ),
+                                "message": (
+                                    f"R1 format is {seq_format}; "
+                                    f"R2 format is {seq_format2}"
+                                ),
+                                "layout": args.read_layout,
+                                "output_file_r2": "NA",
+                                "extracted_reads_r2": "0",
+                                "pair_count_match": "NA",
+                            },
+                            "usable_output": False,
+                        }
+                    )
+
                     continue
 
-            ext = "fastq" if seq_format == "fastq" else "fasta"
-            output_prefix = f"{sample}.taxid{taxid}.{taxon_safe}"
+            ext = (
+                "fastq"
+                if seq_format == "fastq"
+                else "fasta"
+            )
+
+            output_prefix = (
+                f"{sample}.taxid{taxid}."
+                f"{taxon_safe}"
+            )
 
             if args.read_layout == "pe":
-                out_file1 = taxon_dir / f"{output_prefix}.R1.{ext}"
-                out_file2 = taxon_dir / f"{output_prefix}.R2.{ext}"
+                out_file1 = (
+                    taxon_dir
+                    / f"{output_prefix}.R1.{ext}"
+                )
+
+                out_file2 = (
+                    taxon_dir
+                    / f"{output_prefix}.R2.{ext}"
+                )
             else:
-                out_file1 = taxon_dir / f"{output_prefix}.{ext}"
+                out_file1 = (
+                    taxon_dir
+                    / f"{output_prefix}.{ext}"
+                )
+
                 out_file2 = None
 
             output_exists = (
@@ -583,157 +700,379 @@ def main():
 
                     pair_count_match = (
                         "yes"
-                        if extracted_reads1 == extracted_reads2
+                        if extracted_reads1
+                        == extracted_reads2
                         else "no"
                     )
                 else:
                     extracted_reads2 = 0
-                    pair_count_match = "not_applicable"
+                    pair_count_match = (
+                        "not_applicable"
+                    )
 
                 if pair_count_match == "no":
                     status = "pair_count_mismatch"
+
                     message = (
-                        "Existing paired outputs have different "
-                        "sequence counts."
+                        "Existing paired outputs have "
+                        "different sequence counts."
                     )
                 else:
                     status = "already_exists"
+
                     message = (
                         "Existing file kept. "
                         "Use --overwrite to regenerate."
                     )
 
-                all_summary_rows.append({
-                    "rank_position": rank_position,
-                    "taxon": taxon,
-                    "taxid": taxid,
-                    "sample": sample,
-                    "abundance": abundance,
-                    "seq_format": seq_format,
-                    "output_file": str(out_file1),
-                    "extracted_reads": str(extracted_reads1),
-                    "status": status,
-                    "message": message,
-                    "layout": args.read_layout,
-                    "output_file_r2": (
-                        str(out_file2)
-                        if out_file2 is not None
-                        else "NA"
-                    ),
-                    "extracted_reads_r2": str(extracted_reads2),
-                    "pair_count_match": pair_count_match,
-                })
-
-                if extracted_reads1 > 0 and pair_count_match != "no":
-                    sample_output_files_r1.append(out_file1)
-
-                    if args.read_layout == "pe":
-                        sample_output_files_r2.append(out_file2)
-
-                    sample_output_format = seq_format
+                sample_work_items.append(
+                    {
+                        "summary_row": {
+                            "rank_position": rank_position,
+                            "taxon": taxon,
+                            "taxid": taxid,
+                            "sample": sample,
+                            "abundance": abundance,
+                            "seq_format": seq_format,
+                            "output_file": str(
+                                out_file1
+                            ),
+                            "extracted_reads": str(
+                                extracted_reads1
+                            ),
+                            "status": status,
+                            "message": message,
+                            "layout": args.read_layout,
+                            "output_file_r2": (
+                                str(out_file2)
+                                if out_file2 is not None
+                                else "NA"
+                            ),
+                            "extracted_reads_r2": str(
+                                extracted_reads2
+                            ),
+                            "pair_count_match": (
+                                pair_count_match
+                            ),
+                        },
+                        "usable_output": (
+                            extracted_reads1 > 0
+                            and pair_count_match != "no"
+                        ),
+                        "out_file1": out_file1,
+                        "out_file2": out_file2,
+                        "seq_format": seq_format,
+                    }
+                )
 
                 continue
 
+            sample_work_items.append(
+                {
+                    "task": {
+                        "sample": sample,
+                        "abundance": abundance,
+                        "seq_format": seq_format,
+                        "seq_file1": seq_file1,
+                        "seq_file2": seq_file2,
+                        "kraken_file": kraken_file,
+                        "report_file": report_file,
+                        "out_file1": out_file1,
+                        "out_file2": out_file2,
+                    }
+                }
+            )
+
+        extraction_item_indices = [
+            item_index
+            for item_index, item in enumerate(
+                sample_work_items
+            )
+            if "task" in item
+        ]
+
+        future_by_item_index = {}
+
+        if extraction_item_indices:
+            taxon_jobs = min(
+                parallel_jobs,
+                len(extraction_item_indices),
+            )
+
             print(
-                "[EXTRACT]",
+                "[EXTRACT TAXON]",
                 f"rank={rank_position}",
                 f"taxid={taxid}",
                 f"taxon={taxon}",
-                f"sample={sample}",
-                f"abundance={abundance}",
-                f"layout={args.read_layout}",
+                (
+                    "sample_jobs="
+                    f"{len(extraction_item_indices)}"
+                ),
+                f"parallel_jobs={taxon_jobs}",
+                flush=True,
             )
 
-            result, cmd = extract_reads_for_taxon_sample(
-                krakentools_script=krakentools_script,
-                kraken_file=kraken_file,
-                seq_file1=seq_file1,
-                seq_file2=seq_file2,
-                report_file=report_file,
-                taxid=taxid,
-                out_file1=out_file1,
-                out_file2=out_file2,
-                include_children=args.include_children,
-                seq_format=seq_format,
-                read_layout=args.read_layout,
-            )
+            with ThreadPoolExecutor(
+                max_workers=taxon_jobs
+            ) as executor:
 
-            extracted_reads1 = count_sequences(
-                out_file1,
-                seq_format,
-            )
+                # Launch every eligible sample for this taxon
+                # before waiting for results.
+                for item_index in (
+                    extraction_item_indices
+                ):
+                    task = sample_work_items[
+                        item_index
+                    ]["task"]
 
-            if args.read_layout == "pe":
-                extracted_reads2 = count_sequences(
-                    out_file2,
-                    seq_format,
-                )
-
-                pair_count_match = (
-                    "yes"
-                    if extracted_reads1 == extracted_reads2
-                    else "no"
-                )
-            else:
-                extracted_reads2 = 0
-                pair_count_match = "not_applicable"
-
-            if result.returncode == 0:
-                if pair_count_match == "no":
-                    status = "pair_count_mismatch"
-                    message = (
-                        "KrakenTools completed, but R1 and R2 "
-                        f"counts differ: R1={extracted_reads1}; "
-                        f"R2={extracted_reads2}"
+                    future_by_item_index[
+                        item_index
+                    ] = executor.submit(
+                        extract_reads_for_taxon_sample,
+                        krakentools_script=(
+                            krakentools_script
+                        ),
+                        kraken_file=(
+                            task["kraken_file"]
+                        ),
+                        seq_file1=task["seq_file1"],
+                        seq_file2=task["seq_file2"],
+                        report_file=(
+                            task["report_file"]
+                        ),
+                        taxid=taxid,
+                        out_file1=task["out_file1"],
+                        out_file2=task["out_file2"],
+                        include_children=(
+                            args.include_children
+                        ),
+                        seq_format=(
+                            task["seq_format"]
+                        ),
+                        read_layout=args.read_layout,
                     )
-                else:
-                    status = "ok"
+
+                completed_for_taxon = 0
+
+                # Collect results in original sample order.
+                # The subprocesses still execute concurrently.
+                for item_index, item in enumerate(
+                    sample_work_items
+                ):
+                    if "summary_row" in item:
+                        all_summary_rows.append(
+                            item["summary_row"]
+                        )
+
+                        if item.get(
+                            "usable_output",
+                            False,
+                        ):
+                            sample_output_files_r1.append(
+                                item["out_file1"]
+                            )
+
+                            if args.read_layout == "pe":
+                                sample_output_files_r2.append(
+                                    item["out_file2"]
+                                )
+
+                            sample_output_format = (
+                                item["seq_format"]
+                            )
+
+                        continue
+
+                    task = item["task"]
+
+                    completed_for_taxon += 1
+
+                    try:
+                        result, cmd = (
+                            future_by_item_index[
+                                item_index
+                            ].result()
+                        )
+
+                        extraction_exception = None
+                    except Exception as exc:
+                        result = None
+                        cmd = []
+                        extraction_exception = exc
+
+                    extracted_reads1 = count_sequences(
+                        task["out_file1"],
+                        task["seq_format"],
+                    )
 
                     if args.read_layout == "pe":
-                        message = (
-                            "Extracted paired reads: "
-                            f"{extracted_reads1} pairs"
+                        extracted_reads2 = (
+                            count_sequences(
+                                task["out_file2"],
+                                task["seq_format"],
+                            )
+                        )
+
+                        pair_count_match = (
+                            "yes"
+                            if extracted_reads1
+                            == extracted_reads2
+                            else "no"
                         )
                     else:
-                        message = (
-                            f"Extracted reads: {extracted_reads1}"
+                        extracted_reads2 = 0
+                        pair_count_match = (
+                            "not_applicable"
                         )
 
-                if extracted_reads1 > 0 and status == "ok":
-                    sample_output_files_r1.append(out_file1)
+                    if extraction_exception is not None:
+                        status = "failed"
+
+                        message = (
+                            "Extraction worker failed: "
+                            f"{extraction_exception}"
+                        )
+                    elif result.returncode == 0:
+                        if pair_count_match == "no":
+                            status = (
+                                "pair_count_mismatch"
+                            )
+
+                            message = (
+                                "KrakenTools completed, "
+                                "but R1 and R2 counts "
+                                "differ: "
+                                f"R1={extracted_reads1}; "
+                                f"R2={extracted_reads2}"
+                            )
+                        else:
+                            status = "ok"
+
+                            if args.read_layout == "pe":
+                                message = (
+                                    "Extracted paired "
+                                    "reads: "
+                                    f"{extracted_reads1} "
+                                    "pairs"
+                                )
+                            else:
+                                message = (
+                                    "Extracted reads: "
+                                    f"{extracted_reads1}"
+                                )
+                    else:
+                        status = "failed"
+
+                        message = (
+                            result.stderr
+                            or result.stdout
+                            or (
+                                "extract_kraken_reads.py "
+                                "failed"
+                            )
+                        ).replace(
+                            "\n",
+                            " | ",
+                        )
+
+                    if (
+                        extracted_reads1 > 0
+                        and status == "ok"
+                    ):
+                        sample_output_files_r1.append(
+                            task["out_file1"]
+                        )
+
+                        if args.read_layout == "pe":
+                            sample_output_files_r2.append(
+                                task["out_file2"]
+                            )
+
+                        sample_output_format = (
+                            task["seq_format"]
+                        )
+
+                    all_summary_rows.append(
+                        {
+                            "rank_position": (
+                                rank_position
+                            ),
+                            "taxon": taxon,
+                            "taxid": taxid,
+                            "sample": task["sample"],
+                            "abundance": (
+                                task["abundance"]
+                            ),
+                            "seq_format": (
+                                task["seq_format"]
+                            ),
+                            "output_file": str(
+                                task["out_file1"]
+                            ),
+                            "extracted_reads": str(
+                                extracted_reads1
+                            ),
+                            "status": status,
+                            "message": message,
+                            "layout": args.read_layout,
+                            "output_file_r2": (
+                                str(task["out_file2"])
+                                if (
+                                    task["out_file2"]
+                                    is not None
+                                )
+                                else "NA"
+                            ),
+                            "extracted_reads_r2": str(
+                                extracted_reads2
+                            ),
+                            "pair_count_match": (
+                                pair_count_match
+                            ),
+                        }
+                    )
+
+                    print(
+                        "[EXTRACT DONE]",
+                        (
+                            f"taxon={index}/"
+                            f"{len(selected_rows)}"
+                        ),
+                        (
+                            "sample_job="
+                            f"{completed_for_taxon}/"
+                            f"{len(extraction_item_indices)}"
+                        ),
+                        f"sample={task['sample']}",
+                        f"taxid={taxid}",
+                        f"status={status}",
+                        flush=True,
+                    )
+        else:
+            # No new subprocess was required, but existing or
+            # skipped results must still be added to the summary
+            # and combined-output lists.
+            for item in sample_work_items:
+                all_summary_rows.append(
+                    item["summary_row"]
+                )
+
+                if item.get(
+                    "usable_output",
+                    False,
+                ):
+                    sample_output_files_r1.append(
+                        item["out_file1"]
+                    )
 
                     if args.read_layout == "pe":
-                        sample_output_files_r2.append(out_file2)
+                        sample_output_files_r2.append(
+                            item["out_file2"]
+                        )
 
-                    sample_output_format = seq_format
-            else:
-                status = "failed"
-                message = (
-                    result.stderr
-                    or result.stdout
-                    or "extract_kraken_reads.py failed"
-                ).replace("\n", " | ")
-
-            all_summary_rows.append({
-                "rank_position": rank_position,
-                "taxon": taxon,
-                "taxid": taxid,
-                "sample": sample,
-                "abundance": abundance,
-                "seq_format": seq_format,
-                "output_file": str(out_file1),
-                "extracted_reads": str(extracted_reads1),
-                "status": status,
-                "message": message,
-                "layout": args.read_layout,
-                "output_file_r2": (
-                    str(out_file2)
-                    if out_file2 is not None
-                    else "NA"
-                ),
-                "extracted_reads_r2": str(extracted_reads2),
-                "pair_count_match": pair_count_match,
-            })
+                    sample_output_format = (
+                        item["seq_format"]
+                    )
 
         # Concatenate sample-level outputs into one file per taxon.
         if sample_output_files_r1:
