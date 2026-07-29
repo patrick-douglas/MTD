@@ -15,14 +15,18 @@ SAMPLESHEET=""
 PIPELINE_OUTPUT=""
 HOST_ID=""
 THREADS="$(nproc)"
-TOP_N=0
+# The official benchmark does not extract reads by default. When
+# extraction is explicitly enabled, limit it to the top 10 taxa unless
+# the user deliberately requests another value.
+TOP_N=10
+TOP_N_EXPLICIT=0
 RUN_NUMBER=1
 INTERVAL=5
 BENCHMARK_ROOT="$HOME/MTD_pipeline_benchmarks"
 READ_LAYOUT="auto"
 ANALYSIS_MODE="auto"
 USE_BLAST=1
-EXTRACT_READS=1
+EXTRACT_READS=0
 ASSUME_YES=0
 EXTRA_MTD_ARGS=()
 
@@ -43,12 +47,16 @@ Recommended:
       --run-number INT        Repetition number; default: 1
 
 Pipeline options:
-      --top-n INT             Taxa extracted from absolute ranking
-                              0 = all detected taxa; default: 0
+      --extract               Enable detected microbiome read extraction
+                              for an optional extraction benchmark
+      --top-n INT             Taxa extracted from absolute ranking when
+                              --extract is enabled; default: 10
+                              0 = all detected taxa (potentially very slow)
+      --no-extract            Disable read extraction; benchmark default
+                              and retained as an explicit compatibility option
       --read-layout MODE      auto, se, or pe; default: auto
       --analysis-mode MODE    auto, comparison, or exploratory; default: auto
       --hisat2                Use HISAT2 instead of Magic-BLAST
-      --no-extract            Disable detected microbiome read extraction
 
 Benchmark options:
       --interval SECONDS      Resource sampling interval; default: 5
@@ -57,7 +65,8 @@ Benchmark options:
   -y, --yes                   Delete an existing pipeline output without prompting
       --help                  Show this help
 
-Example for Biomphalaria glabrata:
+Example for the standard Biomphalaria glabrata benchmark
+(read extraction disabled):
   bash benchmark/$PROGRAM_NAME \\
     --machine master \\
     --dataset Bglabrata_PRJNA1306560 \\
@@ -65,8 +74,23 @@ Example for Biomphalaria glabrata:
     --output "\$HOME/test_MTD_explorer_B.glabrata" \\
     --hostid 6526 \\
     --threads 20 \\
-    --top-n 0 \\
     --run-number 1
+
+Optional functional extraction benchmark using the top 10 taxa:
+  bash benchmark/$PROGRAM_NAME \\
+    --machine master \\
+    --dataset Bglabrata_PRJNA1306560_extract_top10 \\
+    --input /path/to/B.glabrata_fastq/samplesheet.csv \\
+    --output "\$HOME/test_MTD_explorer_B.glabrata.extract_top10" \\
+    --hostid 6526 \\
+    --threads 20 \\
+    --extract \\
+    --top-n 10 \\
+    --run-number 1
+
+Stress-test extraction of every detected taxon, which can take many
+hours or days and consume substantial storage:
+  --extract --top-n 0
 
 Extra MTD Explorer arguments may be added after --, for example:
   -- --metadata /path/to/metadata.csv --pdm spearman
@@ -137,9 +161,14 @@ while (($# > 0)); do
             THREADS="$2"
             shift 2
             ;;
+        --extract)
+            EXTRACT_READS=1
+            shift
+            ;;
         --top-n)
             (($# >= 2)) || die "$1 requires a value."
             TOP_N="$2"
+            TOP_N_EXPLICIT=1
             shift 2
             ;;
         --run-number)
@@ -194,6 +223,16 @@ while (($# > 0)); do
     esac
 done
 
+# Extraction arguments are managed by this benchmark wrapper so that
+# benchmark labels and reports remain consistent with the executed command.
+for extra_arg in "${EXTRA_MTD_ARGS[@]}"; do
+    case "$extra_arg" in
+        --extract-microbiome-reads|--extract-microbiome-reads-top-n|--extract-microbiome-reads-top-n=*)
+            die "Do not pass extraction options after --. Use benchmark options --extract and --top-n instead."
+            ;;
+    esac
+done
+
 [[ -n "$MACHINE_NAME" ]] || die "Machine name is required."
 [[ -n "$SAMPLESHEET" ]] || die "Samplesheet is required."
 [[ -n "$PIPELINE_OUTPUT" ]] || die "Pipeline output directory is required."
@@ -204,6 +243,17 @@ done
 [[ "$THREADS" =~ ^[0-9]+$ ]] || die "--threads must be a positive integer."
 (( THREADS > 0 )) || die "--threads must be greater than zero."
 [[ "$TOP_N" =~ ^[0-9]+$ ]] || die "--top-n must be an integer >= 0."
+
+if (( TOP_N_EXPLICIT && ! EXTRACT_READS )); then
+    die "--top-n only applies when --extract is enabled. The standard benchmark intentionally disables read extraction."
+fi
+
+if (( EXTRACT_READS && TOP_N == 0 )); then
+    warn "Read extraction was enabled for all detected taxa (--extract --top-n 0)."
+    warn "This stress-test mode may repeatedly scan large Kraken2/FASTQ files, take many hours or days, create hundreds of taxa-specific outputs, and consume substantial disk space."
+    warn "For a functional extraction benchmark, prefer --extract --top-n 10."
+fi
+
 [[ "$RUN_NUMBER" =~ ^[0-9]+$ ]] || die "--run-number must be a positive integer."
 (( RUN_NUMBER > 0 )) || die "--run-number must be greater than zero."
 [[ "$INTERVAL" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "--interval must be numeric."
@@ -271,13 +321,21 @@ for required_option in \
     "--input" \
     "--output" \
     "--hostid" \
-    "--threads" \
-    "--extract-microbiome-reads" \
-    "--extract-microbiome-reads-top-n"
+    "--threads"
 do
     grep -q -- "$required_option" <<< "$HELP_OUTPUT" || \
         die "Current MTD_explorer.sh does not advertise required option: $required_option"
 done
+
+if (( EXTRACT_READS )); then
+    for required_option in \
+        "--extract-microbiome-reads" \
+        "--extract-microbiome-reads-top-n"
+    do
+        grep -q -- "$required_option" <<< "$HELP_OUTPUT" || \
+            die "Current MTD_explorer.sh does not advertise required extraction option: $required_option"
+    done
+fi
 
 if git -C "$REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     GIT_COMMIT="$(git -C "$REPO_DIR" rev-parse HEAD)"
@@ -352,6 +410,15 @@ printf '%-22s %s\n' "Read layout:" "$READ_LAYOUT"
 printf '%-22s %s\n' "Analysis mode:" "$ANALYSIS_MODE"
 printf '%-22s %s\n' "Alignment:" "$ALIGNMENT_LABEL"
 printf '%-22s %s\n' "Read extraction:" "$EXTRACT_LABEL"
+if (( EXTRACT_READS )); then
+    if (( TOP_N == 0 )); then
+        printf '%-22s %s\n' "Extraction policy:" "all detected taxa; stress-test mode"
+    else
+        printf '%-22s %s\n' "Extraction policy:" "top $TOP_N taxa from absolute ranking"
+    fi
+else
+    printf '%-22s %s\n' "Extraction policy:" "disabled for the standard benchmark"
+fi
 printf '%-22s %s\n' "Run number:" "$RUN_NUMBER"
 printf '%-22s %s\n' "Sampling interval:" "$INTERVAL s"
 printf '%-22s %s\n' "Benchmark label:" "$BENCHMARK_LABEL"
