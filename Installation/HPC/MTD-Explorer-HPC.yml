@@ -1,0 +1,28 @@
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+
+dependencies:
+  - python=3.10
+  - pip
+  - numpy=1.26.4
+
+  # HUMAnN / MetaPhlAn stack, aligned with Installation/MTD_humann.yml.
+  - bowtie2=2.5.4
+  - diamond=2.0.15
+  - glpk=5.0
+  - metaphlan=4.1.1
+  - hclust2=1.0.0
+  - simplejson<4
+  - cython
+
+  # Host alignment on compute nodes.
+  - magicblast=1.7.0
+
+  # HUMAnN 3.9 is installed through PyPI, matching the main installer.
+  - pip:
+      - humann==3.9
+
+variables:
+  PYTHONNOUSERSITE: "1"

@@ -426,6 +426,8 @@ BRACKEN_THRESHOLD="10"
 READ_LAYOUT_MODE="auto"
 READ_LAYOUT=""
 
+# MTD_HPC_BACKEND_20260730: optional independent Slurm backend.
+HPC_CONF=""
 show_help() {
 cat << EOF
 Usage:
@@ -454,6 +456,9 @@ Optional:
                                            Default: ${read_len}
       --threads INT                        Number of CPU threads
                                            Default: nproc = ${threads}
+      --hpc-conf FILE                      Enable the independent Slurm backend using FILE.
+                                           MetaPhlAn/HUMAnN and Magic-BLAST run on configured nodes.
+                                           Without this option, execution remains local.
       --ssgsea-gmt default|auto|FILE
                                            ssGSEA GMT selection.
 
@@ -644,6 +649,18 @@ while [[ $# -gt 0 ]]; do
             threads="${1#*=}"
             shift
             ;;
+        --hpc-conf)
+            if [[ $# -lt 2 || -z "${2:-}" ]]; then
+                die "--hpc-conf requires a configuration file"
+            fi
+            HPC_CONF="$2"
+            shift 2
+            ;;
+        --hpc-conf=*)
+            HPC_CONF="${1#*=}"
+            [[ -n "$HPC_CONF" ]] || die "--hpc-conf requires a configuration file"
+            shift
+            ;;
         --ssgsea-gmt)
             SSGSEA_GMT="$2"
             shift 2
@@ -782,6 +799,10 @@ fi
 if [[ -z "${hostid:-}" ]]; then
     die "Missing required argument: -h or --hostid TAXID"
 fi
+if [[ -n "$HPC_CONF" ]]; then
+    require_file "$HPC_CONF" "HPC configuration"
+    HPC_CONF="$(readlink -f "$HPC_CONF")"
+fi
 if [[ "$analysis_mode" != "auto" && "$analysis_mode" != "comparison" && "$analysis_mode" != "exploratory" ]]; then
     die "--analysis-mode must be one of: auto, comparison, exploratory. Got: $analysis_mode"
 fi
@@ -906,6 +927,13 @@ fi
 # ------------------------------------------------------------
 
 MTDIR=$(dirname "$(readlink -f "$0")")
+if [[ -n "$HPC_CONF" ]]; then
+    MTD_HPC_COMMON="$MTDIR/aux_scripts/hpc/mtd_hpc_common.sh"
+    require_file "$MTD_HPC_COMMON" "MTD HPC common library"
+    # shellcheck source=aux_scripts/hpc/mtd_hpc_common.sh
+    source "$MTD_HPC_COMMON"
+    mtd_hpc_load_config "$HPC_CONF" "$MTDIR" || die "Invalid HPC configuration: $HPC_CONF"
+fi
 
 # ------------------------------------------------------------
 # Analysis helper script directories
@@ -1366,6 +1394,8 @@ echo "  HAllA metric:                   $pdm"
 echo "  trim length:                    $length"
 echo "  Bracken read length:            $read_len"
 echo "  threads:                        $threads"
+echo "  HPC backend:                    $([[ -n "$HPC_CONF" ]] && echo enabled || echo disabled)"
+echo "  HPC configuration:              ${HPC_CONF:-none}"
 echo "  host alignment mode:            $blast"
 echo "  no_trim:                        $no_trimm"
 echo "  sequencing read layout request: $READ_LAYOUT_MODE"
@@ -6430,49 +6460,63 @@ column -s $'\t' -t "$HUMANN_INPUT_MANIFEST" 2>/dev/null || \
 
 echo "${g}Run HUMAnN3${w}"
 
-sample_index=0
-for i in $lsn; do
-    sample_index=$((sample_index + 1))
-    show_sample_progress "MetaPhlAn/HUMAnN" "$sample_index" "$total_samples" "$i"
+if [[ -n "$HPC_CONF" ]]; then
+    MTD_HPC_HUMANN_WORK_DIR="$HUMANN_WORK_DIR/hpc_humann"
+    MTD_HPC_SAMPLE_LIST="$MTD_HPC_HUMANN_WORK_DIR/samples.txt"
+    mkdir -p -- "$MTD_HPC_HUMANN_WORK_DIR"
+    printf '%s\n' $lsn > "$MTD_HPC_SAMPLE_LIST"
+    bash "$MTDIR/aux_scripts/hpc/mtd_hpc_humann_stage.sh" \
+        --hpc-conf "$HPC_CONF" \
+        --samples "$MTD_HPC_SAMPLE_LIST" \
+        --input-dir "$HUMANN_INPUT_DIR" \
+        --output-dir "$HUMANN_RESULTS_DIR" \
+        --work-dir "$MTD_HPC_HUMANN_WORK_DIR" \
+        --mtd-root "$MTDIR" || die "HPC HUMAnN stage failed"
+else
+    sample_index=0
+    for i in $lsn; do
+        sample_index=$((sample_index + 1))
+        show_sample_progress "MetaPhlAn/HUMAnN" "$sample_index" "$total_samples" "$i"
 
-    humann_input="$HUMANN_INPUT_DIR/${i}.fq"
+        humann_input="$HUMANN_INPUT_DIR/${i}.fq"
 
-    require_file \
-        "$humann_input" \
-        "HUMAnN input for sample $i"
+        require_file \
+            "$humann_input" \
+            "HUMAnN input for sample $i"
 
-    echo "============================================================"
-    echo "[HUMAnN] Sample: $i"
-    echo "Layout source: $READ_LAYOUT"
-    echo "Input: $humann_input"
-    echo "Output: $HUMANN_RESULTS_DIR"
-    echo "Threads: $threads"
-    echo "============================================================"
+        echo "============================================================"
+        echo "[HUMAnN] Sample: $i"
+        echo "Layout source: $READ_LAYOUT"
+        echo "Input: $humann_input"
+        echo "Output: $HUMANN_RESULTS_DIR"
+        echo "Threads: $threads"
+        echo "============================================================"
 
-    if ! run_humann_tool "$HUMANN_BIN" \
-        --input "$humann_input" \
-        --output "$HUMANN_RESULTS_DIR" \
-        --threads "$threads" \
-        --metaphlan "$HUMANN_ENV_DIR/bin" \
-        --metaphlan-options "$HUMANN_METAPHLAN_OPTIONS" \
-        --verbose
-    then
-        die "HUMAnN failed for sample: $i"
-    fi
+        if ! run_humann_tool "$HUMANN_BIN" \
+            --input "$humann_input" \
+            --output "$HUMANN_RESULTS_DIR" \
+            --threads "$threads" \
+            --metaphlan "$HUMANN_ENV_DIR/bin" \
+            --metaphlan-options "$HUMANN_METAPHLAN_OPTIONS" \
+            --verbose
+        then
+            die "HUMAnN failed for sample: $i"
+        fi
 
-    humann_genefamilies="$HUMANN_RESULTS_DIR/${i}_genefamilies.tsv"
-    humann_pathabundance="$HUMANN_RESULTS_DIR/${i}_pathabundance.tsv"
+        humann_genefamilies="$HUMANN_RESULTS_DIR/${i}_genefamilies.tsv"
+        humann_pathabundance="$HUMANN_RESULTS_DIR/${i}_pathabundance.tsv"
 
-    require_file \
-        "$humann_genefamilies" \
-        "HUMAnN gene families output for sample $i"
+        require_file \
+            "$humann_genefamilies" \
+            "HUMAnN gene families output for sample $i"
 
-    require_file \
-        "$humann_pathabundance" \
-        "HUMAnN pathway abundance output for sample $i"
+        require_file \
+            "$humann_pathabundance" \
+            "HUMAnN pathway abundance output for sample $i"
 
-    echo "${g}[OK] HUMAnN completed for sample:${w} $i"
-done
+        echo "${g}[OK] HUMAnN completed for sample:${w} $i"
+    done
+fi
 
 cd "$HUMANN_WORK_DIR" || \
     die "Could not enter HUMAnN working directory: $HUMANN_WORK_DIR"
@@ -6716,64 +6760,100 @@ host_sam_files=()
 if [[ "$blast" == "blast" ]]; then
     echo "${g}Magic-BLAST${w}"
 
-    for i in $lsn; do
-        set_host_kraken_fastq_paths "$i"
+    if [[ -n "$HPC_CONF" ]]; then
+        MTD_HPC_MAGICBLAST_WORK_DIR="$outputdr/hpc/magicblast"
+        MTD_HPC_MAGICBLAST_INPUTS="$MTD_HPC_MAGICBLAST_WORK_DIR/inputs.tsv"
+        mkdir -p -- "$MTD_HPC_MAGICBLAST_WORK_DIR"
+        : > "$MTD_HPC_MAGICBLAST_INPUTS"
 
-        sam_file="${i}.sam"
-        host_sam_files+=("$sam_file")
+        for i in $lsn; do
+            set_host_kraken_fastq_paths "$i"
+            sam_file="$PIPELINE_TEMP_DIR/${i}.sam"
+            host_sam_files+=("${i}.sam")
+            if [[ "$READ_LAYOUT" == "pe" ]]; then
+                require_file "$HOST_KRAKEN_R1" "Kraken2 host-classified R1 for Magic-BLAST sample $i"
+                require_file "$HOST_KRAKEN_R2" "Kraken2 host-classified R2 for Magic-BLAST sample $i"
+                printf '%s\t%s\t%s\t%s\t%s\n' \
+                    "$i" "$READ_LAYOUT" "$HOST_KRAKEN_R1" "$HOST_KRAKEN_R2" "$sam_file" \
+                    >> "$MTD_HPC_MAGICBLAST_INPUTS"
+            else
+                require_file "$HOST_KRAKEN_R1" "Kraken2 host-classified SE FASTQ for Magic-BLAST sample $i"
+                printf '%s\t%s\t%s\t-\t%s\n' \
+                    "$i" "$READ_LAYOUT" "$HOST_KRAKEN_R1" "$sam_file" \
+                    >> "$MTD_HPC_MAGICBLAST_INPUTS"
+            fi
+        done
 
-        rm -f -- "$sam_file"
+        bash "$MTDIR/aux_scripts/hpc/mtd_hpc_magicblast_stage.sh" \
+            --hpc-conf "$HPC_CONF" \
+            --input-manifest "$MTD_HPC_MAGICBLAST_INPUTS" \
+            --main-database-prefix "$DB_blast" \
+            --work-dir "$MTD_HPC_MAGICBLAST_WORK_DIR" \
+            --mtd-root "$MTDIR" || die "HPC Magic-BLAST stage failed"
 
-        echo "============================================================"
-        echo "[MAGIC-BLAST] Sample: $i"
-        echo "Layout: $READ_LAYOUT"
-        echo "Database: $DB_blast"
-        echo "Output SAM: $sam_file"
-        echo "Threads: $threads"
+        for i in $lsn; do
+            require_file "$PIPELINE_TEMP_DIR/${i}.sam" "HPC Magic-BLAST SAM output for sample $i"
+        done
+    else
+        for i in $lsn; do
+            set_host_kraken_fastq_paths "$i"
 
-        magicblast_args=(
-            -query "$HOST_KRAKEN_R1"
-            -db "$DB_blast"
-            -infmt fastq
-            -out "$sam_file"
-            -num_threads "$threads"
-        )
+            sam_file="${i}.sam"
+            host_sam_files+=("$sam_file")
 
-        if [[ "$READ_LAYOUT" == "pe" ]]; then
-            require_file \
-                "$HOST_KRAKEN_R1" \
-                "Kraken2 host-classified R1 for Magic-BLAST sample $i"
+            rm -f -- "$sam_file"
 
-            require_file \
-                "$HOST_KRAKEN_R2" \
-                "Kraken2 host-classified R2 for Magic-BLAST sample $i"
+            echo "============================================================"
+            echo "[MAGIC-BLAST] Sample: $i"
+            echo "Layout: $READ_LAYOUT"
+            echo "Database: $DB_blast"
+            echo "Output SAM: $sam_file"
+            echo "Threads: $threads"
 
-            echo "Input R1: $HOST_KRAKEN_R1"
-            echo "Input R2: $HOST_KRAKEN_R2"
-
-            magicblast_args+=(
-                -query_mate "$HOST_KRAKEN_R2"
+            magicblast_args=(
+                -query "$HOST_KRAKEN_R1"
+                -db "$DB_blast"
+                -infmt fastq
+                -out "$sam_file"
+                -num_threads "$threads"
             )
-        else
+
+            if [[ "$READ_LAYOUT" == "pe" ]]; then
+                require_file \
+                    "$HOST_KRAKEN_R1" \
+                    "Kraken2 host-classified R1 for Magic-BLAST sample $i"
+
+                require_file \
+                    "$HOST_KRAKEN_R2" \
+                    "Kraken2 host-classified R2 for Magic-BLAST sample $i"
+
+                echo "Input R1: $HOST_KRAKEN_R1"
+                echo "Input R2: $HOST_KRAKEN_R2"
+
+                magicblast_args+=(
+                    -query_mate "$HOST_KRAKEN_R2"
+                )
+            else
+                require_file \
+                    "$HOST_KRAKEN_R1" \
+                    "Kraken2 host-classified SE FASTQ for Magic-BLAST sample $i"
+
+                echo "Input: $HOST_KRAKEN_R1"
+            fi
+
+            echo "============================================================"
+
+            if ! magicblast "${magicblast_args[@]}"; then
+                die "Magic-BLAST failed for sample: $i"
+            fi
+
             require_file \
-                "$HOST_KRAKEN_R1" \
-                "Kraken2 host-classified SE FASTQ for Magic-BLAST sample $i"
+                "$sam_file" \
+                "Magic-BLAST SAM output for sample $i"
 
-            echo "Input: $HOST_KRAKEN_R1"
-        fi
-
-        echo "============================================================"
-
-        if ! magicblast "${magicblast_args[@]}"; then
-            die "Magic-BLAST failed for sample: $i"
-        fi
-
-        require_file \
-            "$sam_file" \
-            "Magic-BLAST SAM output for sample $i"
-
-        echo "${g}[OK] Magic-BLAST completed for sample:${w} $i"
-    done
+            echo "${g}[OK] Magic-BLAST completed for sample:${w} $i"
+        done
+    fi
 
 else
     echo "${g}HISAT2 alignment${w}"

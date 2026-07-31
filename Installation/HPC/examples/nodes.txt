@@ -1,0 +1,4 @@
+# One resolvable hostname per line.
+# Empty lines and lines beginning with # are ignored.
+node01
+node02
