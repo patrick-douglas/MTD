@@ -333,7 +333,7 @@ NO_COMPARISON=0                        # set automatically later
 #   default = legacy MSigDB C2 symbols GMT
 #   auto    = use the master eggNOG/GO GMT produced by Create_custom_host.sh
 #   FILE    = use an explicitly provided GMT
-SSGSEA_GMT="default"
+SSGSEA_GMT="auto"
 SSGSEA_GMT_REQUESTED=""
 SSGSEA_GMT_MODE="default_MSigDB_c2"
 
