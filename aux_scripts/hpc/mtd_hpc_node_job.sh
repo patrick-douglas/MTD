@@ -99,12 +99,19 @@ case "$MODE" in
         rm -f -- "$temp_output"
         trap 'rm -f -- "$temp_output"' EXIT
 
+        # For packed Magic-BLAST chunk jobs, prefer the CPU allocation
+        # assigned to each Slurm task. Fall back to the detected node CPUs
+        # when SLURM_CPUS_PER_TASK is not defined.
+        magicblast_threads="${SLURM_CPUS_PER_TASK:-$MTD_NODE_THREADS}"
+
+        mtd_hpc_info "Magic-BLAST threads assigned to this task: $magicblast_threads"
+
         args=(
             -query "$QUERY"
             -db "$DATABASE"
             -infmt fastq
             -out "$temp_output"
-            -num_threads "$MTD_NODE_THREADS"
+            -num_threads "$magicblast_threads"
         )
         [[ -z "$QUERY_MATE" ]] || args+=( -query_mate "$QUERY_MATE" )
 

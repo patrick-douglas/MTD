@@ -105,7 +105,44 @@ sbatch_args=(
 [[ -n "$MTD_HPC_QOS" ]] && sbatch_args+=(--qos="$MTD_HPC_QOS")
 [[ -n "$MTD_HPC_CONSTRAINT" ]] && sbatch_args+=(--constraint="$MTD_HPC_CONSTRAINT")
 [[ -n "$MTD_HPC_TIME" ]] && sbatch_args+=(--time="$MTD_HPC_TIME")
-sbatch_args+=("${MTD_HPC_SBATCH_EXTRA_ARGS[@]}")
+# Select the Slurm resource policy according to the pipeline stage.
+#
+# Stage-specific arrays are optional. Older configuration files remain
+# compatible because the generic MTD_HPC_SBATCH_EXTRA_ARGS policy is used
+# whenever a stage-specific policy is not defined.
+case "$STAGE" in
+    humann)
+        if declare -p MTD_HPC_HUMANN_SBATCH_EXTRA_ARGS >/dev/null 2>&1; then
+            selected_policy="MTD_HPC_HUMANN_SBATCH_EXTRA_ARGS"
+            stage_sbatch_args=("${MTD_HPC_HUMANN_SBATCH_EXTRA_ARGS[@]}")
+        else
+            selected_policy="MTD_HPC_SBATCH_EXTRA_ARGS (fallback)"
+            stage_sbatch_args=("${MTD_HPC_SBATCH_EXTRA_ARGS[@]}")
+        fi
+        ;;
+
+    magicblast)
+        if declare -p MTD_HPC_MAGICBLAST_SBATCH_EXTRA_ARGS >/dev/null 2>&1; then
+            selected_policy="MTD_HPC_MAGICBLAST_SBATCH_EXTRA_ARGS"
+            stage_sbatch_args=("${MTD_HPC_MAGICBLAST_SBATCH_EXTRA_ARGS[@]}")
+        else
+            selected_policy="MTD_HPC_SBATCH_EXTRA_ARGS (fallback)"
+            stage_sbatch_args=("${MTD_HPC_SBATCH_EXTRA_ARGS[@]}")
+        fi
+        ;;
+
+    *)
+        selected_policy="MTD_HPC_SBATCH_EXTRA_ARGS"
+        stage_sbatch_args=("${MTD_HPC_SBATCH_EXTRA_ARGS[@]}")
+        ;;
+esac
+
+sbatch_args+=("${stage_sbatch_args[@]}")
+
+printf -v stage_sbatch_args_text '%q ' "${stage_sbatch_args[@]}"
+
+mtd_hpc_info "Slurm resource policy: $selected_policy"
+mtd_hpc_info "Slurm resource arguments: ${stage_sbatch_args_text% }"
 
 mtd_hpc_info "Submitting $pending_tasks pending tasks ($expected_tasks total)."
 job_id="$(sbatch "${sbatch_args[@]}" \
