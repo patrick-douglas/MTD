@@ -90,7 +90,7 @@ print_help <- function() {
     cat("      Adjusted p-value / FDR cutoff. Default: 0.05\n\n")
 
     cat("  --logfc VALUE\n")
-    cat("      Absolute log2 fold-change cutoff. Default: 2\n\n")
+    cat("      Absolute log2 fold-change cutoff. Default: 0.5\n\n")
 
     cat("Title options:\n")
     cat("  --group_label1 TEXT\n")
@@ -168,7 +168,7 @@ label_top <- NULL
 label_unmapped_ensembl <- FALSE
 
 padj_cutoff <- 0.05
-logfc_cutoff <- 2
+logfc_cutoff <- 0.5
 
 group_label1 <- "Group1"
 group_label2 <- "Group2"

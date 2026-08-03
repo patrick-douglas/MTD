@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=aux_scripts/hpc/mtd_hpc_common.sh
-source "$SCRIPT_DIR/mtd_hpc_common.sh"
-
+# Slurm copies this submitted script into /var/spool/slurm. Therefore,
+# BASH_SOURCE[0] no longer points to the shared MTD Explorer checkout.
+# Parse MTD_ROOT first and load the common helpers through the NFS path.
 [[ $# -eq 4 ]] || {
-    mtd_hpc_error "Internal array task usage: CONF MANIFEST SUCCESS_DIR MTD_ROOT"
+    printf '[MTD-HPC ERROR] Internal array task usage: CONF MANIFEST SUCCESS_DIR MTD_ROOT\n' >&2
     exit 2
 }
 
@@ -14,6 +13,17 @@ MTD_HPC_CONF="$1"
 MTD_HPC_PENDING_MANIFEST="$2"
 MTD_HPC_SUCCESS_DIR="$3"
 MTD_HPC_MTD_ROOT="$4"
+
+MTD_HPC_COMMON_SH="$MTD_HPC_MTD_ROOT/aux_scripts/hpc/mtd_hpc_common.sh"
+
+if [[ ! -s "$MTD_HPC_COMMON_SH" ]]; then
+    printf '[MTD-HPC ERROR] Shared HPC helper was not found: %s\n'         "$MTD_HPC_COMMON_SH" >&2
+    exit 1
+fi
+
+# shellcheck source=aux_scripts/hpc/mtd_hpc_common.sh
+source "$MTD_HPC_COMMON_SH"
+
 : "${SLURM_ARRAY_TASK_ID:?SLURM_ARRAY_TASK_ID is required}"
 
 mtd_hpc_load_config "$MTD_HPC_CONF" "$MTD_HPC_MTD_ROOT" || exit 1

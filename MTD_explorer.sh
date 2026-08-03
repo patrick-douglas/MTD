@@ -7368,6 +7368,8 @@ fi
 
     EV_VOLCANO_SCRIPT="$MTDIR/aux_scripts/EV/EV.volcano.R"
     EV_VOLCANO_LABEL_TOP="${EV_VOLCANO_LABEL_TOP:-25}"
+    EV_VOLCANO_PADJ="${EV_VOLCANO_PADJ:-0.05}"
+    EV_VOLCANO_LOGFC="${EV_VOLCANO_LOGFC:-0.5}"
     EV_VOLCANO_ENV="${EV_VOLCANO_ENV:-base}"
 
     run_ev_volcano_for_deg_folder() {
@@ -7415,6 +7417,10 @@ fi
             echo "  $de_dir"
             echo "[EV VOLCANO] label_top:"
             echo "  $EV_VOLCANO_LABEL_TOP"
+            echo "[EV VOLCANO] adjusted p-value cutoff:"
+            echo "  $EV_VOLCANO_PADJ"
+            echo "[EV VOLCANO] absolute log2FC cutoff:"
+            echo "  $EV_VOLCANO_LOGFC"
             echo "[EV VOLCANO] conda env:"
             echo "  $EV_VOLCANO_ENV"
             echo "------------------------------------------------------------"
@@ -7430,7 +7436,9 @@ fi
 
                 Rscript "$EV_VOLCANO_SCRIPT" \
                     --de_results "$de_file" \
-                    --label_top "$EV_VOLCANO_LABEL_TOP"
+                    --label_top "$EV_VOLCANO_LABEL_TOP" \
+                    --padj "$EV_VOLCANO_PADJ" \
+                    --logfc "$EV_VOLCANO_LOGFC"
             ) > "$volcano_log" 2>&1
             then
                 echo "${y}[WARNING] EV volcano failed for:${w}"

@@ -74,7 +74,6 @@ case "$MODE" in
             --threads "$MTD_NODE_THREADS" \
             --nucleotide-database "$MTD_HPC_HUMANN_DB_ROOT/chocophlan" \
             --protein-database "$MTD_HPC_HUMANN_DB_ROOT/uniref" \
-            --utility-database "$MTD_HPC_HUMANN_DB_ROOT/utility_mapping" \
             --metaphlan "$MTD_HPC_ENV_DIR/bin" \
             --metaphlan-options "$metaphlan_options" \
             --verbose
