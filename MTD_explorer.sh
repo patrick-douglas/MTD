@@ -6959,12 +6959,51 @@ if [[ "$READ_LAYOUT" == "pe" ]]; then
         -p
     )
 
-    # Newer featureCounts versions require --countReadPairs
-    # explicitly. In older versions, -p already implied fragment
-    # counting, and --countReadPairs may not exist.
-    if featureCounts -h 2>&1 |
-        grep -q -- '--countReadPairs'
+    # featureCounts 2.x may not advertise every supported long
+    # option when invoked with -h. Inspect both usage forms and use
+    # the reported version as a guarded fallback.
+    featurecounts_usage="$(
+        {
+            featureCounts 2>&1 || true
+            featureCounts -h 2>&1 || true
+        }
+    )"
+
+    featurecounts_version="$(
+        featureCounts -v 2>&1 |
+            sed -nE \
+                's/.*v([0-9]+(\.[0-9]+)+).*/\1/p' |
+            head -n 1
+    )"
+
+    featurecounts_has_count_read_pairs=0
+
+    if grep -Fq -- \
+        '--countReadPairs' \
+        <<< "$featurecounts_usage"
     then
+        featurecounts_has_count_read_pairs=1
+    elif [[ -n "$featurecounts_version" ]]; then
+
+        featurecounts_lowest_version="$(
+            printf '%s\n%s\n' \
+                "2.0.2" \
+                "$featurecounts_version" |
+                sort -V |
+                head -n 1
+        )"
+
+        if [[ "$featurecounts_lowest_version" == "2.0.2" ]]; then
+            featurecounts_has_count_read_pairs=1
+        fi
+    fi
+
+    echo "[INFO] featureCounts executable:"
+    echo "  $(command -v featureCounts)"
+    echo "[INFO] featureCounts version:"
+    echo "  ${featurecounts_version:-unknown}"
+
+    if [[ "$featurecounts_has_count_read_pairs" -eq 1 ]]; then
         featurecounts_args+=(
             --countReadPairs
         )
@@ -6972,7 +7011,7 @@ if [[ "$READ_LAYOUT" == "pe" ]]; then
         echo "[INFO] featureCounts paired-end mode:"
         echo "  -p --countReadPairs"
     else
-        echo "${y}[WARNING] Installed featureCounts does not advertise --countReadPairs.${w}"
+        echo "${y}[WARNING] Installed featureCounts does not support --countReadPairs.${w}"
         echo "[WARNING] Using legacy paired-end behavior with -p only."
     fi
 else
