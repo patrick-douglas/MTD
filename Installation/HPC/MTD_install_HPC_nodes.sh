@@ -317,28 +317,39 @@ for node in "${nodes[@]}"; do
             fatal "Cannot connect to root@$node for --remote-root-mode direct."
     fi
 
-    # rsync must exist on both sides of the transfer. Install the minimal
-    # system dependency set through the node package manager when needed.
-    if ! remote_query "$node" command -v rsync >/dev/null 2>&1; then
+    # Node-local stage-in/stage-out requires rsync, while packed chunk
+    # stage-out serialization uses flock from util-linux.
+    missing_remote_commands=()
+    for remote_command in rsync flock; do
+        if ! remote_query "$node" command -v "$remote_command" >/dev/null 2>&1; then
+            missing_remote_commands+=("$remote_command")
+        fi
+    done
+
+    if (( ${#missing_remote_commands[@]} > 0 )); then
+        info "Installing missing node utilities on $node: ${missing_remote_commands[*]}"
+
         package_manager="$(remote_query "$node" bash -c '
             if command -v apt-get >/dev/null 2>&1; then echo apt-get;
             elif command -v dnf >/dev/null 2>&1; then echo dnf;
             elif command -v yum >/dev/null 2>&1; then echo yum;
             else echo none; fi
         ' | tr -d '\r\n')"
+
         case "$package_manager" in
             apt-get)
                 remote_root "$node" env DEBIAN_FRONTEND=noninteractive apt-get update
-                remote_root "$node" env DEBIAN_FRONTEND=noninteractive apt-get install -y rsync ca-certificates
+                remote_root "$node" env DEBIAN_FRONTEND=noninteractive \
+                    apt-get install -y rsync ca-certificates util-linux
                 ;;
             dnf)
-                remote_root "$node" dnf install -y rsync ca-certificates
+                remote_root "$node" dnf install -y rsync ca-certificates util-linux
                 ;;
             yum)
-                remote_root "$node" yum install -y rsync ca-certificates
+                remote_root "$node" yum install -y rsync ca-certificates util-linux
                 ;;
             *)
-                fatal "rsync is missing on $node and no supported package manager was found."
+                fatal "Missing node utilities (${missing_remote_commands[*]}) and no supported package manager was found on $node."
                 ;;
         esac
     fi
@@ -375,7 +386,12 @@ for node in "${nodes[@]}"; do
 
     remote_root "$node" install -d -o "$OWNER_UID" -g "$OWNER_GID" -m 0755 \
         "$PREFIX" "$PREFIX/envs" "$PREFIX/databases" "$PREFIX/config" \
-        "$PREFIX/logs" "$PREFIX/tmp" "$PREFIX/cache"
+        "$PREFIX/logs" "$PREFIX/cache"
+
+    # Scratch is private to the MTD execution owner. Tasks create unique
+    # per-job directories below this node-local path.
+    remote_root "$node" install -d -o "$OWNER_UID" -g "$OWNER_GID" -m 0700 \
+        "$PREFIX/tmp"
 
     copy_as_owner scp -q "${SSH_OPTIONS[@]}" \
         "$installer_local" "$SSH_USER@$node:$PREFIX/cache/$installer_name"
@@ -461,6 +477,7 @@ gid=$OWNER_GID
 prefix=$PREFIX
 environment=$PREFIX/envs/MTD-Explorer-HPC
 database_root=$PREFIX/databases
+scratch_root=$PREFIX/tmp
 configured_at=$configured_at
 MANIFEST
     chown "$OWNER_USER:$OWNER_GROUP" "$manifest_local"

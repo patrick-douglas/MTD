@@ -70,8 +70,22 @@ mtd_hpc_load_config() {
     : "${MTD_HPC_MAGICBLAST_CHUNK_READS:=1000000}"
     : "${MTD_HPC_RESUME:=1}"
 
+    # Node-local task staging prevents compute jobs from continuously reading
+    # FASTQs or writing large intermediate outputs through the shared NFS.
+    : "${MTD_HPC_STAGE_LOCAL:=1}"
+    : "${MTD_HPC_LOCAL_SCRATCH_ROOT:=${MTD_HPC_PREFIX}/tmp}"
+    : "${MTD_HPC_SERIALIZE_STAGEOUT_PER_NODE:=1}"
+    : "${MTD_HPC_CLEAN_LOCAL_ON_SUCCESS:=1}"
+    : "${MTD_HPC_CLEAN_LOCAL_ON_FAILURE:=0}"
+
     if ! declare -p MTD_HPC_SBATCH_EXTRA_ARGS >/dev/null 2>&1; then
         MTD_HPC_SBATCH_EXTRA_ARGS=(--exclusive --nodes=1 --mem=0)
+    fi
+    if ! declare -p MTD_HPC_HUMANN_SBATCH_EXTRA_ARGS >/dev/null 2>&1; then
+        MTD_HPC_HUMANN_SBATCH_EXTRA_ARGS=("${MTD_HPC_SBATCH_EXTRA_ARGS[@]}")
+    fi
+    if ! declare -p MTD_HPC_MAGICBLAST_SBATCH_EXTRA_ARGS >/dev/null 2>&1; then
+        MTD_HPC_MAGICBLAST_SBATCH_EXTRA_ARGS=("${MTD_HPC_SBATCH_EXTRA_ARGS[@]}")
     fi
     if ! declare -p MTD_HPC_PATH_MAPS >/dev/null 2>&1; then
         MTD_HPC_PATH_MAPS=()
@@ -92,12 +106,30 @@ mtd_hpc_load_config() {
     [[ "$MTD_HPC_RESUME" == "0" || "$MTD_HPC_RESUME" == "1" ]] || \
         mtd_hpc_die "MTD_HPC_RESUME must be 0 or 1." || return 1
 
+    local boolean_name boolean_value
+    for boolean_name in \
+        MTD_HPC_STAGE_LOCAL \
+        MTD_HPC_SERIALIZE_STAGEOUT_PER_NODE \
+        MTD_HPC_CLEAN_LOCAL_ON_SUCCESS \
+        MTD_HPC_CLEAN_LOCAL_ON_FAILURE
+    do
+        boolean_value="${!boolean_name}"
+        [[ "$boolean_value" == "0" || "$boolean_value" == "1" ]] || \
+            mtd_hpc_die "$boolean_name must be 0 or 1." || return 1
+    done
+
+    [[ "$MTD_HPC_LOCAL_SCRATCH_ROOT" == /* ]] || \
+        mtd_hpc_die "MTD_HPC_LOCAL_SCRATCH_ROOT must be an absolute path." || return 1
+
     MTD_HPC_CONF="$conf"
     MTD_HPC_MTD_ROOT="$mtd_root"
     export MTD_HPC_CONF MTD_HPC_MTD_ROOT
     export MTD_HPC_PREFIX MTD_HPC_ENV_DIR MTD_HPC_CONDA_BIN
     export MTD_HPC_DATABASE_ROOT MTD_HPC_MTD_DATABASE_ROOT
     export MTD_HPC_HUMANN_DB_ROOT MTD_HPC_METAPHLAN_INDEX
+    export MTD_HPC_STAGE_LOCAL MTD_HPC_LOCAL_SCRATCH_ROOT
+    export MTD_HPC_SERIALIZE_STAGEOUT_PER_NODE
+    export MTD_HPC_CLEAN_LOCAL_ON_SUCCESS MTD_HPC_CLEAN_LOCAL_ON_FAILURE
 
     return 0
 }
@@ -147,6 +179,175 @@ mtd_hpc_export_node_resources() {
     mtd_hpc_info "Detected threads: $MTD_NODE_THREADS"
     mtd_hpc_info "Available memory: ${MTD_NODE_MEMORY_KB} kB"
     mtd_hpc_info "90% memory budget: ${MTD_NODE_MEMORY_GB_90} GiB"
+}
+
+
+mtd_hpc_prepare_local_scratch() {
+    local mode="$1"
+    local sample="$2"
+    local scratch_parent=""
+    local scratch_dir=""
+    local safe_user="${USER:-unknown}"
+    local job_id="${SLURM_JOB_ID:-manual}"
+    local task_id="${SLURM_ARRAY_TASK_ID:-0}"
+
+    MTD_HPC_TASK_SCRATCH=""
+    export MTD_HPC_TASK_SCRATCH
+
+    [[ "$MTD_HPC_STAGE_LOCAL" == "1" ]] || return 0
+
+    mtd_hpc_validate_id "$mode" "scratch mode" || return 1
+    mtd_hpc_validate_id "$sample" "scratch sample" || return 1
+    mtd_hpc_validate_id "$safe_user" "scratch user" || safe_user="user"
+
+    # Use the explicitly configured node-local prefix. This avoids relying
+    # on SLURM_TMPDIR, which may be unset or backed by shared storage.
+    scratch_parent="$MTD_HPC_LOCAL_SCRATCH_ROOT"
+
+    [[ -d "$scratch_parent" ]] || \
+        mtd_hpc_die "Node-local scratch directory does not exist: $scratch_parent" || return 1
+    [[ -w "$scratch_parent" ]] || \
+        mtd_hpc_die "Node-local scratch directory is not writable: $scratch_parent" || return 1
+
+    scratch_dir="$(
+        mktemp -d -p "$scratch_parent" \
+            "mtd.${safe_user}.${job_id}.${task_id}.${mode}.${sample}.XXXXXX"
+    )" || return 1
+
+    chmod 700 "$scratch_dir"
+    mkdir -p -- "$scratch_dir/input" "$scratch_dir/output" "$scratch_dir/tmp"
+
+    export TMPDIR="$scratch_dir/tmp"
+    export TMP="$TMPDIR"
+    export TEMP="$TMPDIR"
+
+    MTD_HPC_TASK_SCRATCH="$scratch_dir"
+    export MTD_HPC_TASK_SCRATCH
+
+    mtd_hpc_info "Node-local scratch: $MTD_HPC_TASK_SCRATCH"
+}
+
+mtd_hpc_stage_in_file() {
+    local source="$1"
+    local destination="$2"
+    local label="${3:-input}"
+    local source_size=0
+    local destination_size=0
+
+    mtd_hpc_require_file "$source" "$label" || return 1
+    command -v rsync >/dev/null 2>&1 || \
+        mtd_hpc_die "rsync is required for node-local input staging." || return 1
+
+    mkdir -p -- "$(dirname -- "$destination")"
+
+    source_size="$(stat -Lc %s -- "$source")"
+    mtd_hpc_info "Stage-in $label: $source -> $destination (${source_size} bytes)"
+
+    rsync -aL --whole-file -- "$source" "$destination" || return 1
+    mtd_hpc_require_file "$destination" "staged $label" || return 1
+
+    destination_size="$(stat -Lc %s -- "$destination")"
+    [[ "$destination_size" == "$source_size" ]] || \
+        mtd_hpc_die "Stage-in size mismatch for $label: source=$source_size destination=$destination_size" || return 1
+}
+
+mtd_hpc_stageout_lock_acquire() {
+    MTD_HPC_STAGEOUT_LOCK_FD=""
+
+    [[ "$MTD_HPC_SERIALIZE_STAGEOUT_PER_NODE" == "1" ]] || return 0
+    command -v flock >/dev/null 2>&1 || \
+        mtd_hpc_die "flock is required when MTD_HPC_SERIALIZE_STAGEOUT_PER_NODE=1." || return 1
+
+    mkdir -p -- "$MTD_HPC_LOCAL_SCRATCH_ROOT/.locks"
+    exec {MTD_HPC_STAGEOUT_LOCK_FD}> \
+        "$MTD_HPC_LOCAL_SCRATCH_ROOT/.locks/stageout.lock"
+    flock -x "$MTD_HPC_STAGEOUT_LOCK_FD"
+
+    mtd_hpc_info "Acquired node-local stage-out lock."
+}
+
+mtd_hpc_stageout_lock_release() {
+    [[ -n "${MTD_HPC_STAGEOUT_LOCK_FD:-}" ]] || return 0
+
+    flock -u "$MTD_HPC_STAGEOUT_LOCK_FD" || true
+    eval "exec ${MTD_HPC_STAGEOUT_LOCK_FD}>&-"
+    MTD_HPC_STAGEOUT_LOCK_FD=""
+
+    mtd_hpc_info "Released node-local stage-out lock."
+}
+
+mtd_hpc_atomic_stage_out_file() {
+    local source="$1"
+    local destination="$2"
+    local label="${3:-output}"
+    local destination_dir=""
+    local temporary_destination=""
+    local source_size=0
+    local copied_size=0
+    local rc=0
+
+    mtd_hpc_require_file "$source" "$label" || return 1
+    command -v rsync >/dev/null 2>&1 || \
+        mtd_hpc_die "rsync is required for node-local output staging." || return 1
+
+    destination_dir="$(dirname -- "$destination")"
+    mkdir -p -- "$destination_dir"
+
+    temporary_destination="$destination.mtd-partial.${SLURM_JOB_ID:-$$}.${SLURM_ARRAY_TASK_ID:-0}.$$"
+    rm -f -- "$temporary_destination"
+
+    source_size="$(stat -Lc %s -- "$source")"
+    mtd_hpc_info "Stage-out $label: $source -> $destination (${source_size} bytes)"
+
+    mtd_hpc_stageout_lock_acquire || return 1
+
+    if rsync -a --whole-file -- "$source" "$temporary_destination"; then
+        if [[ ! -s "$temporary_destination" ]]; then
+            mtd_hpc_error "Staged $label is missing or empty: $temporary_destination"
+            rc=1
+        else
+            copied_size="$(stat -Lc %s -- "$temporary_destination")"
+            if [[ "$copied_size" != "$source_size" ]]; then
+                mtd_hpc_error \
+                    "Stage-out size mismatch for $label: source=$source_size destination=$copied_size"
+                rc=1
+            elif mv -f -- "$temporary_destination" "$destination"; then
+                rc=0
+            else
+                rc=$?
+            fi
+        fi
+    else
+        rc=$?
+    fi
+
+    [[ "$rc" == "0" ]] || rm -f -- "$temporary_destination"
+    mtd_hpc_stageout_lock_release
+
+    (( rc == 0 )) || return "$rc"
+    mtd_hpc_require_file "$destination" "staged $label" || return 1
+    mtd_hpc_ok "Stage-out completed: $destination"
+}
+
+mtd_hpc_cleanup_local_scratch() {
+    local scratch_dir="${1:-}"
+    local exit_status="${2:-1}"
+    local clean=0
+
+    [[ -n "$scratch_dir" && -d "$scratch_dir" ]] || return 0
+
+    if (( exit_status == 0 )); then
+        clean="$MTD_HPC_CLEAN_LOCAL_ON_SUCCESS"
+    else
+        clean="$MTD_HPC_CLEAN_LOCAL_ON_FAILURE"
+    fi
+
+    if [[ "$clean" == "1" ]]; then
+        rm -rf -- "$scratch_dir"
+        mtd_hpc_info "Removed node-local scratch: $scratch_dir"
+    else
+        mtd_hpc_error "Preserving node-local scratch for diagnosis: $scratch_dir"
+    fi
 }
 
 mtd_hpc_map_path_to_node() {

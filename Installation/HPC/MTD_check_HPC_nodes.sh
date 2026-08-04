@@ -69,6 +69,30 @@ test -d "$prefix/envs/MTD-Explorer-HPC/conda-meta"
 test -d "$prefix/databases"
 test -s "$prefix/config/node_manifest.txt"
 
+command -v rsync >/dev/null 2>&1
+command -v flock >/dev/null 2>&1
+
+test -d "$prefix/tmp"
+test "$(stat -c %U "$prefix/tmp")" = "$owner"
+test -w "$prefix/tmp"
+
+scratch_probe="$(mktemp -d -p "$prefix/tmp" mtd-check.XXXXXX)"
+trap 'rm -rf -- "$scratch_probe"' EXIT
+
+printf 'MTD HPC scratch probe\n' > "$scratch_probe/source.txt"
+rsync -a --whole-file -- \
+    "$scratch_probe/source.txt" \
+    "$scratch_probe/copied.txt"
+cmp -s \
+    "$scratch_probe/source.txt" \
+    "$scratch_probe/copied.txt"
+
+exec 9> "$prefix/tmp/.mtd_hpc_check_stageout.lock"
+flock -n 9
+flock -u 9
+exec 9>&-
+rm -f -- "$prefix/tmp/.mtd_hpc_check_stageout.lock"
+
 humann_db="$prefix/databases/MTD-Explorer/HUMAnN/ref_database"
 metaphlan_index="mpa_vJun23_CHOCOPhlAnSGB_202403"
 test -d "$humann_db/chocophlan"
@@ -93,6 +117,11 @@ env_dir="$prefix/envs/MTD-Explorer-HPC"
 
 printf '[INFO] CPUs visible on node: %s\n' "$(nproc)"
 awk '/^MemTotal:/ {printf "[INFO] Total memory: %s kB\\n", $2}' /proc/meminfo
+df -Pk "$prefix/tmp" |
+    awk 'NR == 2 {
+        printf "[INFO] Node-local scratch free space: %s kB (%s)\\n", $4, $6
+    }'
+printf '[OK] Node-local stage-in/stage-out scratch is writable: %s/tmp\n' "$prefix"
 printf '[OK] %s: MTD Explorer HPC runtime is ready.\n' "$(hostname -s)"
 REMOTE
 done
