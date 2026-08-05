@@ -46,6 +46,7 @@ command="$(mtd_hpc_b64_decode "$command_b64")"
 expected_outputs="$(mtd_hpc_b64_decode "$expected_b64")"
 
 mkdir -p -- "$MTD_HPC_SUCCESS_DIR"
+task_node="${SLURMD_NODENAME:-$(hostname -s)}"
 success_marker="$MTD_HPC_SUCCESS_DIR/${task_id}.success"
 failure_marker="$MTD_HPC_SUCCESS_DIR/${task_id}.failed"
 rm -f -- "$success_marker" "$failure_marker"
@@ -54,7 +55,7 @@ record_failure() {
     local status="$1"
     local reason="$2"
     printf 'hash=%s\nexit_code=%s\nhost=%s\nreason=%s\nfinished_at=%s\n' \
-        "$task_hash" "$status" "$(hostname -s)" "$reason" "$(date --iso-8601=seconds)" \
+        "$task_hash" "$status" "$task_node" "$reason" "$(date --iso-8601=seconds)" \
         > "$failure_marker"
 }
 
@@ -84,7 +85,7 @@ if ! mtd_hpc_outputs_exist "$expected_outputs"; then
 fi
 
 printf 'hash=%s\nexit_code=0\nhost=%s\nthreads=%s\nmemory_kb=%s\nfinished_at=%s\n' \
-    "$task_hash" "$(hostname -s)" "$MTD_NODE_THREADS" "$MTD_NODE_MEMORY_KB" \
+    "$task_hash" "$task_node" "$MTD_NODE_THREADS" "$MTD_NODE_MEMORY_KB" \
     "$(date --iso-8601=seconds)" > "$success_marker"
 
 mtd_hpc_ok "Task completed: $task_id"

@@ -69,6 +69,11 @@ mtd_hpc_load_config() {
     : "${MTD_HPC_POLL_SECONDS:=20}"
     : "${MTD_HPC_MAGICBLAST_CHUNK_READS:=1000000}"
     : "${MTD_HPC_RESUME:=1}"
+    : "${MTD_HPC_MAX_ATTEMPTS:=3}"
+    : "${MTD_HPC_RETRY_DELAY_SECONDS:=20}"
+    : "${MTD_HPC_RETRY_EXCLUDE_FAILED_NODES:=1}"
+    : "${MTD_HPC_FINAL_SUBMIT_NODE_FALLBACK:=1}"
+    : "${MTD_HPC_FINAL_SUBMIT_NODE_ATTEMPTS:=1}"
 
     # Node-local task staging prevents compute jobs from continuously reading
     # FASTQs or writing large intermediate outputs through the shared NFS.
@@ -106,12 +111,24 @@ mtd_hpc_load_config() {
     [[ "$MTD_HPC_RESUME" == "0" || "$MTD_HPC_RESUME" == "1" ]] || \
         mtd_hpc_die "MTD_HPC_RESUME must be 0 or 1." || return 1
 
+    [[ "$MTD_HPC_MAX_ATTEMPTS" =~ ^[0-9]+$ ]] && (( MTD_HPC_MAX_ATTEMPTS >= 1 )) || \
+        mtd_hpc_die "MTD_HPC_MAX_ATTEMPTS must be an integer >= 1." || return 1
+
+    [[ "$MTD_HPC_RETRY_DELAY_SECONDS" =~ ^[0-9]+$ ]] || \
+        mtd_hpc_die "MTD_HPC_RETRY_DELAY_SECONDS must be an integer >= 0." || return 1
+
+    [[ "$MTD_HPC_FINAL_SUBMIT_NODE_ATTEMPTS" =~ ^[0-9]+$ ]] && \
+       (( MTD_HPC_FINAL_SUBMIT_NODE_ATTEMPTS >= 1 )) || \
+        mtd_hpc_die "MTD_HPC_FINAL_SUBMIT_NODE_ATTEMPTS must be an integer >= 1." || return 1
+
     local boolean_name boolean_value
     for boolean_name in \
         MTD_HPC_STAGE_LOCAL \
         MTD_HPC_SERIALIZE_STAGEOUT_PER_NODE \
         MTD_HPC_CLEAN_LOCAL_ON_SUCCESS \
-        MTD_HPC_CLEAN_LOCAL_ON_FAILURE
+        MTD_HPC_CLEAN_LOCAL_ON_FAILURE \
+        MTD_HPC_RETRY_EXCLUDE_FAILED_NODES \
+        MTD_HPC_FINAL_SUBMIT_NODE_FALLBACK
     do
         boolean_value="${!boolean_name}"
         [[ "$boolean_value" == "0" || "$boolean_value" == "1" ]] || \
@@ -130,6 +147,10 @@ mtd_hpc_load_config() {
     export MTD_HPC_STAGE_LOCAL MTD_HPC_LOCAL_SCRATCH_ROOT
     export MTD_HPC_SERIALIZE_STAGEOUT_PER_NODE
     export MTD_HPC_CLEAN_LOCAL_ON_SUCCESS MTD_HPC_CLEAN_LOCAL_ON_FAILURE
+    export MTD_HPC_MAX_ATTEMPTS MTD_HPC_RETRY_DELAY_SECONDS
+    export MTD_HPC_RETRY_EXCLUDE_FAILED_NODES
+    export MTD_HPC_FINAL_SUBMIT_NODE_FALLBACK
+    export MTD_HPC_FINAL_SUBMIT_NODE_ATTEMPTS
 
     return 0
 }
