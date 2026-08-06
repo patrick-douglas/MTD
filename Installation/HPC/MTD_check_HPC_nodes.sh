@@ -66,6 +66,8 @@ test -d "$prefix"
 test "$(stat -c %U "$prefix")" = "$owner"
 test -x "$prefix/miniconda3/bin/conda"
 test -d "$prefix/envs/MTD-Explorer-HPC/conda-meta"
+test -d "$prefix/envs/MTD_fastp/conda-meta"
+test -d "$prefix/envs/MTD_kraken2/conda-meta"
 test -d "$prefix/databases"
 test -s "$prefix/config/node_manifest.txt"
 
@@ -109,11 +111,44 @@ done
 
 conda_bin="$prefix/miniconda3/bin/conda"
 env_dir="$prefix/envs/MTD-Explorer-HPC"
+fastp_env="$prefix/envs/MTD_fastp"
+kraken2_env="$prefix/envs/MTD_kraken2"
 
 "$conda_bin" run --prefix "$env_dir" python --version
 "$conda_bin" run --prefix "$env_dir" humann --version
 "$conda_bin" run --prefix "$env_dir" metaphlan --version
 "$conda_bin" run --prefix "$env_dir" magicblast -version
+"$conda_bin" run --prefix "$fastp_env" fastp --version
+"$conda_bin" run --prefix "$kraken2_env" kraken2 --version
+if ! "$conda_bin" run --prefix "$kraken2_env" bracken -v; then
+    "$conda_bin" run --prefix "$kraken2_env" bracken -h >/dev/null
+fi
+
+kraken_db_count=0
+while IFS= read -r -d '' kraken_hash; do
+    kraken_db="$(dirname -- "$kraken_hash")"
+    test -s "$kraken_db/opts.k2d"
+    test -s "$kraken_db/taxo.k2d"
+    kraken_db_count=$((kraken_db_count + 1))
+    printf '[OK] Kraken2 database: %s\n' "$kraken_db"
+
+    bracken_dist_count="$(
+        find "$kraken_db" -maxdepth 1 -type f \
+            -name 'database*mers.kmer_distrib' -size +0c 2>/dev/null | \
+            awk 'END {print NR + 0}'
+    )"
+    if (( bracken_dist_count > 0 )); then
+        printf '[OK] Bracken distributions: %s (%s file(s))\n' \
+            "$kraken_db" "$bracken_dist_count"
+    fi
+done < <(
+    find "$prefix/databases" -type f -name hash.k2d -size +0c -print0 2>/dev/null
+)
+
+if (( kraken_db_count == 0 )); then
+    printf '[WARNING] No node-local Kraken2 database was found under: %s/databases\n' \
+        "$prefix" >&2
+fi
 
 printf '[INFO] CPUs visible on node: %s\n' "$(nproc)"
 awk '/^MemTotal:/ {printf "[INFO] Total memory: %s kB\\n", $2}' /proc/meminfo

@@ -3927,6 +3927,62 @@ if [[ "$no_trimm" == "1" ]]; then
 # ------------------------------------------------------------
 
 else
+    if [[ -n "$HPC_CONF" ]]; then
+        echo "[INFO] Running fastp trimming through the Slurm HPC backend."
+        echo "  Input directory: $inputdr"
+        echo
+
+        mkdir -p "$outputdr/fastp"
+        MTD_HPC_FASTP_WORK_DIR="$outputdr/hpc/fastp"
+        MTD_HPC_FASTP_INPUTS="$MTD_HPC_FASTP_WORK_DIR/inputs.tsv"
+        mkdir -p -- "$MTD_HPC_FASTP_WORK_DIR"
+        : > "$MTD_HPC_FASTP_INPUTS"
+
+        for i in $lsn; do
+            load_fastq_manifest_row "$i"
+            fastp_html="$outputdr/fastp/Trimmed_${i}.fastp.html"
+            fastp_json="$outputdr/fastp/Trimmed_${i}.fastp.json"
+
+            if [[ "$INPUT_LAYOUT" == "pe" ]]; then
+                out_fq1="$PIPELINE_TEMP_DIR/Trimmed_${i}_R1.fq.gz"
+                out_fq2="$PIPELINE_TEMP_DIR/Trimmed_${i}_R2.fq.gz"
+                printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                    "$i" "pe" "$INPUT_READ1" "$INPUT_READ2" \
+                    "$out_fq1" "$out_fq2" "$fastp_html" "$fastp_json" \
+                    >> "$MTD_HPC_FASTP_INPUTS"
+            else
+                out_fq="$PIPELINE_TEMP_DIR/Trimmed_${i}.fq.gz"
+                printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                    "$i" "se" "$INPUT_READ1" "-" \
+                    "$out_fq" "-" "$fastp_html" "$fastp_json" \
+                    >> "$MTD_HPC_FASTP_INPUTS"
+            fi
+        done
+
+        bash "$MTDIR/aux_scripts/hpc/mtd_hpc_fastp_stage.sh" \
+            --hpc-conf "$HPC_CONF" \
+            --input-manifest "$MTD_HPC_FASTP_INPUTS" \
+            --min-length "$length" \
+            --validate-paired-ids "$FASTP_VALIDATE_PAIRED_IDS" \
+            --pe-max-attempts "$FASTP_PE_MAX_ATTEMPTS" \
+            --work-dir "$MTD_HPC_FASTP_WORK_DIR" \
+            --mtd-root "$MTDIR" || die "HPC fastp stage failed"
+
+        for i in $lsn; do
+            load_fastq_manifest_row "$i"
+            if [[ "$INPUT_LAYOUT" == "pe" ]]; then
+                register_prepared_fastq \
+                    "$i" "pe" \
+                    "$PIPELINE_TEMP_DIR/Trimmed_${i}_R1.fq.gz" \
+                    "$PIPELINE_TEMP_DIR/Trimmed_${i}_R2.fq.gz"
+            else
+                register_prepared_fastq \
+                    "$i" "se" \
+                    "$PIPELINE_TEMP_DIR/Trimmed_${i}.fq.gz" \
+                    "-"
+            fi
+        done
+    else
     echo "[INFO] Running fastp trimming using FASTQ files from samplesheet directory:"
     echo "  $inputdr"
     echo
@@ -4084,6 +4140,7 @@ else
         require_file "$fastp_html" "fastp HTML report for sample $i"
         require_file "$fastp_json" "fastp JSON report for sample $i"
     done
+    fi
 fi
 conda deactivate
 conda activate MTD
@@ -4124,6 +4181,47 @@ echo -e "sample\thost_classified_reads\thost_classified_pct\thost_unclassified_r
 
 # Threshold for warning about low host classification.
 HOST_LOW_WARN=50
+
+if [[ -n "$HPC_CONF" ]]; then
+    MTD_HPC_KRAKEN_HOST_WORK_DIR="$outputdr/hpc/kraken_host"
+    MTD_HPC_KRAKEN_HOST_INPUTS="$MTD_HPC_KRAKEN_HOST_WORK_DIR/inputs.tsv"
+    mkdir -p -- "$MTD_HPC_KRAKEN_HOST_WORK_DIR"
+    : > "$MTD_HPC_KRAKEN_HOST_INPUTS"
+
+    for i in $lsn; do
+        load_prepared_fastq_manifest_row "$i"
+        if [[ "$PREPARED_LAYOUT" == "pe" ]]; then
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                "$i" "pe" "$PREPARED_READ1" "$PREPARED_READ2" \
+                "$PIPELINE_TEMP_DIR/Report_host_${i}.txt" \
+                "$PIPELINE_TEMP_DIR/Report_host_${i}.kraken" \
+                "$PIPELINE_TEMP_DIR/${i}_host_1.fq" \
+                "$PIPELINE_TEMP_DIR/${i}_host_2.fq" \
+                "$PIPELINE_TEMP_DIR/${i}_non-host_raw_1.fq" \
+                "$PIPELINE_TEMP_DIR/${i}_non-host_raw_2.fq" \
+                >> "$MTD_HPC_KRAKEN_HOST_INPUTS"
+        else
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                "$i" "se" "$PREPARED_READ1" "-" \
+                "$PIPELINE_TEMP_DIR/Report_host_${i}.txt" \
+                "$PIPELINE_TEMP_DIR/Report_host_${i}.kraken" \
+                "$PIPELINE_TEMP_DIR/${i}_host.fq" "-" \
+                "$PIPELINE_TEMP_DIR/${i}_non-host_raw.fq" "-" \
+                >> "$MTD_HPC_KRAKEN_HOST_INPUTS"
+        fi
+    done
+
+    bash "$MTDIR/aux_scripts/hpc/mtd_hpc_kraken_stage.sh" \
+        --hpc-conf "$HPC_CONF" \
+        --stage kraken_host \
+        --input-manifest "$MTD_HPC_KRAKEN_HOST_INPUTS" \
+        --database "$DB_host" \
+        --confidence "$KRAKEN_HOST_CONF" \
+        --minimum-hit-groups "$KRAKEN_HOST_MIN_HIT_GROUPS" \
+        --input-gzip 1 \
+        --work-dir "$MTD_HPC_KRAKEN_HOST_WORK_DIR" \
+        --mtd-root "$MTDIR" || die "HPC Kraken2 host stage failed"
+fi
 
 sample_index=0
 for i in $lsn; do
@@ -4182,35 +4280,37 @@ for i in $lsn; do
 
     echo "============================================================"
 
-    kraken_host_args=(
-        --db "$DB_host"
-        --use-names
-        --confidence "$KRAKEN_HOST_CONF"
-        --minimum-hit-groups "$KRAKEN_HOST_MIN_HIT_GROUPS"
-        --report "$report"
-        --output "$kraken_output"
-        --threads "$threads"
-        --gzip-compressed
-    )
-
-    if [[ "$PREPARED_LAYOUT" == "pe" ]]; then
-        kraken_host_args+=(
-            --paired
-            --classified-out "$host_classified_pattern"
-            --unclassified-out "$host_unclassified_pattern"
-            "$PREPARED_READ1"
-            "$PREPARED_READ2"
+    if [[ -z "$HPC_CONF" ]]; then
+        kraken_host_args=(
+            --db "$DB_host"
+            --use-names
+            --confidence "$KRAKEN_HOST_CONF"
+            --minimum-hit-groups "$KRAKEN_HOST_MIN_HIT_GROUPS"
+            --report "$report"
+            --output "$kraken_output"
+            --threads "$threads"
+            --gzip-compressed
         )
-    else
-        kraken_host_args+=(
-            --classified-out "$host_classified_pattern"
-            --unclassified-out "$host_unclassified_pattern"
-            "$PREPARED_READ1"
-        )
-    fi
 
-    if ! kraken2 "${kraken_host_args[@]}"; then
-        die "Kraken2 host filtering failed for sample: $i"
+        if [[ "$PREPARED_LAYOUT" == "pe" ]]; then
+            kraken_host_args+=(
+                --paired
+                --classified-out "$host_classified_pattern"
+                --unclassified-out "$host_unclassified_pattern"
+                "$PREPARED_READ1"
+                "$PREPARED_READ2"
+            )
+        else
+            kraken_host_args+=(
+                --classified-out "$host_classified_pattern"
+                --unclassified-out "$host_unclassified_pattern"
+                "$PREPARED_READ1"
+            )
+        fi
+
+        if ! kraken2 "${kraken_host_args[@]}"; then
+            die "Kraken2 host filtering failed for sample: $i"
+        fi
     fi
 
     require_file \
@@ -4399,6 +4499,49 @@ printf 'sample\tmicro_classified_reads\tmicro_classified_pct\tmicro_unclassified
 # among the reads that were not classified as host.
 MICRO_HIGH_WARN=20
 
+if [[ -n "$HPC_CONF" ]]; then
+    MTD_HPC_KRAKEN_MICRO_RAW_WORK_DIR="$outputdr/hpc/kraken_micro_raw"
+    MTD_HPC_KRAKEN_MICRO_RAW_INPUTS="$MTD_HPC_KRAKEN_MICRO_RAW_WORK_DIR/inputs.tsv"
+    mkdir -p -- "$MTD_HPC_KRAKEN_MICRO_RAW_WORK_DIR"
+    : > "$MTD_HPC_KRAKEN_MICRO_RAW_INPUTS"
+
+    for i in $lsn; do
+        if [[ "$READ_LAYOUT" == "pe" ]]; then
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                "$i" "pe" \
+                "$PIPELINE_TEMP_DIR/${i}_non-host_raw_1.fq" \
+                "$PIPELINE_TEMP_DIR/${i}_non-host_raw_2.fq" \
+                "$PIPELINE_TEMP_DIR/Report_non-host.raw_${i}.txt" \
+                "$PIPELINE_TEMP_DIR/Report_non-host_raw_${i}.kraken" \
+                "$PIPELINE_TEMP_DIR/${i}_raw_cseqs_1.fq" \
+                "$PIPELINE_TEMP_DIR/${i}_raw_cseqs_2.fq" \
+                "$PIPELINE_TEMP_DIR/${i}_raw_ucseqs_1.fq" \
+                "$PIPELINE_TEMP_DIR/${i}_raw_ucseqs_2.fq" \
+                >> "$MTD_HPC_KRAKEN_MICRO_RAW_INPUTS"
+        else
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                "$i" "se" \
+                "$PIPELINE_TEMP_DIR/${i}_non-host_raw.fq" "-" \
+                "$PIPELINE_TEMP_DIR/Report_non-host.raw_${i}.txt" \
+                "$PIPELINE_TEMP_DIR/Report_non-host_raw_${i}.kraken" \
+                "$PIPELINE_TEMP_DIR/${i}_raw_cseqs.fq" "-" \
+                "$PIPELINE_TEMP_DIR/${i}_raw_ucseqs.fq" "-" \
+                >> "$MTD_HPC_KRAKEN_MICRO_RAW_INPUTS"
+        fi
+    done
+
+    bash "$MTDIR/aux_scripts/hpc/mtd_hpc_kraken_stage.sh" \
+        --hpc-conf "$HPC_CONF" \
+        --stage kraken_micro_raw \
+        --input-manifest "$MTD_HPC_KRAKEN_MICRO_RAW_INPUTS" \
+        --database "$DB_micro" \
+        --confidence "$KRAKEN_MICRO_CONF" \
+        --minimum-hit-groups "$KRAKEN_MICRO_MIN_HIT_GROUPS" \
+        --input-gzip 0 \
+        --work-dir "$MTD_HPC_KRAKEN_MICRO_RAW_WORK_DIR" \
+        --mtd-root "$MTDIR" || die "HPC raw microbiome Kraken2 stage failed"
+fi
+
 sample_index=0
 for i in $lsn; do
     sample_index=$((sample_index + 1))
@@ -4477,34 +4620,36 @@ for i in $lsn; do
         fi
     fi
 
-    kraken_micro_args=(
-        --db "$DB_micro"
-        --use-names
-        --confidence "$KRAKEN_MICRO_CONF"
-        --minimum-hit-groups "$KRAKEN_MICRO_MIN_HIT_GROUPS"
-        --report "$report"
-        --output "$kraken_output"
-        --threads "$threads"
-    )
-
-    if [[ "$READ_LAYOUT" == "pe" ]]; then
-        kraken_micro_args+=(
-            --paired
-            --classified-out "$raw_classified_pattern"
-            --unclassified-out "$raw_unclassified_pattern"
-            "$raw_nonhost_read1"
-            "$raw_nonhost_read2"
+    if [[ -z "$HPC_CONF" ]]; then
+        kraken_micro_args=(
+            --db "$DB_micro"
+            --use-names
+            --confidence "$KRAKEN_MICRO_CONF"
+            --minimum-hit-groups "$KRAKEN_MICRO_MIN_HIT_GROUPS"
+            --report "$report"
+            --output "$kraken_output"
+            --threads "$threads"
         )
-    else
-        kraken_micro_args+=(
-            --classified-out "$raw_classified_pattern"
-            --unclassified-out "$raw_unclassified_pattern"
-            "$raw_nonhost_read1"
-        )
-    fi
 
-    if ! kraken2 "${kraken_micro_args[@]}"; then
-        die "Kraken2 raw microbiome classification failed for sample: $i"
+        if [[ "$READ_LAYOUT" == "pe" ]]; then
+            kraken_micro_args+=(
+                --paired
+                --classified-out "$raw_classified_pattern"
+                --unclassified-out "$raw_unclassified_pattern"
+                "$raw_nonhost_read1"
+                "$raw_nonhost_read2"
+            )
+        else
+            kraken_micro_args+=(
+                --classified-out "$raw_classified_pattern"
+                --unclassified-out "$raw_unclassified_pattern"
+                "$raw_nonhost_read1"
+            )
+        fi
+
+        if ! kraken2 "${kraken_micro_args[@]}"; then
+            die "Kraken2 raw microbiome classification failed for sample: $i"
+        fi
     fi
 
     require_file \
@@ -5064,6 +5209,50 @@ if [[ "$valid_contaminant_list" == "1" ]]; then
 
     show_progress 35 "Reclassifying decontaminated non-host reads with Kraken2"
 
+    if [[ -n "$HPC_CONF" ]]; then
+        MTD_HPC_KRAKEN_MICRO_FINAL_WORK_DIR="$outputdr/hpc/kraken_micro_final"
+        MTD_HPC_KRAKEN_MICRO_FINAL_INPUTS="$MTD_HPC_KRAKEN_MICRO_FINAL_WORK_DIR/inputs.tsv"
+        mkdir -p -- "$MTD_HPC_KRAKEN_MICRO_FINAL_WORK_DIR"
+        : > "$MTD_HPC_KRAKEN_MICRO_FINAL_INPUTS"
+
+        for i in $lsn; do
+            set_microbiome_fastq_paths "$i"
+            if [[ "$READ_LAYOUT" == "pe" ]]; then
+                printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                    "$i" "pe" \
+                    "$PIPELINE_TEMP_DIR/$FINAL_NONHOST_R1" \
+                    "$PIPELINE_TEMP_DIR/$FINAL_NONHOST_R2" \
+                    "$PIPELINE_TEMP_DIR/$FINAL_KRAKEN_REPORT" \
+                    "$PIPELINE_TEMP_DIR/$FINAL_KRAKEN_OUTPUT" \
+                    "$PIPELINE_TEMP_DIR/$FINAL_CLASSIFIED_R1" \
+                    "$PIPELINE_TEMP_DIR/$FINAL_CLASSIFIED_R2" \
+                    "$PIPELINE_TEMP_DIR/$FINAL_UNCLASSIFIED_R1" \
+                    "$PIPELINE_TEMP_DIR/$FINAL_UNCLASSIFIED_R2" \
+                    >> "$MTD_HPC_KRAKEN_MICRO_FINAL_INPUTS"
+            else
+                printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                    "$i" "se" \
+                    "$PIPELINE_TEMP_DIR/$FINAL_NONHOST_R1" "-" \
+                    "$PIPELINE_TEMP_DIR/$FINAL_KRAKEN_REPORT" \
+                    "$PIPELINE_TEMP_DIR/$FINAL_KRAKEN_OUTPUT" \
+                    "$PIPELINE_TEMP_DIR/$FINAL_CLASSIFIED_R1" "-" \
+                    "$PIPELINE_TEMP_DIR/$FINAL_UNCLASSIFIED_R1" "-" \
+                    >> "$MTD_HPC_KRAKEN_MICRO_FINAL_INPUTS"
+            fi
+        done
+
+        bash "$MTDIR/aux_scripts/hpc/mtd_hpc_kraken_stage.sh" \
+            --hpc-conf "$HPC_CONF" \
+            --stage kraken_micro_final \
+            --input-manifest "$MTD_HPC_KRAKEN_MICRO_FINAL_INPUTS" \
+            --database "$DB_micro" \
+            --confidence "$KRAKEN_MICRO_CONF" \
+            --minimum-hit-groups "$KRAKEN_MICRO_MIN_HIT_GROUPS" \
+            --input-gzip 0 \
+            --work-dir "$MTD_HPC_KRAKEN_MICRO_FINAL_WORK_DIR" \
+            --mtd-root "$MTDIR" || die "HPC final microbiome Kraken2 stage failed"
+    fi
+
     sample_index=0
     for i in $lsn; do
         sample_index=$((sample_index + 1))
@@ -5095,34 +5284,36 @@ if [[ "$valid_contaminant_list" == "1" ]]; then
         echo "Final report: $FINAL_KRAKEN_REPORT"
         echo "============================================================"
 
-        kraken_final_args=(
-            --db "$DB_micro"
-            --use-names
-            --confidence "$KRAKEN_MICRO_CONF"
-            --minimum-hit-groups "$KRAKEN_MICRO_MIN_HIT_GROUPS"
-            --report "$FINAL_KRAKEN_REPORT"
-            --output "$FINAL_KRAKEN_OUTPUT"
-            --threads "$threads"
-        )
-
-        if [[ "$READ_LAYOUT" == "pe" ]]; then
-            kraken_final_args+=(
-                --paired
-                --classified-out "$final_classified_pattern"
-                --unclassified-out "$final_unclassified_pattern"
-                "$FINAL_NONHOST_R1"
-                "$FINAL_NONHOST_R2"
+        if [[ -z "$HPC_CONF" ]]; then
+            kraken_final_args=(
+                --db "$DB_micro"
+                --use-names
+                --confidence "$KRAKEN_MICRO_CONF"
+                --minimum-hit-groups "$KRAKEN_MICRO_MIN_HIT_GROUPS"
+                --report "$FINAL_KRAKEN_REPORT"
+                --output "$FINAL_KRAKEN_OUTPUT"
+                --threads "$threads"
             )
-        else
-            kraken_final_args+=(
-                --classified-out "$final_classified_pattern"
-                --unclassified-out "$final_unclassified_pattern"
-                "$FINAL_NONHOST_R1"
-            )
-        fi
 
-        if ! kraken2 "${kraken_final_args[@]}"; then
-            die "Final Kraken2 microbiome classification failed for sample: $i"
+            if [[ "$READ_LAYOUT" == "pe" ]]; then
+                kraken_final_args+=(
+                    --paired
+                    --classified-out "$final_classified_pattern"
+                    --unclassified-out "$final_unclassified_pattern"
+                    "$FINAL_NONHOST_R1"
+                    "$FINAL_NONHOST_R2"
+                )
+            else
+                kraken_final_args+=(
+                    --classified-out "$final_classified_pattern"
+                    --unclassified-out "$final_unclassified_pattern"
+                    "$FINAL_NONHOST_R1"
+                )
+            fi
+
+            if ! kraken2 "${kraken_final_args[@]}"; then
+                die "Final Kraken2 microbiome classification failed for sample: $i"
+            fi
         fi
 
         require_file \
@@ -5404,6 +5595,32 @@ echo "${g}[OK] Bracken distribution file found:${w} $BRACKEN_DIST"
 
 echo "Bracken threshold: $BRACKEN_THRESHOLD"
 
+if [[ -n "$HPC_CONF" ]]; then
+    MTD_HPC_BRACKEN_WORK_DIR="$outputdr/hpc/bracken"
+    MTD_HPC_BRACKEN_INPUTS="$MTD_HPC_BRACKEN_WORK_DIR/inputs.tsv"
+    mkdir -p -- "$MTD_HPC_BRACKEN_WORK_DIR"
+    : > "$MTD_HPC_BRACKEN_INPUTS"
+
+    for i in $lsn; do
+        printf '%s\t%s\t%s\t%s\t%s\n' \
+            "$i" \
+            "$PIPELINE_TEMP_DIR/Report_non-host_${i}.txt" \
+            "$PIPELINE_TEMP_DIR/Report_${i}.phylum.bracken" \
+            "$PIPELINE_TEMP_DIR/Report_${i}.genus.bracken" \
+            "$PIPELINE_TEMP_DIR/Report_${i}.species.bracken" \
+            >> "$MTD_HPC_BRACKEN_INPUTS"
+    done
+
+    bash "$MTDIR/aux_scripts/hpc/mtd_hpc_bracken_stage.sh" \
+        --hpc-conf "$HPC_CONF" \
+        --input-manifest "$MTD_HPC_BRACKEN_INPUTS" \
+        --database "$DB_micro" \
+        --read-length "$read_len" \
+        --threshold "$BRACKEN_THRESHOLD" \
+        --work-dir "$MTD_HPC_BRACKEN_WORK_DIR" \
+        --mtd-root "$MTDIR" || die "HPC Bracken stage failed"
+fi
+
 sample_index=0
 for i in $lsn; do
     sample_index=$((sample_index + 1))
@@ -5422,26 +5639,32 @@ for i in $lsn; do
         exit 1
     fi
 
-    "$BRACKEN_BIN" -d "$DB_micro" \
-        -i "Report_non-host_${i}.txt" \
-        -o "Report_$i.phylum.bracken" \
-        -r "$read_len" \
-        -l P \
-        -t "$BRACKEN_THRESHOLD"
+    if [[ -z "$HPC_CONF" ]]; then
+        "$BRACKEN_BIN" -d "$DB_micro" \
+            -i "Report_non-host_${i}.txt" \
+            -o "Report_$i.phylum.bracken" \
+            -r "$read_len" \
+            -l P \
+            -t "$BRACKEN_THRESHOLD"
 
-    "$BRACKEN_BIN" -d "$DB_micro" \
-        -i "Report_non-host_${i}.txt" \
-        -o "Report_$i.genus.bracken" \
-        -r "$read_len" \
-        -l G \
-        -t "$BRACKEN_THRESHOLD"
+        "$BRACKEN_BIN" -d "$DB_micro" \
+            -i "Report_non-host_${i}.txt" \
+            -o "Report_$i.genus.bracken" \
+            -r "$read_len" \
+            -l G \
+            -t "$BRACKEN_THRESHOLD"
 
-    "$BRACKEN_BIN" -d "$DB_micro" \
-        -i "Report_non-host_${i}.txt" \
-        -o "Report_$i.species.bracken" \
-        -r "$read_len" \
-        -l S \
-        -t "$BRACKEN_THRESHOLD"
+        "$BRACKEN_BIN" -d "$DB_micro" \
+            -i "Report_non-host_${i}.txt" \
+            -o "Report_$i.species.bracken" \
+            -r "$read_len" \
+            -l S \
+            -t "$BRACKEN_THRESHOLD"
+    fi
+
+    require_file "Report_$i.phylum.bracken" "Bracken phylum output for sample $i"
+    require_file "Report_$i.genus.bracken" "Bracken genus output for sample $i"
+    require_file "Report_$i.species.bracken" "Bracken species output for sample $i"
 done
 
 show_progress 45 "Combining Bracken outputs for downstream analyses"

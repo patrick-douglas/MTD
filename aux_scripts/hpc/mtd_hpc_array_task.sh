@@ -79,7 +79,9 @@ if ! mtd_hpc_outputs_exist "$expected_outputs"; then
     mtd_hpc_error "At least one expected output is missing or empty for task: $task_id"
     while IFS= read -r expected; do
         [[ -z "$expected" ]] && continue
-        [[ -s "$expected" ]] || mtd_hpc_error "Missing output: $expected"
+        if ! mtd_hpc_output_spec_is_valid "$expected"; then
+            mtd_hpc_error "Missing output: $(mtd_hpc_output_spec_path "$expected")"
+        fi
     done <<< "$expected_outputs"
     exit 90
 fi

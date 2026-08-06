@@ -32,13 +32,15 @@ Options:
                                direct: SSH to root@HOST for root operations.
   --database SOURCE=RELATIVE   Copy an additional database directory with
                                rsync into PREFIX/databases/RELATIVE. Repeatable.
-  --skip-default-databases     Do not auto-copy HUMAnN/ref_database and host
+  --skip-default-databases     Do not auto-copy HUMAnN/ref_database, the
+                               default kraken2DB_micro directory, or host
                                Magic-BLAST database directories.
-  --force-recreate-env         Remove and recreate MTD-Explorer-HPC env.
+  --force-recreate-env         Remove and recreate all node-local MTD envs.
   --dry-run                    Validate nodes and print mutating commands.
   --help                       Show this help.
 
-Complete HUMAnN/MetaPhlAn + Magic-BLAST nodes currently require x86_64 Linux.
+Complete HUMAnN/MetaPhlAn, Magic-BLAST, fastp, Kraken2 and Bracken nodes
+currently require x86_64 Linux.
 USAGE
 }
 
@@ -150,7 +152,11 @@ done
 REPO_ROOT="$(readlink -f "$REPO_ROOT")"
 [[ -s "$REPO_ROOT/MTD_explorer.sh" ]] || fatal "MTD Explorer repository not found: $REPO_ROOT"
 ENV_YML="$REPO_ROOT/Installation/HPC/MTD-Explorer-HPC.yml"
+FASTP_ENV_YML="$REPO_ROOT/Installation/MTD_fastp.yml"
+KRAKEN2_ENV_YML="$REPO_ROOT/Installation/MTD_kraken2.yml"
 [[ -s "$ENV_YML" ]] || fatal "HPC environment YAML not found: $ENV_YML"
+[[ -s "$FASTP_ENV_YML" ]] || fatal "fastp environment YAML not found: $FASTP_ENV_YML"
+[[ -s "$KRAKEN2_ENV_YML" ]] || fatal "Kraken2 environment YAML not found: $KRAKEN2_ENV_YML"
 
 case "$REMOTE_ROOT_MODE" in
     sudo|direct) ;;
@@ -251,6 +257,9 @@ copy_as_owner() {
 if (( SKIP_DEFAULT_DATABASES == 0 )); then
     [[ -d "$REPO_ROOT/HUMAnN/ref_database" ]] && \
         DATABASE_SPECS+=("$REPO_ROOT/HUMAnN/ref_database=MTD-Explorer/HUMAnN/ref_database")
+
+    [[ -d "$REPO_ROOT/kraken2DB_micro" ]] && \
+        DATABASE_SPECS+=("$REPO_ROOT/kraken2DB_micro=MTD-Explorer/kraken2DB_micro")
 
     for candidate in \
         "$REPO_ROOT"/*_blastdb \
@@ -398,10 +407,17 @@ for node in "${nodes[@]}"; do
     copy_as_owner scp -q "${SSH_OPTIONS[@]}" \
         "$ENV_YML" "$SSH_USER@$node:$PREFIX/config/MTD-Explorer-HPC.yml"
     copy_as_owner scp -q "${SSH_OPTIONS[@]}" \
+        "$FASTP_ENV_YML" "$SSH_USER@$node:$PREFIX/config/MTD_fastp.yml"
+    copy_as_owner scp -q "${SSH_OPTIONS[@]}" \
+        "$KRAKEN2_ENV_YML" "$SSH_USER@$node:$PREFIX/config/MTD_kraken2.yml"
+    copy_as_owner scp -q "${SSH_OPTIONS[@]}" \
         "$CONDARC_LOCAL" "$SSH_USER@$node:$PREFIX/config/condarc"
 
     if (( FORCE_RECREATE_ENV )); then
-        remote_root "$node" rm -rf -- "$PREFIX/envs/MTD-Explorer-HPC"
+        remote_root "$node" rm -rf -- \
+            "$PREFIX/envs/MTD-Explorer-HPC" \
+            "$PREFIX/envs/MTD_fastp" \
+            "$PREFIX/envs/MTD_kraken2"
     fi
 
     if ! remote_query "$node" test -x "$PREFIX/miniconda3/bin/conda"; then
@@ -410,23 +426,35 @@ for node in "${nodes[@]}"; do
         info "Using existing Miniconda on $node."
     fi
 
-    if ! remote_query "$node" test -d "$PREFIX/envs/MTD-Explorer-HPC/conda-meta"; then
-        remote_owner "$node" env \
-            PYTHONNOUSERSITE=1 \
-            CONDARC="$PREFIX/config/condarc" \
-            "$PREFIX/miniconda3/bin/conda" env create \
-            --prefix "$PREFIX/envs/MTD-Explorer-HPC" \
-            --file "$PREFIX/config/MTD-Explorer-HPC.yml"
-    else
-        info "Updating existing MTD-Explorer-HPC environment on $node."
-        remote_owner "$node" env \
-            PYTHONNOUSERSITE=1 \
-            CONDARC="$PREFIX/config/condarc" \
-            "$PREFIX/miniconda3/bin/conda" env update \
-            --prefix "$PREFIX/envs/MTD-Explorer-HPC" \
-            --file "$PREFIX/config/MTD-Explorer-HPC.yml" \
-            --prune
-    fi
+    install_or_update_environment() {
+        local environment_name="$1"
+        local yaml_name="$2"
+        local environment_prefix="$PREFIX/envs/$environment_name"
+        local yaml_path="$PREFIX/config/$yaml_name"
+
+        if ! remote_query "$node" test -d "$environment_prefix/conda-meta"; then
+            info "Creating $environment_name environment on $node."
+            remote_owner "$node" env \
+                PYTHONNOUSERSITE=1 \
+                CONDARC="$PREFIX/config/condarc" \
+                "$PREFIX/miniconda3/bin/conda" env create \
+                --prefix "$environment_prefix" \
+                --file "$yaml_path"
+        else
+            info "Updating existing $environment_name environment on $node."
+            remote_owner "$node" env \
+                PYTHONNOUSERSITE=1 \
+                CONDARC="$PREFIX/config/condarc" \
+                "$PREFIX/miniconda3/bin/conda" env update \
+                --prefix "$environment_prefix" \
+                --file "$yaml_path" \
+                --prune
+        fi
+    }
+
+    install_or_update_environment "MTD-Explorer-HPC" "MTD-Explorer-HPC.yml"
+    install_or_update_environment "MTD_fastp" "MTD_fastp.yml"
+    install_or_update_environment "MTD_kraken2" "MTD_kraken2.yml"
 
     for spec in "${DATABASE_SPECS[@]}"; do
         source_path="${spec%%=*}"
@@ -466,6 +494,21 @@ for node in "${nodes[@]}"; do
             "PYTHONNOUSERSITE=1 '$PREFIX/miniconda3/bin/conda' run --prefix '$PREFIX/envs/MTD-Explorer-HPC' $version_command"
     done
 
+    remote_owner "$node" env PYTHONNOUSERSITE=1 \
+        "$PREFIX/miniconda3/bin/conda" run --prefix "$PREFIX/envs/MTD_fastp" \
+        fastp --version
+    remote_owner "$node" env PYTHONNOUSERSITE=1 \
+        "$PREFIX/miniconda3/bin/conda" run --prefix "$PREFIX/envs/MTD_kraken2" \
+        kraken2 --version
+    if ! remote_owner "$node" env PYTHONNOUSERSITE=1 \
+        "$PREFIX/miniconda3/bin/conda" run --prefix "$PREFIX/envs/MTD_kraken2" \
+        bracken -v
+    then
+        remote_owner "$node" env PYTHONNOUSERSITE=1 \
+            "$PREFIX/miniconda3/bin/conda" run --prefix "$PREFIX/envs/MTD_kraken2" \
+            bracken -h >/dev/null
+    fi
+
     configured_at="$(date --iso-8601=seconds)"
     manifest_local="$(mktemp)"
     cat > "$manifest_local" <<MANIFEST
@@ -476,6 +519,8 @@ uid=$OWNER_UID
 gid=$OWNER_GID
 prefix=$PREFIX
 environment=$PREFIX/envs/MTD-Explorer-HPC
+fastp_environment=$PREFIX/envs/MTD_fastp
+kraken2_environment=$PREFIX/envs/MTD_kraken2
 database_root=$PREFIX/databases
 scratch_root=$PREFIX/tmp
 configured_at=$configured_at

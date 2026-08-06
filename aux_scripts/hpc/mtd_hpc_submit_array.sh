@@ -123,6 +123,26 @@ mtd_hpc_select_resource_policy() {
             fi
             ;;
 
+        fastp)
+            if declare -p MTD_HPC_FASTP_SBATCH_EXTRA_ARGS >/dev/null 2>&1; then
+                selected_policy="MTD_HPC_FASTP_SBATCH_EXTRA_ARGS"
+                stage_sbatch_args=("${MTD_HPC_FASTP_SBATCH_EXTRA_ARGS[@]}")
+            else
+                selected_policy="MTD_HPC_SBATCH_EXTRA_ARGS (fallback)"
+                stage_sbatch_args=("${MTD_HPC_SBATCH_EXTRA_ARGS[@]}")
+            fi
+            ;;
+
+        kraken_host|kraken_micro_raw|kraken_micro_final|bracken)
+            if declare -p MTD_HPC_KRAKEN_SBATCH_EXTRA_ARGS >/dev/null 2>&1; then
+                selected_policy="MTD_HPC_KRAKEN_SBATCH_EXTRA_ARGS"
+                stage_sbatch_args=("${MTD_HPC_KRAKEN_SBATCH_EXTRA_ARGS[@]}")
+            else
+                selected_policy="MTD_HPC_SBATCH_EXTRA_ARGS (fallback)"
+                stage_sbatch_args=("${MTD_HPC_SBATCH_EXTRA_ARGS[@]}")
+            fi
+            ;;
+
         *)
             selected_policy="MTD_HPC_SBATCH_EXTRA_ARGS"
             stage_sbatch_args=("${MTD_HPC_SBATCH_EXTRA_ARGS[@]}")
