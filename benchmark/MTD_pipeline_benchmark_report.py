@@ -42,6 +42,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repo-dir", required=True, type=Path)
     parser.add_argument("--dataset-label", required=True)
     parser.add_argument("--machine", required=True)
+    parser.add_argument("--execution-mode", required=True, choices=("local", "hpc"))
+    parser.add_argument("--hpc-conf", required=True)
     parser.add_argument("--hostid", required=True)
     parser.add_argument("--threads", required=True, type=int)
     parser.add_argument("--top-n", required=True, type=int)
@@ -90,6 +92,24 @@ def read_summary(path: Path) -> dict[str, str]:
             if key:
                 values[key] = row.get("value", "")
     return values
+
+
+def read_metric_rows(path: Path) -> list[tuple[str, str, str]]:
+    rows: list[tuple[str, str, str]] = []
+    if not path.is_file():
+        return rows
+    with path.open(newline="", encoding="utf-8", errors="replace") as handle:
+        for row in csv.DictReader(handle, delimiter="\t"):
+            metric = row.get("metric", "")
+            if metric:
+                rows.append(
+                    (
+                        metric,
+                        row.get("value", ""),
+                        row.get("unit_or_definition", ""),
+                    )
+                )
+    return rows
 
 
 def read_samplesheet(path: Path) -> tuple[list[str], list[list[str]]]:
@@ -405,6 +425,12 @@ def main() -> int:
     )
 
     generic_summary = read_summary(run_dir / "summary.tsv")
+    hpc_metric_rows = (
+        read_metric_rows(run_dir / "hpc_summary.tsv")
+        if args.execution_mode == "hpc"
+        else []
+    )
+    hpc_summary = {metric: value for metric, value, _unit in hpc_metric_rows}
     git_commit = command_output(["git", "rev-parse", "HEAD"], cwd=repo)
     git_branch = command_output(["git", "branch", "--show-current"], cwd=repo)
     git_status = command_output(["git", "status", "--short"], cwd=repo)
@@ -421,6 +447,20 @@ def main() -> int:
         and output_exists
         and output_file_count > 0
     )
+    hpc_collection_status = (
+        hpc_summary.get("hpc_collection_status", "MISSING")
+        if args.execution_mode == "hpc"
+        else "NA"
+    )
+    benchmark_data_status = (
+        "FAIL"
+        if not overall_pass
+        else (
+            "PASS"
+            if args.execution_mode == "local" or hpc_collection_status == "PASS"
+            else "PASS_WITH_PARTIAL_HPC_METRICS"
+        )
+    )
 
     extraction_mode = (
         "disabled"
@@ -430,7 +470,12 @@ def main() -> int:
 
     metrics: list[tuple[str, object, str]] = [
         ("pipeline_benchmark_status", "PASS" if overall_pass else "FAIL", "text"),
-        ("machine", args.machine, "text"),
+        ("benchmark_data_status", benchmark_data_status, "text"),
+        ("execution_mode", args.execution_mode, "local or hpc"),
+        ("hpc_collection_status", hpc_collection_status, "PASS, PARTIAL, NO_JOBS, MISSING, or NA"),
+        ("machine", args.machine, "controller machine or cluster label"),
+        ("controller_threads", args.threads, "count"),
+        ("hpc_configuration", args.hpc_conf if args.execution_mode == "hpc" else "NA", "path"),
         ("dataset_label", args.dataset_label, "text"),
         ("samplesheet", str(samplesheet), "path"),
         ("samplesheet_sha256", samplesheet_sha, "SHA-256"),
@@ -441,7 +486,7 @@ def main() -> int:
         ("missing_referenced_input_files", missing_inputs, "count"),
         ("referenced_input_total_bytes", input_total_bytes, "bytes"),
         ("host_taxid", args.hostid, "NCBI TaxID"),
-        ("threads", args.threads, "count"),
+        ("threads", args.threads, "backward-compatible alias for controller_threads"),
         ("requested_read_layout", args.read_layout, "text"),
         ("analysis_mode", args.analysis_mode, "text"),
         ("alignment", args.alignment, "text"),
@@ -518,6 +563,11 @@ def main() -> int:
         ("mtd_explorer_sha256", script_sha, "SHA-256"),
     ]
 
+    existing_metric_names = {metric for metric, _value, _unit in metrics}
+    metrics.extend(
+        row for row in hpc_metric_rows if row[0] not in existing_metric_names
+    )
+
     with (run_dir / "pipeline_summary.tsv").open(
         "w", newline="", encoding="utf-8"
     ) as handle:
@@ -525,14 +575,51 @@ def main() -> int:
         writer.writerow(["metric", "value", "unit_or_definition"])
         writer.writerows(metrics)
 
+    with (run_dir / "benchmark_comparison_row.tsv").open(
+        "w", newline="", encoding="utf-8"
+    ) as handle:
+        writer = csv.writer(handle, delimiter="\t")
+        writer.writerow(
+            [
+                "dataset",
+                "execution_mode",
+                "machine_or_cluster",
+                "host_taxid",
+                "controller_threads",
+                "slurm_nodes_used",
+                "slurm_node_names",
+                "end_to_end_wall_seconds",
+                "slurm_compute_makespan_seconds",
+                "status",
+                "git_commit",
+            ]
+        )
+        writer.writerow(
+            [
+                args.dataset_label,
+                args.execution_mode,
+                args.machine,
+                args.hostid,
+                args.threads,
+                hpc_summary.get("slurm_nodes_used", "1" if args.execution_mode == "local" else "NA"),
+                hpc_summary.get("slurm_node_names", args.machine if args.execution_mode == "local" else "NA"),
+                generic_summary.get("wall_time_seconds", "NA"),
+                hpc_summary.get("slurm_compute_makespan_seconds", "NA"),
+                benchmark_data_status,
+                git_commit,
+            ]
+        )
+
     summary_lines = [
         "MTD Explorer pipeline benchmark summary",
         "======================================",
-        f"Status: {'PASS' if overall_pass else 'FAIL'}",
-        f"Machine: {args.machine}",
+        f"Status: {benchmark_data_status}",
+        f"Pipeline status: {'PASS' if overall_pass else 'FAIL'}",
+        f"Execution mode: {args.execution_mode}",
+        f"Machine/cluster: {args.machine}",
         f"Dataset: {args.dataset_label}",
         f"Host TaxID: {args.hostid}",
-        f"Threads: {args.threads}",
+        f"Controller threads: {args.threads}",
         f"Alignment: {args.alignment}",
         f"Extraction: {extraction_mode}",
         f"Exit status: {args.exit_status}",
@@ -546,6 +633,18 @@ def main() -> int:
             "Mean system CPU busy: "
             f"{generic_summary.get('mean_system_cpu_busy', 'NA')}%"
         ),
+        *(
+            [
+                f"HPC collection status: {hpc_collection_status}",
+                f"Slurm nodes used: {hpc_summary.get('slurm_nodes_used', 'NA')}",
+                f"Slurm node names: {hpc_summary.get('slurm_node_names', 'NA')}",
+                f"Slurm jobs: {hpc_summary.get('slurm_job_count', 'NA')}",
+                f"Slurm task attempts: {hpc_summary.get('slurm_array_task_attempt_count', 'NA')}",
+                f"Slurm compute makespan: {hpc_summary.get('slurm_compute_makespan_seconds', 'NA')} seconds",
+            ]
+            if args.execution_mode == "hpc"
+            else []
+        ),
         f"Output files: {output_file_count}",
         f"Output size: {output_total_bytes} bytes",
         f"Recorded stages: {stage_count}",
@@ -555,11 +654,22 @@ def main() -> int:
         "Important files:",
         f"  {run_dir / 'summary.tsv'}",
         f"  {run_dir / 'pipeline_summary.tsv'}",
+        f"  {run_dir / 'benchmark_comparison_row.tsv'}",
         f"  {run_dir / 'pipeline_steps.tsv'}",
         f"  {run_dir / 'resource_samples.csv'}",
         f"  {run_dir / 'output_inventory.tsv'}",
         f"  {run_dir / 'console_clean.log'}",
     ]
+    if args.execution_mode == "hpc":
+        summary_lines.extend(
+            [
+                f"  {run_dir / 'hpc_summary.tsv'}",
+                f"  {run_dir / 'hpc_stage_summary.tsv'}",
+                f"  {run_dir / 'hpc_node_summary.tsv'}",
+                f"  {run_dir / 'hpc_jobs.tsv'}",
+                f"  {run_dir / 'hpc_tasks.tsv'}",
+            ]
+        )
     (run_dir / "pipeline_summary.txt").write_text(
         "\n".join(summary_lines) + "\n", encoding="utf-8"
     )

@@ -8,6 +8,7 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PIPELINE_SCRIPT="$REPO_DIR/MTD_explorer.sh"
 RESOURCE_WRAPPER="$SCRIPT_DIR/MTD_benchmark_install.sh"
 REPORTER="$SCRIPT_DIR/MTD_pipeline_benchmark_report.py"
+SLURM_REPORTER="$SCRIPT_DIR/MTD_slurm_benchmark_report.py"
 
 MACHINE_NAME=""
 DATASET_LABEL=""
@@ -28,6 +29,8 @@ ANALYSIS_MODE="auto"
 USE_BLAST=1
 EXTRACT_READS=0
 ASSUME_YES=0
+EXECUTION_MODE="auto"
+HPC_CONF=""
 EXTRA_MTD_ARGS=()
 
 usage() {
@@ -57,8 +60,11 @@ Pipeline options:
       --read-layout MODE      auto, se, or pe; default: auto
       --analysis-mode MODE    auto, comparison, or exploratory; default: auto
       --hisat2                Use HISAT2 instead of Magic-BLAST
+      --hpc-conf FILE          Enable the Slurm backend with this configuration
 
 Benchmark options:
+      --execution-mode MODE    auto, local, or hpc; default: auto
+                              auto selects hpc when --hpc-conf is supplied
       --interval SECONDS      Resource sampling interval; default: 5
       --benchmark-root DIR    Benchmark output root
                               default: \$HOME/MTD_pipeline_benchmarks
@@ -72,6 +78,18 @@ Example for the standard Biomphalaria glabrata benchmark
     --dataset Bglabrata_PRJNA1306560 \\
     --input /path/to/B.glabrata_fastq/samplesheet.csv \\
     --output "\$HOME/test_MTD_explorer_B.glabrata" \\
+    --hostid 6526 \\
+    --threads 20 \\
+    --run-number 1
+
+HPC benchmark using the same dataset:
+  bash benchmark/$PROGRAM_NAME \\
+    --machine LBN_Slurm \\
+    --execution-mode hpc \\
+    --hpc-conf "\$HOME/MTD-Explorer/Installation/HPC/MTD_hpc_slurm.conf" \\
+    --dataset Bglabrata_PRJNA1306560 \\
+    --input /path/to/B.glabrata_fastq/samplesheet.csv \\
+    --output "\$HOME/test_MTD_explorer_B.glabrata.hpc" \\
     --hostid 6526 \\
     --threads 20 \\
     --run-number 1
@@ -196,6 +214,20 @@ while (($# > 0)); do
             ANALYSIS_MODE="${2,,}"
             shift 2
             ;;
+        --execution-mode)
+            (($# >= 2)) || die "$1 requires a value."
+            EXECUTION_MODE="${2,,}"
+            shift 2
+            ;;
+        --hpc-conf)
+            (($# >= 2)) || die "$1 requires a value."
+            HPC_CONF="$2"
+            shift 2
+            ;;
+        --hpc-conf=*)
+            HPC_CONF="${1#*=}"
+            shift
+            ;;
         --hisat2)
             USE_BLAST=0
             shift
@@ -230,6 +262,9 @@ for extra_arg in "${EXTRA_MTD_ARGS[@]}"; do
         --extract-microbiome-reads|--extract-microbiome-reads-top-n|--extract-microbiome-reads-top-n=*)
             die "Do not pass extraction options after --. Use benchmark options --extract and --top-n instead."
             ;;
+        --hpc-conf|--hpc-conf=*)
+            die "Do not pass --hpc-conf after --. Use the benchmark option --hpc-conf instead."
+            ;;
     esac
 done
 
@@ -237,6 +272,31 @@ done
 [[ -n "$SAMPLESHEET" ]] || die "Samplesheet is required."
 [[ -n "$PIPELINE_OUTPUT" ]] || die "Pipeline output directory is required."
 [[ -n "$HOST_ID" ]] || die "Host TaxID is required."
+
+case "$EXECUTION_MODE" in
+    auto|local|hpc) ;;
+    *) die "--execution-mode must be auto, local, or hpc." ;;
+esac
+
+if [[ -n "$HPC_CONF" ]]; then
+    HPC_CONF="$(expand_home "$HPC_CONF")"
+fi
+
+if [[ "$EXECUTION_MODE" == "auto" ]]; then
+    if [[ -n "$HPC_CONF" ]]; then
+        EXECUTION_MODE="hpc"
+    else
+        EXECUTION_MODE="local"
+    fi
+fi
+
+if [[ "$EXECUTION_MODE" == "hpc" ]]; then
+    [[ -n "$HPC_CONF" ]] || die "HPC mode requires --hpc-conf FILE."
+    [[ -s "$HPC_CONF" ]] || die "HPC configuration not found or empty: $HPC_CONF"
+    HPC_CONF="$(readlink -f -- "$HPC_CONF")"
+else
+    [[ -z "$HPC_CONF" ]] || die "--hpc-conf cannot be used with --execution-mode local."
+fi
 
 [[ "$HOST_ID" =~ ^[0-9]+$ ]] || die "--hostid must be a positive integer."
 (( HOST_ID > 0 )) || die "--hostid must be greater than zero."
@@ -311,10 +371,19 @@ command -v git >/dev/null 2>&1 || die "git is required."
 [[ -s "$PIPELINE_SCRIPT" ]] || die "Missing pipeline script: $PIPELINE_SCRIPT"
 [[ -s "$RESOURCE_WRAPPER" ]] || die "Missing benchmark wrapper: $RESOURCE_WRAPPER"
 [[ -s "$REPORTER" ]] || die "Missing pipeline reporter: $REPORTER"
+[[ -s "$SLURM_REPORTER" ]] || die "Missing Slurm reporter: $SLURM_REPORTER"
 
 bash -n "$PIPELINE_SCRIPT" || die "MTD_explorer.sh failed Bash syntax validation."
 bash -n "$RESOURCE_WRAPPER" || die "MTD_benchmark_install.sh failed Bash syntax validation."
 python3 -m py_compile "$REPORTER" || die "Pipeline reporter failed Python syntax validation."
+python3 -m py_compile "$SLURM_REPORTER" || die "Slurm reporter failed Python syntax validation."
+
+if [[ "$EXECUTION_MODE" == "hpc" ]]; then
+    for slurm_command in sbatch squeue sacct scontrol; do
+        command -v "$slurm_command" >/dev/null 2>&1 || \
+            die "HPC benchmark requires Slurm command: $slurm_command"
+    done
+fi
 
 HELP_OUTPUT="$(bash "$PIPELINE_SCRIPT" --help 2>&1 || true)"
 for required_option in \
@@ -326,6 +395,11 @@ do
     grep -q -- "$required_option" <<< "$HELP_OUTPUT" || \
         die "Current MTD_explorer.sh does not advertise required option: $required_option"
 done
+
+if [[ "$EXECUTION_MODE" == "hpc" ]]; then
+    grep -q -- "--hpc-conf" <<< "$HELP_OUTPUT" || \
+        die "Current MTD_explorer.sh does not advertise required option: --hpc-conf"
+fi
 
 if (( EXTRACT_READS )); then
     for required_option in \
@@ -368,7 +442,7 @@ else
     EXTRACT_LABEL="no_extract"
 fi
 
-BENCHMARK_LABEL="${MACHINE_SAFE}_${DATASET_SAFE}_warm_host${HOST_ID}_${ALIGNMENT_LABEL}_${EXTRACT_LABEL}_${READ_LAYOUT}_t${THREADS}_r${RUN_NUMBER}"
+BENCHMARK_LABEL="${MACHINE_SAFE}_${DATASET_SAFE}_${EXECUTION_MODE}_warm_host${HOST_ID}_${ALIGNMENT_LABEL}_${EXTRACT_LABEL}_${READ_LAYOUT}_controller_t${THREADS}_r${RUN_NUMBER}"
 
 CMD=(
     bash "$PIPELINE_SCRIPT"
@@ -379,6 +453,10 @@ CMD=(
     --read-layout "$READ_LAYOUT"
     --analysis-mode "$ANALYSIS_MODE"
 )
+
+if [[ "$EXECUTION_MODE" == "hpc" ]]; then
+    CMD+=(--hpc-conf "$HPC_CONF")
+fi
 
 if (( USE_BLAST )); then
     CMD+=(--blast)
@@ -400,12 +478,16 @@ BENCHMARK_ROOT="$(readlink -f -- "$BENCHMARK_ROOT")"
 
 printf '%s\n' "============================================================"
 printf '%s\n' "MTD EXPLORER PIPELINE BENCHMARK PRECHECK"
-printf '%-22s %s\n' "Machine:" "$MACHINE_NAME"
+printf '%-22s %s\n' "Machine/cluster:" "$MACHINE_NAME"
+printf '%-22s %s\n' "Execution mode:" "$EXECUTION_MODE"
+if [[ "$EXECUTION_MODE" == "hpc" ]]; then
+    printf '%-22s %s\n' "HPC configuration:" "$HPC_CONF"
+fi
 printf '%-22s %s\n' "Dataset:" "$DATASET_LABEL"
 printf '%-22s %s\n' "Samplesheet:" "$SAMPLESHEET"
 printf '%-22s %s\n' "Pipeline output:" "$PIPELINE_OUTPUT"
 printf '%-22s %s\n' "Host TaxID:" "$HOST_ID"
-printf '%-22s %s\n' "Threads:" "$THREADS"
+printf '%-22s %s\n' "Controller threads:" "$THREADS"
 printf '%-22s %s\n' "Read layout:" "$READ_LAYOUT"
 printf '%-22s %s\n' "Analysis mode:" "$ANALYSIS_MODE"
 printf '%-22s %s\n' "Alignment:" "$ALIGNMENT_LABEL"
@@ -512,6 +594,22 @@ if [[ -n "$LATEST_BENCHMARK" && -d "$LATEST_BENCHMARK" ]]; then
     } > "$LATEST_BENCHMARK/pipeline_command.sh"
     chmod +x "$LATEST_BENCHMARK/pipeline_command.sh"
 
+    if [[ "$EXECUTION_MODE" == "hpc" ]]; then
+        cp -- "$HPC_CONF" "$LATEST_BENCHMARK/hpc_configuration.conf"
+        set +e
+        python3 "$SLURM_REPORTER" \
+            --run-dir "$LATEST_BENCHMARK" \
+            --pipeline-output "$PIPELINE_OUTPUT" \
+            --hpc-conf "$HPC_CONF" \
+            --controller-host "$(hostname -s 2>/dev/null || hostname)" \
+            --controller-threads "$THREADS"
+        SLURM_REPORT_STATUS=$?
+        set -e
+        if (( SLURM_REPORT_STATUS != 0 )); then
+            warn "Slurm-specific report failed with exit status $SLURM_REPORT_STATUS."
+        fi
+    fi
+
     set +e
     python3 "$REPORTER" \
         --run-dir "$LATEST_BENCHMARK" \
@@ -520,6 +618,8 @@ if [[ -n "$LATEST_BENCHMARK" && -d "$LATEST_BENCHMARK" ]]; then
         --repo-dir "$REPO_DIR" \
         --dataset-label "$DATASET_LABEL" \
         --machine "$MACHINE_NAME" \
+        --execution-mode "$EXECUTION_MODE" \
+        --hpc-conf "${HPC_CONF:-NA}" \
         --hostid "$HOST_ID" \
         --threads "$THREADS" \
         --top-n "$TOP_N" \
@@ -557,6 +657,12 @@ if [[ -n "$LATEST_BENCHMARK" && -d "$LATEST_BENCHMARK" ]]; then
         printf 'Pipeline summary: %s\n' "$LATEST_BENCHMARK/pipeline_summary.tsv"
     [[ -s "$LATEST_BENCHMARK/pipeline_steps.tsv" ]] && \
         printf 'Stage timings: %s\n' "$LATEST_BENCHMARK/pipeline_steps.tsv"
+    [[ -s "$LATEST_BENCHMARK/hpc_summary.tsv" ]] && \
+        printf 'HPC summary: %s\n' "$LATEST_BENCHMARK/hpc_summary.tsv"
+    [[ -s "$LATEST_BENCHMARK/hpc_stage_summary.tsv" ]] && \
+        printf 'HPC stage summary: %s\n' "$LATEST_BENCHMARK/hpc_stage_summary.tsv"
+    [[ -s "$LATEST_BENCHMARK/hpc_node_summary.tsv" ]] && \
+        printf 'HPC node summary: %s\n' "$LATEST_BENCHMARK/hpc_node_summary.tsv"
     [[ -s "$LATEST_BENCHMARK/failure_report.txt" ]] && \
         printf 'Failure report: %s\n' "$LATEST_BENCHMARK/failure_report.txt"
 fi
