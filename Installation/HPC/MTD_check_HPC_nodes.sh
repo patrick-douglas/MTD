@@ -151,11 +151,11 @@ if (( kraken_db_count == 0 )); then
 fi
 
 printf '[INFO] CPUs visible on node: %s\n' "$(nproc)"
-awk '/^MemTotal:/ {printf "[INFO] Total memory: %s kB\\n", $2}' /proc/meminfo
+awk '/^MemTotal:/ {printf "[INFO] Total memory: %s kB\n", $2}' /proc/meminfo
 df -Pk "$prefix/tmp" |
-    awk 'NR == 2 {
-        printf "[INFO] Node-local scratch free space: %s kB (%s)\\n", $4, $6
-    }'
+awk 'NR == 2 {
+    printf "[INFO] Node-local scratch free space: %s kB (filesystem: %s)\n", $4, $6
+}'
 printf '[OK] Node-local stage-in/stage-out scratch is writable: %s/tmp\n' "$prefix"
 printf '[OK] %s: MTD Explorer HPC runtime is ready.\n' "$(hostname -s)"
 REMOTE
