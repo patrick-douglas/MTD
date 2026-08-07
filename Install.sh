@@ -3167,6 +3167,98 @@ build_bracken_database() {
     fi
 }
 
+cleanup_microbiome_bacteria_download_archives() {
+    local database="$dir/kraken2DB_micro"
+    local cleanup_dir="$database/library/bacteria/all"
+    local cache_root="$offline_files_folder/Kraken2DB_micro"
+    local cache_dir="$cache_root/library/bacteria/all"
+    local bracken_distribution="$database/database${read_len}mers.kmer_distrib"
+    local database_real=""
+    local cleanup_real=""
+    local cache_root_real=""
+    local required_file=""
+
+    # Cleanup is allowed only after the final Kraken2 database is valid.
+    for required_file in hash.k2d opts.k2d taxo.k2d; do
+        if [[ ! -s "$database/$required_file" ]]; then
+            log_error "Refusing microbiome cleanup: required Kraken2 database file is missing or empty:"
+            log_error "  $database/$required_file"
+            return 1
+        fi
+    done
+
+    # Bracken must already be completely built before removing the
+    # downloaded bacterial genome archives.
+    if [[ ! -s "$bracken_distribution" ]]; then
+        log_error "Refusing microbiome cleanup: Bracken database file is missing or empty:"
+        log_error "  $bracken_distribution"
+        return 1
+    fi
+
+    # Preserve the consolidated bacterial library. Only the redundant
+    # downloaded archives under bacteria/all are removed.
+    if [[ ! -s "$database/library/bacteria/library.fna" ]]; then
+        log_error "Refusing microbiome cleanup: consolidated bacterial library is missing or empty:"
+        log_error "  $database/library/bacteria/library.fna"
+        return 1
+    fi
+
+    if [[ ! -d "$cleanup_dir" ]]; then
+        log_info "No final bacterial download archive directory needs cleanup:"
+        log_info "  $cleanup_dir"
+        return 0
+    fi
+
+    database_real="$(readlink -f -- "$database")" || return 1
+    cleanup_real="$(readlink -f -- "$cleanup_dir")" || return 1
+    cache_root_real="$(readlink -f -- "$cache_root")" || return 1
+
+    # Safety check: the deletion target must resolve exactly inside the
+    # installed Kraken2 database.
+    if [[ "$cleanup_real" != "$database_real/library/bacteria/all" ]]; then
+        log_error "Refusing microbiome cleanup because the target resolves outside the final database:"
+        log_error "  Target:   $cleanup_dir"
+        log_error "  Resolves: $cleanup_real"
+        return 1
+    fi
+
+    # Absolute protection for the persistent -o cache.
+    case "$cleanup_real" in
+        "$cache_root_real" | "$cache_root_real"/*)
+            log_error "Refusing microbiome cleanup because the target resolves inside the persistent cache:"
+            log_error "  $cleanup_real"
+            return 1
+            ;;
+    esac
+
+    log_info "Removing redundant bacterial genome download archives from the completed database:"
+    log_info "  $cleanup_dir"
+
+    log_info "Persistent installation cache will be preserved:"
+    log_info "  $cache_dir"
+
+    if ! rm -rf -- "$cleanup_dir"; then
+        log_error "Could not remove redundant bacterial genome download archives:"
+        log_error "  $cleanup_dir"
+        return 1
+    fi
+
+    if [[ -e "$cleanup_dir" || -L "$cleanup_dir" ]]; then
+        log_error "Bacterial download archive directory still exists after cleanup:"
+        log_error "  $cleanup_dir"
+        return 1
+    fi
+
+    if [[ ! -d "$cache_dir" ]]; then
+        log_error "Persistent bacterial genome cache is unexpectedly missing after cleanup:"
+        log_error "  $cache_dir"
+        return 1
+    fi
+
+    log_ok "Removed redundant bacterial genome download archives from the final Kraken2 database."
+    log_ok "Persistent bacterial genome cache preserved."
+}
+
 validate_installed_humann_databases() {
     local humann_dir="$1"
     local chocophlan_dir="$humann_dir/chocophlan"
@@ -3651,9 +3743,13 @@ main() {
         "Building the Bracken database" \
         build_bracken_database
 
-    show_progress 94 "Installing and configuring HUMAnN databases"
-    install_humann_databases
+    show_progress 92 "Cleaning redundant Kraken2 bacterial genome archives"
+    run_required_command \
+        "Cleaning redundant bacterial genome archives from the final Kraken2 database" \
+        cleanup_microbiome_bacteria_download_archives
 
+show_progress 94 "Installing and configuring HUMAnN databases"
+install_humann_databases
     show_progress 98 "Running final R package validation"
     show_r_package_versions
 
