@@ -496,7 +496,8 @@ while (( attempt <= total_attempt_limit )); do
 
     job_id="$(sbatch "${sbatch_args[@]}" \
         "$SCRIPT_DIR/mtd_hpc_array_task.sh" \
-        "$MTD_HPC_CONF" "$current_manifest" "$success_dir" "$MTD_ROOT")"
+        "$MTD_HPC_CONF" "$current_manifest" "$success_dir" "$MTD_ROOT" \
+        "$STAGE" "$round_history_label")"
     job_id="${job_id%%;*}"
     [[ "$job_id" =~ ^[0-9]+$ ]] || mtd_hpc_die "Could not parse Slurm job ID: $job_id"
 
@@ -518,18 +519,33 @@ while (( attempt <= total_attempt_limit )); do
     done
 
     sacct_output=""
+    sacct_fields=""
     for _ in 1 2 3 4 5; do
-        sacct_output="$(
-            sacct -n -P -j "$job_id" \
-                --format=JobIDRaw,State,ExitCode 2>/dev/null || true
-        )"
+        for candidate_fields in \
+            'JobIDRaw,JobName,State,ExitCode,Submit,Eligible,Start,End,ElapsedRaw,NodeList,NCPUS,CPUTimeRAW,TotalCPU,MaxRSS,MaxVMSize,AveRSS,ReqMem,AllocTRES' \
+            'JobIDRaw,JobName,State,ExitCode,Submit,Start,End,ElapsedRaw,NodeList,NCPUS,CPUTimeRAW,TotalCPU,MaxRSS,ReqMem' \
+            'JobIDRaw,State,ExitCode'
+        do
+            sacct_output="$(
+                sacct -n -P -j "$job_id" \
+                    --format="$candidate_fields" 2>/dev/null || true
+            )"
+            if [[ -n "$sacct_output" ]]; then
+                sacct_fields="$candidate_fields"
+                break
+            fi
+        done
         [[ -n "$sacct_output" ]] && break
         sleep 2
     done
 
-    printf '%s\n' "$sacct_output" > "$WORK_DIR/${STAGE}.${round_tag}.sacct.tsv"
     {
-        printf '# round=%s job_id=%s\n' "$round_history_label" "$job_id"
+        printf '# fields=%s\n' "${sacct_fields:-unavailable}"
+        printf '%s\n' "$sacct_output"
+    } > "$WORK_DIR/${STAGE}.${round_tag}.sacct.tsv"
+    {
+        printf '# round=%s job_id=%s fields=%s\n' \
+            "$round_history_label" "$job_id" "${sacct_fields:-unavailable}"
         printf '%s\n' "$sacct_output"
     } >> "$sacct_history"
     active_job_id=""
