@@ -1,43 +1,35 @@
-/virushostdb.genomic.fna.gz
-
-# Local Virus-Host DB mirror staging
-/build/virushost_mirror/
-
-# Local/generated files
-.~lock.*
-HUMAnN/
-MTD_R_package_health.tsv
-R412_package_health.tsv
-blastdb_*/
-build/
-curl_*.tar.gz
-custom_R_libs/
-hisat2_index_*/
-kraken2DB_*/
-offlineCachePath
-ref_*/
-update_fix/*_logs/
-viral_genomes_combined.fna
-.gitignore
-# Python cache
+# ============================================================
+# Python-generated files
+# ============================================================
 __pycache__/
-*.pyc
-.gitignore
-Tools/graphlan/src/__pycache__/__init__.cpython-38.pyc
-Tools/graphlan/src/__pycache__/graphlan_lib.cpython-38.pyc
-Tools/graphlan/src/__pycache__/pyphlan.cpython-38.pyc
+*.py[cod]
 
+# ============================================================
+# MTD Explorer generated/local directories
+# ============================================================
+HUMAnN/
+Installation/HPC/cache/
 
-/Install_profiled.sh
-condaPath
-
-# Local temporary and diagnostic outputs
-/temp/
-
-# MkDocs local environment and build output
-.venv-docs/
+blastdb_6526/
+build/
+custom_R_libs/
+hisat2_index_6526/
+kraken2DB_6526/
+kraken2DB_micro/
+ref_6526/
 site/
-Tools/graphlan/src/__pycache__/__init__.cpython-38.pyc
-Tools/graphlan/src/__pycache__/graphlan_lib.cpython-38.pyc
-Tools/graphlan/src/__pycache__/pyphlan.cpython-38.pyc
+temp/
+
+# ============================================================
+# Local installation/configuration files
+# ============================================================
+Install_profiled.sh
+condaPath
+offlineCachePath
+
+# ============================================================
+# Update/install temporary data
+# ============================================================
+update_fix/MTD_R_install_logs/
+update_fix/R412_post_recreate_logs/
 update_fix/bioc_tarball_cache/
