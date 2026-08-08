@@ -1,0 +1,8 @@
+name: MTD_featurecounts
+
+channels:
+  - conda-forge
+  - bioconda
+
+dependencies:
+  - subread=2.1.1

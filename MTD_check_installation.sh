@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # MTD Explorer installation checker
-# Version: 2026.07.28-r13
+# Version: 2026.08.08-r14
 #
 # Current installation architecture:
 #   - repository location is detected from this checker, never assumed as ~/MTD;
@@ -18,7 +18,7 @@
 # ==============================================================================
 set -uo pipefail
 
-CHECKER_VERSION="2026.07.28-r13"
+CHECKER_VERSION="2026.08.08-r14"
 
 SCRIPT_DIR="$(
     cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &&
@@ -758,6 +758,7 @@ check_source_tree() {
         HostSpecies.csv
         Installation/MTD.yml
         Installation/MTD_fastp.yml
+        Installation/MTD_featurecounts.yml
         Installation/MTD_humann.yml
         Installation/MTD_kraken2.yml
         Installation/MTD_orgdb.yml
@@ -836,6 +837,12 @@ check_source_tree() {
         "$INSTALL_SH" 'KRAKEN_ENV_NAME="MTD_kraken2"'
     check_text_marker "Installer contract" "Kraken environment file" \
         "$INSTALL_SH" 'Installation/MTD_kraken2.yml'
+    check_text_marker "Installer contract" "dedicated featureCounts environment" \
+        "$INSTALL_SH" 'MTD_featurecounts'
+    check_text_marker "Installer contract" "featureCounts environment file" \
+        "$INSTALL_SH" 'Installation/MTD_featurecounts.yml'
+    check_text_marker "Runtime contract" "isolated featureCounts runtime" \
+        "$MTD_DIR/MTD_explorer.sh" 'FEATURECOUNTS_ENV_NAME="${MTD_FEATURECOUNTS_ENV_NAME:-MTD_featurecounts}"'
     check_text_marker "Installer contract" "manifest helper directory" \
         "$INSTALL_SH" 'MANIFEST_SCRIPTS_DIR="$dir/aux_scripts/manifest_scripts"'
     check_text_marker "Installer contract" "Kraken helper directory" \
@@ -963,7 +970,7 @@ check_conda_stack() {
     record PASS "Conda" "executable" "$CONDA_PATH/bin/conda"
 
     for env_name in \
-        base MTD_fastp MTD MTD_kraken2 MTD_humann py2 halla0820 R412
+        base MTD_fastp MTD MTD_featurecounts MTD_kraken2 MTD_humann py2 halla0820 R412
     do
         check_conda_env "$env_name" 1
     done
@@ -974,6 +981,7 @@ check_conda_stack() {
     check_conda_env MTD_orgdb "$expect_orgdb"
 
     check_env_version MTD_fastp fastp 1.3.6 WARN
+    check_env_version MTD_featurecounts subread 2.1.1 FAIL
     check_env_version MTD r-base 4.0.3 WARN
     check_env_version MTD hisat2 2.2.1 WARN
     check_env_version MTD_kraken2 kraken2 2.17.1 FAIL
@@ -986,6 +994,12 @@ check_conda_stack() {
     for command_name in fastp R Rscript; do
         check_env_command MTD_fastp "$command_name"
     done
+
+
+    # MTD_FEATURECOUNTS_ISOLATED_RUNTIME_V1
+    # Keep validating legacy featureCounts in MTD above for dependency-stack
+    # integrity, while production quantification uses MTD_featurecounts.
+    check_env_command MTD_featurecounts featureCounts
 
     for command_name in \
         python R Rscript hisat2 hisat2-build bowtie2 samtools featureCounts \

@@ -2440,6 +2440,59 @@ validate_humann_environment() {
     log_info "  $metaphlan_version"
 }
 
+
+# ------------------------------------------------------------------------------
+# Dedicated featureCounts runtime
+# ------------------------------------------------------------------------------
+# MTD_FEATURECOUNTS_ISOLATED_RUNTIME_V1
+# Keep the legacy Subread/featureCounts package in MTD unchanged.  Host read
+# quantification uses this isolated modern runtime instead.
+validate_featurecounts_environment() {
+    local env_name="MTD_featurecounts"
+    local expected_version="2.1.1"
+    local package_version=""
+    local cli_version=""
+
+    require_env_command "$env_name" featureCounts
+
+    package_version="$(
+        conda list \
+            --name "$env_name" \
+            subread \
+            2>/dev/null |
+        awk '$1 == "subread" {
+            print $2
+            exit
+        }'
+    )"
+
+    cli_version="$(
+        conda run -n "$env_name" \
+            featureCounts -v 2>&1 |
+        sed -nE \
+            's/.*v([0-9]+(\.[0-9]+)+).*/\1/p' |
+        head -n 1
+    )"
+
+    if [[ "$package_version" != "$expected_version" ]]; then
+        log_error "Unexpected Subread package version in $env_name."
+        log_error "Expected: $expected_version"
+        log_error "Observed: ${package_version:-unknown}"
+        exit 1
+    fi
+
+    if [[ "$cli_version" != "$expected_version" ]]; then
+        log_error "Unexpected featureCounts executable version in $env_name."
+        log_error "Expected: $expected_version"
+        log_error "Observed: ${cli_version:-unknown}"
+        exit 1
+    fi
+
+    log_ok "Dedicated $env_name environment passed validation."
+    log_info "  Subread package: $package_version"
+    log_info "  featureCounts:   $cli_version"
+}
+
 create_conda_environments() {
     safe_conda_deactivate
 
@@ -2450,6 +2503,13 @@ create_conda_environments() {
     run_required_command \
         "Creating MTD environment" \
         conda env create -f "$dir/Installation/MTD.yml"
+
+
+    run_required_command \
+        "Creating dedicated MTD_featurecounts environment" \
+        conda env create -f "$dir/Installation/MTD_featurecounts.yml"
+
+    validate_featurecounts_environment
 
 
     run_required_command \
@@ -3589,6 +3649,8 @@ validate_all_software_before_databases() {
     log_info "Database downloads and builds will not start unless every check passes."
 
     require_env_command MTD_fastp fastp
+
+    validate_featurecounts_environment
 
     require_env_command MTD Rscript
     require_env_command MTD hisat2-build

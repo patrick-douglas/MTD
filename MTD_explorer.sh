@@ -982,6 +982,67 @@ conda deactivate
 conda activate MTD
 
 # ------------------------------------------------------------
+# Dedicated featureCounts 2.1.1 runtime
+# ------------------------------------------------------------
+# MTD_FEATURECOUNTS_ISOLATED_RUNTIME_V1
+# The legacy Subread/featureCounts package remains installed in the MTD
+# environment for dependency stability.  Quantification is performed only by
+# the isolated modern runtime below, without adding its bin directory to PATH.
+# ------------------------------------------------------------
+FEATURECOUNTS_ENV_NAME="${MTD_FEATURECOUNTS_ENV_NAME:-MTD_featurecounts}"
+FEATURECOUNTS_ENV_DIR="$condapath/envs/$FEATURECOUNTS_ENV_NAME"
+FEATURECOUNTS_BIN="$FEATURECOUNTS_ENV_DIR/bin/featureCounts"
+FEATURECOUNTS_EXPECTED_VERSION="2.1.1"
+
+if [[ ! -d "$FEATURECOUNTS_ENV_DIR" ]]; then
+    die "Dedicated featureCounts environment was not found: $FEATURECOUNTS_ENV_DIR
+Run Install.sh to create the $FEATURECOUNTS_ENV_NAME environment."
+fi
+
+if [[ ! -x "$FEATURECOUNTS_BIN" ]]; then
+    die "featureCounts executable was not found or is not executable:
+$FEATURECOUNTS_BIN"
+fi
+
+FEATURECOUNTS_PACKAGE_VERSION="$(
+    conda list \
+        --name "$FEATURECOUNTS_ENV_NAME" \
+        subread \
+        2>/dev/null |
+    awk '$1 == "subread" {
+        print $2
+        exit
+    }'
+)"
+
+FEATURECOUNTS_VERSION="$(
+    "$FEATURECOUNTS_BIN" -v 2>&1 |
+        sed -nE \
+            's/.*v([0-9]+(\.[0-9]+)+).*/\1/p' |
+        head -n 1
+)"
+
+if [[ "$FEATURECOUNTS_PACKAGE_VERSION" != "$FEATURECOUNTS_EXPECTED_VERSION" ]]; then
+    die "Unexpected Subread package version in $FEATURECOUNTS_ENV_NAME.
+Expected: $FEATURECOUNTS_EXPECTED_VERSION
+Observed: ${FEATURECOUNTS_PACKAGE_VERSION:-unknown}
+Executable: $FEATURECOUNTS_BIN"
+fi
+
+if [[ "$FEATURECOUNTS_VERSION" != "$FEATURECOUNTS_EXPECTED_VERSION" ]]; then
+    die "Unexpected featureCounts version in $FEATURECOUNTS_ENV_NAME.
+Expected: $FEATURECOUNTS_EXPECTED_VERSION
+Observed: ${FEATURECOUNTS_VERSION:-unknown}
+Executable: $FEATURECOUNTS_BIN"
+fi
+
+echo "${g}[INFO] featureCounts runtime:${w}"
+echo " Environment:     $FEATURECOUNTS_ENV_NAME"
+echo " Subread package: $FEATURECOUNTS_PACKAGE_VERSION"
+echo " Version:         $FEATURECOUNTS_VERSION"
+echo " Executable:      $FEATURECOUNTS_BIN"
+
+# ------------------------------------------------------------
 # Dedicated Kraken2 2.17.1 runtime
 # ------------------------------------------------------------
 # Kraken2 is isolated from the legacy MTD environment because
@@ -1754,10 +1815,11 @@ write_methods_log() {
             "Host downstream analysis" \
             "featureCounts" \
             "paired_end_mode" \
-            "-p plus --countReadPairs when supported" \
+            "-p plus --countReadPairs" \
             "Paired-end alignments are counted as fragments/read pairs"
         csv_row "Host downstream analysis" "Magic-BLAST" "blast_database" "$DB_blast" "Magic-BLAST database selected from --hostid"
         csv_row "Host downstream analysis" "HISAT2" "hisat2_database" "$DB_hisat2" "HISAT2 database selected from --hostid"
+        csv_row "Host downstream analysis" "featureCounts" "conda_environment" "$FEATURECOUNTS_ENV_NAME" "Dedicated environment used for host read quantification"
         csv_row "Host downstream analysis" "featureCounts" "gtf_file" "$gtf" "GTF annotation selected from --hostid"
         csv_row "Host downstream analysis" "featureCounts" "output" "$outputdr/host_counts.txt" "Host count matrix output"
         csv_row \
@@ -1889,7 +1951,7 @@ write_methods_log() {
         csv_row "Software path" "metaphlan" "path" "$HUMANN_METAPHLAN_BIN" "Dedicated MTD_humann executable path"
         csv_row "Software path" "magicblast" "path" "$(get_tool_path magicblast)" "Executable path"
         csv_row "Software path" "hisat2" "path" "$(get_tool_path hisat2)" "Executable path"
-        csv_row "Software path" "featureCounts" "path" "$(get_tool_path featureCounts)" "Executable path"
+        csv_row "Software path" "featureCounts" "path" "$FEATURECOUNTS_BIN" "Dedicated MTD_featurecounts executable path"
         csv_row "Software path" "samtools" "path" "$(get_tool_path samtools)" "Executable path"
 
         # Software versions, best effort
@@ -1903,7 +1965,7 @@ write_methods_log() {
         csv_row "Software version" "metaphlan" "version" "$(run_humann_tool "$HUMANN_METAPHLAN_BIN" --version 2>&1 | head -n 1 | sed 's/\r//g')" "Version from dedicated MTD_humann environment"
         csv_row "Software version" "magicblast" "version" "$(get_tool_version 'magicblast -version')" "Best-effort version capture"
         csv_row "Software version" "hisat2" "version" "$(get_tool_version 'hisat2 --version')" "Best-effort version capture"
-        csv_row "Software version" "featureCounts" "version" "$(get_tool_version 'featureCounts -v')" "Best-effort version capture"
+        csv_row "Software version" "featureCounts" "version" "$FEATURECOUNTS_VERSION" "Validated dedicated runtime version"
         csv_row "Software version" "samtools" "version" "$(get_tool_version 'samtools --version')" "Best-effort version capture"
 
     } > "$methods_csv"
@@ -7166,7 +7228,7 @@ done
 # PE:
 #   declare paired-end input with -p
 #   explicitly count fragments/read pairs with --countReadPairs
-#   when supported by the installed featureCounts version
+#   using the isolated validated featureCounts 2.1.1 runtime
 # ------------------------------------------------------------
 
 echo "${g}featureCounts${w}"
@@ -7180,66 +7242,19 @@ featurecounts_args=(
 if [[ "$READ_LAYOUT" == "pe" ]]; then
     featurecounts_args+=(
         -p
+        --countReadPairs
     )
 
-    # featureCounts 2.x may not advertise every supported long
-    # option when invoked with -h. Inspect both usage forms and use
-    # the reported version as a guarded fallback.
-    featurecounts_usage="$(
-        {
-            featureCounts 2>&1 || true
-            featureCounts -h 2>&1 || true
-        }
-    )"
-
-    featurecounts_version="$(
-        featureCounts -v 2>&1 |
-            sed -nE \
-                's/.*v([0-9]+(\.[0-9]+)+).*/\1/p' |
-            head -n 1
-    )"
-
-    featurecounts_has_count_read_pairs=0
-
-    if grep -Fq -- \
-        '--countReadPairs' \
-        <<< "$featurecounts_usage"
-    then
-        featurecounts_has_count_read_pairs=1
-    elif [[ -n "$featurecounts_version" ]]; then
-
-        featurecounts_lowest_version="$(
-            printf '%s\n%s\n' \
-                "2.0.2" \
-                "$featurecounts_version" |
-                sort -V |
-                head -n 1
-        )"
-
-        if [[ "$featurecounts_lowest_version" == "2.0.2" ]]; then
-            featurecounts_has_count_read_pairs=1
-        fi
-    fi
-
-    echo "[INFO] featureCounts executable:"
-    echo "  $(command -v featureCounts)"
-    echo "[INFO] featureCounts version:"
-    echo "  ${featurecounts_version:-unknown}"
-
-    if [[ "$featurecounts_has_count_read_pairs" -eq 1 ]]; then
-        featurecounts_args+=(
-            --countReadPairs
-        )
-
-        echo "[INFO] featureCounts paired-end mode:"
-        echo "  -p --countReadPairs"
-    else
-        echo "${y}[WARNING] Installed featureCounts does not support --countReadPairs.${w}"
-        echo "[WARNING] Using legacy paired-end behavior with -p only."
-    fi
+    echo "[INFO] featureCounts paired-end mode:"
+    echo "  -p --countReadPairs"
 else
     echo "[INFO] featureCounts single-end mode."
 fi
+
+echo "[INFO] featureCounts executable:"
+echo "  $FEATURECOUNTS_BIN"
+echo "[INFO] featureCounts version:"
+echo "  $FEATURECOUNTS_VERSION"
 
 featurecounts_args+=(
     "${host_sam_files[@]}"
@@ -7254,7 +7269,7 @@ echo "SAM inputs: ${#host_sam_files[@]}"
 printf '  %s\n' "${host_sam_files[@]}"
 echo "============================================================"
 
-if ! featureCounts "${featurecounts_args[@]}"; then
+if ! "$FEATURECOUNTS_BIN" "${featurecounts_args[@]}"; then
     die "featureCounts failed for host alignments."
 fi
 
