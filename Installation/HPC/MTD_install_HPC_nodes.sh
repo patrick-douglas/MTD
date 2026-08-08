@@ -32,6 +32,10 @@ Options:
                                direct: SSH to root@HOST for root operations.
   --database SOURCE=RELATIVE   Copy an additional database directory with
                                rsync into PREFIX/databases/RELATIVE. Repeatable.
+  --database-distribution MODE
+                               direct or propagate. Default: direct.
+                               propagate uses complete nodes from --node-list
+                               as one-at-a-time sources for pending nodes.
   --skip-default-databases     Do not auto-copy HUMAnN/ref_database, the
                                default kraken2DB_micro directory, or host
                                Magic-BLAST database directories.
@@ -51,6 +55,7 @@ PREFIX="/MTD_explorer_HPC"
 REPO_ROOT="$REPO_ROOT_DEFAULT"
 SSH_USER=""
 REMOTE_ROOT_MODE="sudo"
+DATABASE_DISTRIBUTION="direct"
 SKIP_DEFAULT_DATABASES=0
 FORCE_RECREATE_ENV=0
 DRY_RUN=0
@@ -93,6 +98,8 @@ while [[ $# -gt 0 ]]; do
         --remote-root-mode=*) REMOTE_ROOT_MODE="${1#*=}"; shift ;;
         --database) need_value "$1" "${2:-}"; DATABASE_SPECS+=("$2"); shift 2 ;;
         --database=*) DATABASE_SPECS+=("${1#*=}"); shift ;;
+        --database-distribution) need_value "$1" "${2:-}"; DATABASE_DISTRIBUTION="$2"; shift 2 ;;
+        --database-distribution=*) DATABASE_DISTRIBUTION="${1#*=}"; shift ;;
         --skip-default-databases) SKIP_DEFAULT_DATABASES=1; shift ;;
         --force-recreate-env) FORCE_RECREATE_ENV=1; shift ;;
         --dry-run) DRY_RUN=1; shift ;;
@@ -162,6 +169,13 @@ case "$REMOTE_ROOT_MODE" in
     sudo|direct) ;;
     *) fatal "--remote-root-mode must be sudo or direct." ;;
 esac
+case "$DATABASE_DISTRIBUTION" in
+    direct|propagate) ;;
+    *) fatal "--database-distribution must be direct or propagate." ;;
+esac
+if [[ "$DATABASE_DISTRIBUTION" == "propagate" && -z "$NODE_LIST" ]]; then
+    fatal "--database-distribution propagate requires --node-list."
+fi
 [[ -n "$SSH_USER" ]] || SSH_USER="$OWNER_USER"
 [[ "$SSH_USER" == "$OWNER_USER" ]] || \
     fatal "This release requires --ssh-user to equal --user so copied files retain operational ownership."
@@ -297,6 +311,7 @@ info "Repository: $REPO_ROOT"
 info "Node-local prefix: $PREFIX"
 info "Nodes: ${nodes[*]}"
 info "Database directories: ${#DATABASE_SPECS[@]}"
+info "Database distribution: $DATABASE_DISTRIBUTION"
 
 CACHE_DIR="$REPO_ROOT/Installation/HPC/cache"
 mkdir -p -- "$CACHE_DIR"
@@ -456,17 +471,119 @@ for node in "${nodes[@]}"; do
     install_or_update_environment "MTD_fastp" "MTD_fastp.yml"
     install_or_update_environment "MTD_kraken2" "MTD_kraken2.yml"
 
+    remote_root "$node" chown -R "$OWNER_UID:$OWNER_GID" "$PREFIX"
+done
+
+database_target_is_complete() {
+    local node="$1"
+    local spec source_path relative_target changes
+
+    (( DRY_RUN == 0 )) || return 1
     for spec in "${DATABASE_SPECS[@]}"; do
         source_path="${spec%%=*}"
         relative_target="${spec#*=}"
-        remote_root "$node" install -d -o "$OWNER_UID" -g "$OWNER_GID" -m 0755 \
+        remote_query "$node" test -d "$PREFIX/databases/$relative_target" || return 1
+        changes="$(run_as_owner rsync -aHn --delete --itemize-changes \
+            -e "ssh ${SSH_OPTIONS[*]}" \
+            "$source_path/" "$SSH_USER@$node:$PREFIX/databases/$relative_target/")" || return 1
+        [[ -z "$changes" ]] || return 1
+    done
+}
+
+copy_databases_from_master() {
+    local destination="$1"
+    local spec source_path relative_target
+
+    for spec in "${DATABASE_SPECS[@]}"; do
+        source_path="${spec%%=*}"
+        relative_target="${spec#*=}"
+        remote_root "$destination" install -d -o "$OWNER_UID" -g "$OWNER_GID" -m 0755 \
             "$PREFIX/databases/$relative_target"
-        info "Synchronizing database to $node: $relative_target"
+        info "Synchronizing database master -> $destination: $relative_target"
         copy_as_owner rsync -aH --delete --info=progress2 \
             -e "ssh ${SSH_OPTIONS[*]}" \
-            "$source_path/" "$SSH_USER@$node:$PREFIX/databases/$relative_target/"
+            "$source_path/" "$SSH_USER@$destination:$PREFIX/databases/$relative_target/"
+    done
+}
+
+copy_databases_from_node() {
+    local source="$1"
+    local destination="$2"
+    local spec relative_target
+
+    remote_query "$source" ssh "${SSH_OPTIONS[@]}" "$SSH_USER@$destination" true || \
+        fatal "Source $source cannot connect non-interactively to $SSH_USER@$destination."
+    for spec in "${DATABASE_SPECS[@]}"; do
+        relative_target="${spec#*=}"
+        remote_root "$destination" install -d -o "$OWNER_UID" -g "$OWNER_GID" -m 0755 \
+            "$PREFIX/databases/$relative_target"
+        info "Synchronizing database $source -> $destination: $relative_target"
+        remote_owner "$source" rsync -aH --delete --info=progress2 \
+            -e "ssh ${SSH_OPTIONS[*]}" \
+            "$PREFIX/databases/$relative_target/" \
+            "$SSH_USER@$destination:$PREFIX/databases/$relative_target/"
+    done
+}
+
+if [[ "$DATABASE_DISTRIBUTION" == "direct" ]]; then
+    for node in "${nodes[@]}"; do
+        copy_databases_from_master "$node"
+    done
+else
+    ready_sources=(master)
+    pending_nodes=()
+    for node in "${nodes[@]}"; do
+        if database_target_is_complete "$node"; then
+            info "Using node with complete database targets as a source: $node"
+            ready_sources+=("$node")
+        else
+            pending_nodes+=("$node")
+        fi
     done
 
+    while (( ${#pending_nodes[@]} > 0 )); do
+        round_destinations=()
+        round_sources=()
+        round_pids=()
+        assignments=${#ready_sources[@]}
+        (( assignments > ${#pending_nodes[@]} )) && assignments=${#pending_nodes[@]}
+
+        for (( index=0; index<assignments; index++ )); do
+            source="${ready_sources[$index]}"
+            destination="${pending_nodes[$index]}"
+            round_sources+=("$source")
+            round_destinations+=("$destination")
+            if [[ "$source" == "master" ]]; then
+                copy_databases_from_master "$destination" &
+            else
+                copy_databases_from_node "$source" "$destination" &
+            fi
+            round_pids+=("$!")
+        done
+
+        round_failed=0
+        for (( index=0; index<assignments; index++ )); do
+            if ! wait "${round_pids[$index]}"; then
+                printf '[ERROR] Database transfer failed: %s -> %s\n' \
+                    "${round_sources[$index]}" "${round_destinations[$index]}" >&2
+                round_failed=1
+            fi
+        done
+        (( round_failed == 0 )) || fatal "Database propagation stopped after a failed transfer."
+
+        for destination in "${round_destinations[@]}"; do
+            if (( DRY_RUN == 0 )); then
+                database_target_is_complete "$destination" || \
+                    fatal "Database validation failed after transfer to $destination."
+            fi
+            ready_sources+=("$destination")
+            ok "Database targets complete; promoted to source: $destination"
+        done
+        pending_nodes=("${pending_nodes[@]:assignments}")
+    done
+fi
+
+for node in "${nodes[@]}"; do
     remote_root "$node" chown -R "$OWNER_UID:$OWNER_GID" "$PREFIX"
 
     if remote_query "$node" test -d "$PREFIX/databases/MTD-Explorer/HUMAnN/ref_database"; then
