@@ -267,6 +267,22 @@ copy_as_owner() {
     run_as_owner "$@"
 }
 
+# OpenSSH joins remote command arguments with spaces instead of preserving
+# their original argument boundaries. Shell-quote every argument when a
+# command (notably rsync -e) must retain an argument containing spaces.
+remote_owner_quoted() {
+    local node="$1"
+    shift
+    local remote_command
+    printf -v remote_command '%q ' "$@"
+
+    if (( DRY_RUN )); then
+        printf '[DRY-RUN] ssh %q %s\n' "$SSH_USER@$node" "$remote_command"
+        return 0
+    fi
+    remote_query "$node" "$remote_command"
+}
+
 # Build database copy list. Relative targets mirror the main repository.
 if (( SKIP_DEFAULT_DATABASES == 0 )); then
     [[ -d "$REPO_ROOT/HUMAnN/ref_database" ]] && \
@@ -518,7 +534,7 @@ copy_databases_from_node() {
         remote_root "$destination" install -d -o "$OWNER_UID" -g "$OWNER_GID" -m 0755 \
             "$PREFIX/databases/$relative_target"
         info "Synchronizing database $source -> $destination: $relative_target"
-        remote_owner "$source" rsync -aH --delete --info=progress2 \
+        remote_owner_quoted "$source" rsync -aH --delete --info=progress2 \
             -e "ssh ${SSH_OPTIONS[*]}" \
             "$PREFIX/databases/$relative_target/" \
             "$SSH_USER@$destination:$PREFIX/databases/$relative_target/"
