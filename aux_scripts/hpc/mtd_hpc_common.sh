@@ -87,6 +87,16 @@ mtd_hpc_load_config() {
     : "${MTD_HPC_SCRATCH_RESERVE_GB:=10}"
     : "${MTD_HPC_FASTP_SCRATCH_MULTIPLIER:=3}"
     : "${MTD_HPC_KRAKEN_SCRATCH_MULTIPLIER:=3}"
+    : "${MTD_HPC_REMOTE_INPUT_FROM_SUBMIT_HOST:=1}"
+    : "${MTD_HPC_SUBMIT_SSH_CONNECT_TIMEOUT:=10}"
+
+    # Cluster-wide transfer throttling. The shared lock directory itself is
+    # supplied by mtd_hpc_submit_array.sh for each submitted stage.
+    # A value of 0 disables the corresponding global throttle.
+    : "${MTD_HPC_STAGEIN_MAX_CONCURRENT:=1}"
+    : "${MTD_HPC_STAGEOUT_MAX_CONCURRENT:=1}"
+    : "${MTD_HPC_TRANSFER_LOCK_POLL_SECONDS:=1}"
+    : "${MTD_HPC_TRANSFER_LOCK_STALE_SECONDS:=300}"
 
     if ! declare -p MTD_HPC_SBATCH_EXTRA_ARGS >/dev/null 2>&1; then
         MTD_HPC_SBATCH_EXTRA_ARGS=(--exclusive --nodes=1 --mem=0)
@@ -152,12 +162,35 @@ mtd_hpc_load_config() {
         MTD_HPC_CLEAN_LOCAL_ON_SUCCESS \
         MTD_HPC_CLEAN_LOCAL_ON_FAILURE \
         MTD_HPC_RETRY_EXCLUDE_FAILED_NODES \
-        MTD_HPC_FINAL_SUBMIT_NODE_FALLBACK
+        MTD_HPC_FINAL_SUBMIT_NODE_FALLBACK \
+        MTD_HPC_REMOTE_INPUT_FROM_SUBMIT_HOST
     do
         boolean_value="${!boolean_name}"
         [[ "$boolean_value" == "0" || "$boolean_value" == "1" ]] || \
             mtd_hpc_die "$boolean_name must be 0 or 1." || return 1
     done
+
+    [[ "$MTD_HPC_SUBMIT_SSH_CONNECT_TIMEOUT" =~ ^[0-9]+$ ]] && \
+       (( MTD_HPC_SUBMIT_SSH_CONNECT_TIMEOUT >= 1 )) || \
+        mtd_hpc_die "MTD_HPC_SUBMIT_SSH_CONNECT_TIMEOUT must be an integer >= 1." || return 1
+
+    local transfer_limit_name transfer_limit_value
+    for transfer_limit_name in \
+        MTD_HPC_STAGEIN_MAX_CONCURRENT \
+        MTD_HPC_STAGEOUT_MAX_CONCURRENT
+    do
+        transfer_limit_value="${!transfer_limit_name}"
+        [[ "$transfer_limit_value" =~ ^[0-9]+$ ]] || \
+            mtd_hpc_die "$transfer_limit_name must be an integer >= 0." || return 1
+    done
+
+    [[ "$MTD_HPC_TRANSFER_LOCK_POLL_SECONDS" =~ ^[0-9]+$ ]] && \
+       (( MTD_HPC_TRANSFER_LOCK_POLL_SECONDS >= 1 )) || \
+        mtd_hpc_die "MTD_HPC_TRANSFER_LOCK_POLL_SECONDS must be an integer >= 1." || return 1
+
+    [[ "$MTD_HPC_TRANSFER_LOCK_STALE_SECONDS" =~ ^[0-9]+$ ]] && \
+       (( MTD_HPC_TRANSFER_LOCK_STALE_SECONDS >= 1 )) || \
+        mtd_hpc_die "MTD_HPC_TRANSFER_LOCK_STALE_SECONDS must be an integer >= 1." || return 1
 
     [[ "$MTD_HPC_LOCAL_SCRATCH_ROOT" == /* ]] || \
         mtd_hpc_die "MTD_HPC_LOCAL_SCRATCH_ROOT must be an absolute path." || return 1
@@ -174,6 +207,9 @@ mtd_hpc_load_config() {
     export MTD_HPC_CLEAN_LOCAL_ON_SUCCESS MTD_HPC_CLEAN_LOCAL_ON_FAILURE
     export MTD_HPC_SCRATCH_RESERVE_GB
     export MTD_HPC_FASTP_SCRATCH_MULTIPLIER MTD_HPC_KRAKEN_SCRATCH_MULTIPLIER
+    export MTD_HPC_REMOTE_INPUT_FROM_SUBMIT_HOST MTD_HPC_SUBMIT_SSH_CONNECT_TIMEOUT
+    export MTD_HPC_STAGEIN_MAX_CONCURRENT MTD_HPC_STAGEOUT_MAX_CONCURRENT
+    export MTD_HPC_TRANSFER_LOCK_POLL_SECONDS MTD_HPC_TRANSFER_LOCK_STALE_SECONDS
     export MTD_HPC_MAX_ATTEMPTS MTD_HPC_RETRY_DELAY_SECONDS
     export MTD_HPC_RETRY_EXCLUDE_FAILED_NODES
     export MTD_HPC_FINAL_SUBMIT_NODE_FALLBACK
@@ -234,6 +270,108 @@ mtd_hpc_require_path_exists() {
     local path="$1"
     local label="${2:-path}"
     [[ -e "$path" ]] || mtd_hpc_die "$label does not exist: $path"
+}
+
+mtd_hpc_submit_ssh_candidates() {
+    local candidate=""
+    local -A seen=()
+
+    for candidate in \
+        "${MTD_HPC_SUBMIT_HOST_FQDN:-}" \
+        "${MTD_HPC_SUBMIT_HOST_SHORT:-}" \
+        "${MTD_HPC_SUBMIT_SLURM_NODE:-}"
+    do
+        [[ -n "$candidate" && "$candidate" != "unknown" ]] || continue
+        [[ "$candidate" =~ ^[A-Za-z0-9._:-]+$ ]] || continue
+        [[ -z "${seen[$candidate]:-}" ]] || continue
+        seen["$candidate"]=1
+        printf '%s\n' "$candidate"
+    done
+}
+
+mtd_hpc_resolve_submit_ssh_target() {
+    local submit_user="${MTD_HPC_SUBMIT_USER:-}"
+    local candidate=""
+    local target=""
+
+    [[ "$MTD_HPC_REMOTE_INPUT_FROM_SUBMIT_HOST" == "1" ]] || {
+        mtd_hpc_error "Remote input staging from the submission host is disabled."
+        return 1
+    }
+
+    [[ "$submit_user" =~ ^[A-Za-z0-9._-]+$ ]] || {
+        mtd_hpc_error \
+            "Submission user is unavailable or invalid for remote input staging: ${submit_user:-<unset>}"
+        return 1
+    }
+
+    command -v ssh >/dev/null 2>&1 || {
+        mtd_hpc_error \
+            "ssh is required when an input exists only on the host that launched MTD Explorer."
+        return 1
+    }
+
+    while IFS= read -r candidate; do
+        [[ -n "$candidate" ]] || continue
+        target="${submit_user}@${candidate}"
+        if ssh \
+            -o BatchMode=yes \
+            -o ConnectTimeout="$MTD_HPC_SUBMIT_SSH_CONNECT_TIMEOUT" \
+            -- "$target" true >/dev/null 2>&1
+        then
+            printf '%s\n' "$target"
+            return 0
+        fi
+    done < <(mtd_hpc_submit_ssh_candidates)
+
+    mtd_hpc_error \
+        "Input is not mounted on node ${SLURMD_NODENAME:-$(hostname -s)} and no "\
+        "passwordless SSH connection to the host that launched MTD Explorer could be established."
+    return 1
+}
+
+mtd_hpc_require_local_scratch_capacity_bytes() {
+    local multiplier="$1"
+    local label="$2"
+    shift 2
+
+    local total_input_bytes=0
+    local required_bytes=0
+    local reserve_bytes=0
+    local free_kb=0
+    local free_bytes=0
+    local size=""
+
+    [[ "$MTD_HPC_STAGE_LOCAL" == "1" ]] || return 0
+    [[ "$multiplier" =~ ^[0-9]+$ ]] && (( multiplier >= 1 )) || \
+        mtd_hpc_die "Invalid scratch multiplier for $label: $multiplier" || return 1
+
+    for size in "$@"; do
+        [[ -z "$size" || "$size" == "-" ]] && continue
+        [[ "$size" =~ ^[0-9]+$ ]] && (( size > 0 )) || \
+            mtd_hpc_die "Invalid input size for $label scratch precheck: $size" || return 1
+        total_input_bytes=$((total_input_bytes + size))
+    done
+
+    free_kb="$(df -Pk "$MTD_HPC_LOCAL_SCRATCH_ROOT" | awk 'NR == 2 {print $4}')"
+    [[ "$free_kb" =~ ^[0-9]+$ ]] || \
+        mtd_hpc_die "Could not determine free scratch space: $MTD_HPC_LOCAL_SCRATCH_ROOT" || return 1
+
+    free_bytes=$((free_kb * 1024))
+    reserve_bytes=$((MTD_HPC_SCRATCH_RESERVE_GB * 1024 * 1024 * 1024))
+    required_bytes=$((total_input_bytes * multiplier + reserve_bytes))
+
+    mtd_hpc_info \
+        "$label scratch precheck: input=${total_input_bytes} bytes, multiplier=${multiplier}," \
+        "reserve=${MTD_HPC_SCRATCH_RESERVE_GB} GiB, required=${required_bytes} bytes," \
+        "free=${free_bytes} bytes"
+
+    if (( free_bytes < required_bytes )); then
+        mtd_hpc_die \
+            "Insufficient node-local scratch for $label. Required ${required_bytes} bytes;" \
+            "available ${free_bytes} bytes at $MTD_HPC_LOCAL_SCRATCH_ROOT."
+        return 1
+    fi
 }
 
 mtd_hpc_require_local_scratch_capacity() {
@@ -398,23 +536,365 @@ mtd_hpc_prepare_local_scratch() {
     mtd_hpc_info "Node-local scratch: $MTD_HPC_TASK_SCRATCH"
 }
 
+mtd_hpc_global_transfer_slot_owner_query_id() {
+    if [[ -n "${SLURM_ARRAY_JOB_ID:-}" && -n "${SLURM_ARRAY_TASK_ID:-}" ]]; then
+        printf '%s_%s\n' "$SLURM_ARRAY_JOB_ID" "$SLURM_ARRAY_TASK_ID"
+    else
+        printf '%s\n' "${SLURM_JOB_ID:-}"
+    fi
+}
+
+mtd_hpc_global_transfer_slot_write_owner() {
+    local slot_dir="$1"
+    local token="$2"
+    local owner_tmp="$slot_dir/.owner.$$.${RANDOM}"
+    local query_id=""
+
+    query_id="$(mtd_hpc_global_transfer_slot_owner_query_id)"
+
+    {
+        printf 'token=%s\n' "$token"
+        printf 'host=%s\n' "${SLURMD_NODENAME:-$(hostname -s)}"
+        printf 'slurm_job_id=%s\n' "${SLURM_JOB_ID:-}"
+        printf 'slurm_array_job_id=%s\n' "${SLURM_ARRAY_JOB_ID:-}"
+        printf 'slurm_array_task_id=%s\n' "${SLURM_ARRAY_TASK_ID:-}"
+        printf 'slurm_query_id=%s\n' "$query_id"
+        printf 'pid=%s\n' "$$"
+        printf 'created_epoch=%s\n' "$(date +%s)"
+    } > "$owner_tmp" || return 1
+
+    mv -f -- "$owner_tmp" "$slot_dir/owner" || {
+        rm -f -- "$owner_tmp"
+        return 1
+    }
+}
+
+mtd_hpc_global_transfer_slot_owner_is_active() {
+    local slot_dir="$1"
+    local owner_file="$slot_dir/owner"
+    local query_id=""
+    local state=""
+
+    [[ -r "$owner_file" ]] || return 1
+
+    query_id="$(
+        sed -n 's/^slurm_query_id=//p' "$owner_file" 2>/dev/null |
+            head -n 1
+    )"
+    [[ -n "$query_id" ]] || return 1
+
+    if command -v squeue >/dev/null 2>&1; then
+        if state="$(squeue -h -j "$query_id" -o '%T' 2>/dev/null)"; then
+            [[ -n "$state" ]] && return 0
+            return 1
+        fi
+
+        # A scheduler query failure is not proof that the owner disappeared.
+        # Keep the lock rather than risking two transfers at once.
+        return 0
+    fi
+
+    if command -v scontrol >/dev/null 2>&1; then
+        if scontrol show job "$query_id" >/dev/null 2>&1; then
+            return 0
+        fi
+        return 1
+    fi
+
+    # Without a scheduler client on the worker, stale ownership cannot be
+    # verified safely. Leave the lock in place rather than stealing it.
+    return 0
+}
+
+mtd_hpc_global_transfer_slot_reclaim_if_stale() {
+    local slot_dir="$1"
+    local direction="$2"
+    local slot="$3"
+    local display_direction="$direction"
+    local now=0
+    local modified=0
+    local age=0
+    local quarantine=""
+
+    [[ -d "$slot_dir" ]] || return 1
+
+    case "$direction" in
+        stagein) display_direction="stage-in" ;;
+        stageout) display_direction="stage-out" ;;
+    esac
+
+    modified="$(stat -Lc %Y -- "$slot_dir" 2>/dev/null)" || return 1
+    now="$(date +%s)"
+    age=$((now - modified))
+    (( age >= MTD_HPC_TRANSFER_LOCK_STALE_SECONDS )) || return 1
+
+    if mtd_hpc_global_transfer_slot_owner_is_active "$slot_dir"; then
+        # Refresh the directory timestamp after a successful owner check so
+        # long transfers do not trigger a scheduler query on every poll once
+        # they exceed the stale-age threshold.
+        touch -m -- "$slot_dir" >/dev/null 2>&1 || true
+        return 1
+    fi
+
+    # Rename first instead of deleting the shared path in-place. On NFS this
+    # makes stale-lock recovery race-safe: only one waiter can move the old
+    # directory, and a newly acquired slot at the original pathname is never
+    # removed by the recovery cleanup.
+    quarantine="${slot_dir}.reclaimed.${SLURM_JOB_ID:-manual}.${SLURM_ARRAY_TASK_ID:-0}.$$.$RANDOM"
+    if mv -- "$slot_dir" "$quarantine" 2>/dev/null; then
+        mtd_hpc_info \
+            "Recovered stale shared $display_direction transfer slot $slot" \
+            "after ${age}s without an active Slurm owner."
+        rm -rf -- "$quarantine"
+        return 0
+    fi
+
+    return 1
+}
+
+mtd_hpc_global_transfer_slot_acquire() {
+    local direction="$1"
+    local max_concurrent="$2"
+    local handle_variable="$3"
+    local slot_variable="$4"
+    local lock_dir="${MTD_HPC_TRANSFER_LOCK_DIR:-}"
+    local display_direction="$direction"
+    local slot=0
+    local slot_dir=""
+    local token=""
+    local handle=""
+    local waited_seconds=0
+    local announced_wait=0
+    local reclaimed_any=0
+
+    printf -v "$handle_variable" '%s' ""
+    printf -v "$slot_variable" '%s' ""
+
+    case "$direction" in
+        stagein) display_direction="stage-in" ;;
+        stageout) display_direction="stage-out" ;;
+    esac
+
+    (( max_concurrent > 0 )) || return 0
+
+    # Direct/manual node-job invocations may not have been launched through the
+    # array submitter. Keep those useful for smoke tests instead of failing.
+    if [[ -z "$lock_dir" ]]; then
+        mtd_hpc_info \
+            "Shared $display_direction transfer throttling is unavailable for this standalone task" \
+            "(MTD_HPC_TRANSFER_LOCK_DIR is not set)."
+        return 0
+    fi
+
+    [[ "$lock_dir" == /* ]] || \
+        mtd_hpc_die "MTD_HPC_TRANSFER_LOCK_DIR must be an absolute shared path: $lock_dir" || return 1
+
+    mkdir -p -- "$lock_dir/$direction" || return 1
+    [[ -w "$lock_dir/$direction" ]] || \
+        mtd_hpc_die "Shared $display_direction lock directory is not writable: $lock_dir/$direction" || return 1
+
+    while true; do
+        reclaimed_any=0
+        for (( slot=1; slot<=max_concurrent; slot++ )); do
+            # Use mkdir rather than flock for the cluster-wide semaphore.
+            # mkdir is an atomic namespace operation on the shared filesystem
+            # and remains mutually exclusive when NFS clients are mounted with
+            # nolock/local_lock=all, where flock is only client-local.
+            slot_dir="$lock_dir/$direction/slot_${slot}.lockdir"
+
+            if mkdir -- "$slot_dir" 2>/dev/null; then
+                token="${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-manual}}.${SLURM_ARRAY_TASK_ID:-0}.${SLURM_JOB_ID:-0}.$$.$RANDOM"
+                if ! mtd_hpc_global_transfer_slot_write_owner "$slot_dir" "$token"; then
+                    rm -rf -- "$slot_dir"
+                    mtd_hpc_die "Unable to write shared $display_direction transfer lock metadata: $slot_dir" || return 1
+                fi
+
+                handle="${slot_dir}"$'\t'"${token}"
+                printf -v "$handle_variable" '%s' "$handle"
+                printf -v "$slot_variable" '%s' "$slot"
+
+                if (( waited_seconds > 0 )); then
+                    mtd_hpc_info \
+                        "Acquired shared $display_direction transfer slot $slot/$max_concurrent" \
+                        "after waiting ${waited_seconds}s."
+                else
+                    mtd_hpc_info \
+                        "Acquired shared $display_direction transfer slot $slot/$max_concurrent."
+                fi
+                return 0
+            fi
+
+            if mtd_hpc_global_transfer_slot_reclaim_if_stale \
+                "$slot_dir" "$direction" "$slot"
+            then
+                reclaimed_any=1
+            fi
+        done
+
+        # A stale slot was just removed. Retry immediately instead of adding
+        # an unnecessary polling delay before claiming the now-free slot.
+        (( reclaimed_any == 0 )) || continue
+
+        if (( announced_wait == 0 )); then
+            mtd_hpc_info \
+                "Waiting for a shared $display_direction transfer slot" \
+                "(limit: $max_concurrent concurrent transfer(s))..."
+            announced_wait=1
+        fi
+
+        sleep "$MTD_HPC_TRANSFER_LOCK_POLL_SECONDS"
+        waited_seconds=$((waited_seconds + MTD_HPC_TRANSFER_LOCK_POLL_SECONDS))
+    done
+}
+
+mtd_hpc_global_transfer_slot_release() {
+    local direction="$1"
+    local handle_variable="$2"
+    local slot_variable="$3"
+    local handle="${!handle_variable:-}"
+    local slot="${!slot_variable:-}"
+    local display_direction="$direction"
+    local slot_dir=""
+    local token=""
+    local current_token=""
+    local released=0
+
+    case "$direction" in
+        stagein) display_direction="stage-in" ;;
+        stageout) display_direction="stage-out" ;;
+    esac
+
+    [[ -n "$handle" ]] || return 0
+
+    slot_dir="${handle%%$'\t'*}"
+    token="${handle#*$'\t'}"
+
+    if [[ -r "$slot_dir/owner" ]]; then
+        current_token="$(
+            sed -n 's/^token=//p' "$slot_dir/owner" 2>/dev/null |
+                head -n 1
+        )"
+    fi
+
+    if [[ -d "$slot_dir" && "$current_token" == "$token" ]]; then
+        rm -f -- "$slot_dir/owner"
+        if rmdir -- "$slot_dir" 2>/dev/null; then
+            released=1
+        else
+            mtd_hpc_error \
+                "Unable to remove shared $display_direction transfer lock directory: $slot_dir"
+        fi
+    elif [[ -d "$slot_dir" ]]; then
+        mtd_hpc_info \
+            "Shared $display_direction transfer slot${slot:+ $slot} ownership changed;" \
+            "leaving the current lock untouched."
+    fi
+
+    printf -v "$handle_variable" '%s' ""
+    printf -v "$slot_variable" '%s' ""
+
+    if (( released == 1 )); then
+        mtd_hpc_info "Released shared $display_direction transfer slot${slot:+ $slot}."
+    fi
+}
+
+mtd_hpc_stagein_group_begin() {
+    # A group keeps one global slot across all input files belonging to the
+    # same task (for example paired R1/R2), so a sample can begin computation
+    # as soon as its complete input set has arrived.
+    MTD_HPC_STAGEIN_GROUP_ACTIVE=1
+    MTD_HPC_STAGEIN_GLOBAL_LOCK_HANDLE=""
+    MTD_HPC_STAGEIN_GLOBAL_LOCK_SLOT=""
+}
+
+mtd_hpc_stagein_lock_acquire() {
+    [[ -n "${MTD_HPC_STAGEIN_GLOBAL_LOCK_HANDLE:-}" ]] && return 0
+
+    mtd_hpc_global_transfer_slot_acquire \
+        stagein \
+        "$MTD_HPC_STAGEIN_MAX_CONCURRENT" \
+        MTD_HPC_STAGEIN_GLOBAL_LOCK_HANDLE \
+        MTD_HPC_STAGEIN_GLOBAL_LOCK_SLOT
+}
+
+mtd_hpc_stagein_group_end() {
+    mtd_hpc_global_transfer_slot_release \
+        stagein \
+        MTD_HPC_STAGEIN_GLOBAL_LOCK_HANDLE \
+        MTD_HPC_STAGEIN_GLOBAL_LOCK_SLOT
+    MTD_HPC_STAGEIN_GROUP_ACTIVE=0
+}
+
 mtd_hpc_stage_in_file() {
     local source="$1"
     local destination="$2"
     local label="${3:-input}"
+    local expected_size="${4:-}"
     local source_size=0
     local destination_size=0
+    local remote_target=""
+    local rsync_status=0
+    local automatic_group=0
 
-    mtd_hpc_require_file "$source" "$label" || return 1
     command -v rsync >/dev/null 2>&1 || \
         mtd_hpc_die "rsync is required for node-local input staging." || return 1
 
     mkdir -p -- "$(dirname -- "$destination")"
 
-    source_size="$(stat -Lc %s -- "$source")"
-    mtd_hpc_info "Stage-in $label: $source -> $destination (${source_size} bytes)"
+    # Most node jobs explicitly group their complete input set. Keep a safe
+    # fallback for any older/direct caller that stages one file at a time.
+    if [[ "${MTD_HPC_STAGEIN_GROUP_ACTIVE:-0}" != "1" ]]; then
+        mtd_hpc_stagein_group_begin
+        automatic_group=1
+    fi
 
-    rsync -aL --whole-file -- "$source" "$destination" || return 1
+    if [[ -s "$source" ]]; then
+        source_size="$(stat -Lc %s -- "$source")" || return 1
+        if [[ -n "$expected_size" && "$source_size" != "$expected_size" ]]; then
+            mtd_hpc_die \
+                "$label changed after task submission: expected=$expected_size current=$source_size bytes: $source" || return 1
+        fi
+
+        mtd_hpc_stagein_lock_acquire || return 1
+
+        mtd_hpc_info "Stage-in $label: $source -> $destination (${source_size} bytes)"
+        set +e
+        rsync -aL --whole-file -- "$source" "$destination"
+        rsync_status=$?
+        set -e
+    else
+        [[ "$expected_size" =~ ^[0-9]+$ ]] && (( expected_size > 0 )) || \
+            mtd_hpc_die \
+                "$label is not visible on this compute node and no validated source size was supplied: $source" || return 1
+
+        remote_target="$(mtd_hpc_resolve_submit_ssh_target)" || return 1
+        source_size="$expected_size"
+
+        mtd_hpc_stagein_lock_acquire || return 1
+
+        mtd_hpc_info \
+            "$label is not mounted on node ${SLURMD_NODENAME:-$(hostname -s)};" \
+            "pulling it from the pipeline submission host $remote_target."
+        mtd_hpc_info \
+            "Stage-in $label: ${remote_target}:${source} -> $destination (${source_size} bytes)"
+
+        set +e
+        rsync \
+            -aL \
+            --whole-file \
+            --protect-args \
+            -e "ssh -o BatchMode=yes -o ConnectTimeout=$MTD_HPC_SUBMIT_SSH_CONNECT_TIMEOUT" \
+            -- "${remote_target}:${source}" "$destination"
+        rsync_status=$?
+        set -e
+    fi
+
+    if (( automatic_group == 1 )); then
+        mtd_hpc_stagein_group_end
+    fi
+
+    (( rsync_status == 0 )) || return "$rsync_status"
+
     mtd_hpc_require_file "$destination" "staged $label" || return 1
 
     destination_size="$(stat -Lc %s -- "$destination")"
@@ -424,10 +904,24 @@ mtd_hpc_stage_in_file() {
 
 mtd_hpc_stageout_lock_acquire() {
     MTD_HPC_STAGEOUT_LOCK_FD=""
+    MTD_HPC_GLOBAL_STAGEOUT_LOCK_HANDLE=""
+    MTD_HPC_GLOBAL_STAGEOUT_LOCK_SLOT=""
+
+    mtd_hpc_global_transfer_slot_acquire \
+        stageout \
+        "$MTD_HPC_STAGEOUT_MAX_CONCURRENT" \
+        MTD_HPC_GLOBAL_STAGEOUT_LOCK_HANDLE \
+        MTD_HPC_GLOBAL_STAGEOUT_LOCK_SLOT || return 1
 
     [[ "$MTD_HPC_SERIALIZE_STAGEOUT_PER_NODE" == "1" ]] || return 0
-    command -v flock >/dev/null 2>&1 || \
-        mtd_hpc_die "flock is required when MTD_HPC_SERIALIZE_STAGEOUT_PER_NODE=1." || return 1
+    command -v flock >/dev/null 2>&1 || {
+        mtd_hpc_global_transfer_slot_release \
+            stageout \
+            MTD_HPC_GLOBAL_STAGEOUT_LOCK_HANDLE \
+            MTD_HPC_GLOBAL_STAGEOUT_LOCK_SLOT
+        mtd_hpc_die "flock is required when MTD_HPC_SERIALIZE_STAGEOUT_PER_NODE=1."
+        return 1
+    }
 
     mkdir -p -- "$MTD_HPC_LOCAL_SCRATCH_ROOT/.locks"
     exec {MTD_HPC_STAGEOUT_LOCK_FD}> \
@@ -438,13 +932,17 @@ mtd_hpc_stageout_lock_acquire() {
 }
 
 mtd_hpc_stageout_lock_release() {
-    [[ -n "${MTD_HPC_STAGEOUT_LOCK_FD:-}" ]] || return 0
+    if [[ -n "${MTD_HPC_STAGEOUT_LOCK_FD:-}" ]]; then
+        flock -u "$MTD_HPC_STAGEOUT_LOCK_FD" || true
+        eval "exec ${MTD_HPC_STAGEOUT_LOCK_FD}>&-"
+        MTD_HPC_STAGEOUT_LOCK_FD=""
+        mtd_hpc_info "Released node-local stage-out lock."
+    fi
 
-    flock -u "$MTD_HPC_STAGEOUT_LOCK_FD" || true
-    eval "exec ${MTD_HPC_STAGEOUT_LOCK_FD}>&-"
-    MTD_HPC_STAGEOUT_LOCK_FD=""
-
-    mtd_hpc_info "Released node-local stage-out lock."
+    mtd_hpc_global_transfer_slot_release \
+        stageout \
+        MTD_HPC_GLOBAL_STAGEOUT_LOCK_HANDLE \
+        MTD_HPC_GLOBAL_STAGEOUT_LOCK_SLOT
 }
 
 mtd_hpc_atomic_stage_out_file() {

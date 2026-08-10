@@ -60,6 +60,8 @@ while IFS=$'\t' read -r sample layout read1 read2 output_read1 output_read2 html
     mtd_hpc_validate_id "$sample" "sample name"
     [[ "$layout" == "se" || "$layout" == "pe" ]] || mtd_hpc_die "Invalid layout for $sample: $layout"
     mtd_hpc_require_file "$read1" "fastp R1 for $sample"
+    read1_size="$(stat -Lc %s -- "$read1")" || \
+        mtd_hpc_die "Could not determine fastp R1 size for $sample: $read1"
     [[ -n "$output_read1" && -n "$html" && -n "$json" ]] || \
         mtd_hpc_die "Missing fastp output path for sample: $sample"
 
@@ -70,6 +72,7 @@ while IFS=$'\t' read -r sample layout read1 read2 output_read1 output_read2 html
         --sample "$sample"
         --layout "$layout"
         --read1 "$read1"
+        --read1-size "$read1_size"
         --output-read1 "$output_read1"
         --html "$html"
         --json "$json"
@@ -83,7 +86,13 @@ while IFS=$'\t' read -r sample layout read1 read2 output_read1 output_read2 html
         [[ "$read2" != "-" && "$output_read2" != "-" ]] || \
             mtd_hpc_die "Paired fastp sample has no R2 path: $sample"
         mtd_hpc_require_file "$read2" "fastp R2 for $sample"
-        command+=(--read2 "$read2" --output-read2 "$output_read2")
+        read2_size="$(stat -Lc %s -- "$read2")" || \
+            mtd_hpc_die "Could not determine fastp R2 size for $sample: $read2"
+        command+=(
+            --read2 "$read2"
+            --read2-size "$read2_size"
+            --output-read2 "$output_read2"
+        )
         expected+=$'\n'"$output_read2"
     fi
 

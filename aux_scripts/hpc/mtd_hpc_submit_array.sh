@@ -48,7 +48,16 @@ mtd_hpc_validate_id "$STAGE" "stage name"
 mtd_hpc_load_config "$HPC_CONF" "$MTD_ROOT"
 mtd_hpc_require_file "$MANIFEST" "HPC task manifest"
 
-for command in sbatch squeue sacct scancel scontrol base64 sha256sum; do
+# Backward-compatible defaults for older custom HPC configuration files.
+: "${MTD_HPC_PROGRESS_ON_CHANGE:=1}"
+: "${MTD_HPC_PROGRESS_HEARTBEAT_SECONDS:=300}"
+
+[[ "$MTD_HPC_PROGRESS_ON_CHANGE" == "0" || "$MTD_HPC_PROGRESS_ON_CHANGE" == "1" ]] || \
+    mtd_hpc_die "MTD_HPC_PROGRESS_ON_CHANGE must be 0 or 1."
+[[ "$MTD_HPC_PROGRESS_HEARTBEAT_SECONDS" =~ ^[0-9]+$ ]] || \
+    mtd_hpc_die "MTD_HPC_PROGRESS_HEARTBEAT_SECONDS must be a non-negative integer."
+
+for command in sbatch squeue sacct scancel scontrol base64 sha256sum date; do
     command -v "$command" >/dev/null 2>&1 || mtd_hpc_die "Required command not found: $command"
 done
 
@@ -59,11 +68,16 @@ MTD_ROOT="$(mtd_hpc_realpath "$MTD_ROOT")"
 
 log_root="$WORK_DIR/logs"
 success_dir="$WORK_DIR/success"
+transfer_lock_dir="$WORK_DIR/.transfer_locks"
 latest_pending_manifest="$WORK_DIR/${STAGE}.pending.tsv"
 job_history="$WORK_DIR/${STAGE}.job_ids.tsv"
 sacct_history="$WORK_DIR/${STAGE}.sacct.tsv"
 retry_history="$WORK_DIR/${STAGE}.retry.tsv"
-mkdir -p -- "$log_root" "$success_dir"
+mkdir -p -- \
+    "$log_root" \
+    "$success_dir" \
+    "$transfer_lock_dir/stagein" \
+    "$transfer_lock_dir/stageout"
 : > "$job_history"
 : > "$sacct_history"
 : > "$retry_history"
@@ -99,6 +113,14 @@ mtd_hpc_count_completed() {
 mtd_hpc_count_manifest_tasks() {
     local manifest="$1"
     awk -F '\t' 'NF && $1 !~ /^#/ {count++} END {print count + 0}' "$manifest"
+}
+
+mtd_hpc_format_elapsed() {
+    local seconds="$1"
+    printf '%02d:%02d:%02d' \
+        $((seconds / 3600)) \
+        $(((seconds % 3600) / 60)) \
+        $((seconds % 60))
 }
 
 mtd_hpc_select_resource_policy() {
@@ -343,9 +365,25 @@ printf -v stage_sbatch_args_text '%q ' "${stage_sbatch_args[@]}"
 mtd_hpc_info "Slurm resource policy: $selected_policy"
 mtd_hpc_info "Slurm resource arguments: ${stage_sbatch_args_text% }"
 mtd_hpc_info "Automatic attempts per task: $MTD_HPC_MAX_ATTEMPTS"
+if [[ "$MTD_HPC_STAGE_LOCAL" == "1" ]]; then
+    if (( MTD_HPC_STAGEIN_MAX_CONCURRENT > 0 )); then
+        mtd_hpc_info \
+            "Shared stage-in limit: $MTD_HPC_STAGEIN_MAX_CONCURRENT concurrent transfer(s)."
+    else
+        mtd_hpc_info "Shared stage-in limit: disabled."
+    fi
+    if (( MTD_HPC_STAGEOUT_MAX_CONCURRENT > 0 )); then
+        mtd_hpc_info \
+            "Shared stage-out limit: $MTD_HPC_STAGEOUT_MAX_CONCURRENT concurrent transfer(s)."
+    else
+        mtd_hpc_info "Shared stage-out limit: disabled."
+    fi
+    mtd_hpc_info "Shared transfer lock directory: $transfer_lock_dir"
+fi
 
 submit_host_short="$(hostname -s 2>/dev/null || hostname 2>/dev/null || printf unknown)"
 submit_host_fqdn="$(hostname -f 2>/dev/null || true)"
+submit_user="$(id -un 2>/dev/null || printf unknown)"
 submit_slurm_node=""
 submit_fallback_unavailable_reason=""
 
@@ -373,6 +411,7 @@ if [[ "$MTD_HPC_FINAL_SUBMIT_NODE_FALLBACK" == "1" ]]; then
 
     mtd_hpc_info "Submission host: $submit_host_short"
     [[ -z "$submit_host_fqdn" ]] || mtd_hpc_info "Submission host FQDN: $submit_host_fqdn"
+    mtd_hpc_info "Submission user: $submit_user"
 
     if [[ -n "$submit_slurm_node" ]]; then
         mtd_hpc_info "Submission Slurm node: $submit_slurm_node"
@@ -383,6 +422,23 @@ if [[ "$MTD_HPC_FINAL_SUBMIT_NODE_FALLBACK" == "1" ]]; then
             "Final submission-node fallback is unavailable: $submit_fallback_unavailable_reason"
     fi
 fi
+
+if [[ "$MTD_HPC_FINAL_SUBMIT_NODE_FALLBACK" != "1" ]]; then
+    mtd_hpc_info "Submission host: $submit_host_short"
+    [[ -z "$submit_host_fqdn" ]] || mtd_hpc_info "Submission host FQDN: $submit_host_fqdn"
+    mtd_hpc_info "Submission user: $submit_user"
+fi
+
+if [[ "$STAGE" == "fastp" && "$MTD_HPC_STAGE_LOCAL" == "1" && \
+      "$MTD_HPC_REMOTE_INPUT_FROM_SUBMIT_HOST" == "1" ]]; then
+    mtd_hpc_info \
+        "fastp inputs not mounted on a compute node will be pulled directly from the dynamically detected submission host."
+fi
+
+submit_host_fqdn_arg="${submit_host_fqdn:--}"
+submit_host_short_arg="${submit_host_short:--}"
+submit_slurm_node_arg="${submit_slurm_node:--}"
+submit_user_arg="${submit_user:--}"
 
 mtd_hpc_build_fallback_stage_args
 
@@ -497,7 +553,10 @@ while (( attempt <= total_attempt_limit )); do
     job_id="$(sbatch "${sbatch_args[@]}" \
         "$SCRIPT_DIR/mtd_hpc_array_task.sh" \
         "$MTD_HPC_CONF" "$current_manifest" "$success_dir" "$MTD_ROOT" \
-        "$STAGE" "$round_history_label")"
+        "$STAGE" "$round_history_label" \
+        "$submit_host_fqdn_arg" "$submit_host_short_arg" \
+        "$submit_slurm_node_arg" "$submit_user_arg" \
+        "$transfer_lock_dir")"
     job_id="${job_id%%;*}"
     [[ "$job_id" =~ ^[0-9]+$ ]] || mtd_hpc_die "Could not parse Slurm job ID: $job_id"
 
@@ -509,12 +568,67 @@ while (( attempt <= total_attempt_limit )); do
         >> "$job_history"
     mtd_hpc_info "Submitted Slurm array job: $job_id"
 
-    while squeue -h -j "$job_id" 2>/dev/null | grep -q .; do
+    monitor_started_epoch="$(date +%s)"
+    last_progress_epoch=0
+    last_progress_fingerprint=""
+
+    while true; do
+        squeue_snapshot="$(
+            squeue -h -r -j "$job_id" -o '%T' 2>/dev/null || true
+        )"
+        [[ -n "$squeue_snapshot" ]] || break
+
+        running_tasks=0
+        pending_tasks=0
+        other_active_tasks=0
+        while IFS= read -r queue_state; do
+            [[ -n "$queue_state" ]] || continue
+            case "$queue_state" in
+                RUNNING)
+                    running_tasks=$((running_tasks + 1))
+                    ;;
+                PENDING)
+                    pending_tasks=$((pending_tasks + 1))
+                    ;;
+                *)
+                    other_active_tasks=$((other_active_tasks + 1))
+                    ;;
+            esac
+        done <<< "$squeue_snapshot"
+
         attempt_completed="$(mtd_hpc_count_completed "$current_manifest")"
         overall_completed="$(mtd_hpc_count_completed "$MANIFEST")"
-        mtd_hpc_info \
-            "Job $job_id running; overall success: $overall_completed/$expected_tasks; "\
-            "$round_display: $attempt_completed/$current_tasks"
+        progress_fingerprint="${overall_completed}:${attempt_completed}:${running_tasks}:${pending_tasks}:${other_active_tasks}"
+        now_epoch="$(date +%s)"
+        elapsed_seconds=$((now_epoch - monitor_started_epoch))
+        should_print=0
+        heartbeat=0
+
+        if [[ "$MTD_HPC_PROGRESS_ON_CHANGE" == "1" ]] && \
+           [[ "$progress_fingerprint" != "$last_progress_fingerprint" ]]; then
+            should_print=1
+        elif (( MTD_HPC_PROGRESS_HEARTBEAT_SECONDS > 0 )) && \
+             (( last_progress_epoch == 0 || \
+                now_epoch - last_progress_epoch >= MTD_HPC_PROGRESS_HEARTBEAT_SECONDS )); then
+            should_print=1
+            heartbeat=1
+        fi
+
+        if (( should_print == 1 )); then
+            elapsed_text="$(mtd_hpc_format_elapsed "$elapsed_seconds")"
+            progress_message="Job $job_id | $round_display | overall success $overall_completed/$expected_tasks | attempt success $attempt_completed/$current_tasks | running $running_tasks | pending $pending_tasks"
+            if (( other_active_tasks > 0 )); then
+                progress_message+=" | other $other_active_tasks"
+            fi
+            progress_message+=" | elapsed $elapsed_text"
+            if (( heartbeat == 1 )) && [[ -n "$last_progress_fingerprint" ]]; then
+                progress_message+=" | heartbeat"
+            fi
+            mtd_hpc_info "$progress_message"
+            last_progress_epoch="$now_epoch"
+        fi
+
+        last_progress_fingerprint="$progress_fingerprint"
         sleep "$MTD_HPC_POLL_SECONDS"
     done
 

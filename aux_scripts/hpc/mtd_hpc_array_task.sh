@@ -4,8 +4,8 @@ set -Eeuo pipefail
 # Slurm copies this submitted script into /var/spool/slurm. Therefore,
 # BASH_SOURCE[0] no longer points to the shared MTD Explorer checkout.
 # Parse MTD_ROOT first and load the common helpers through the NFS path.
-[[ $# -ge 4 && $# -le 6 ]] || {
-    printf '[MTD-HPC ERROR] Internal array task usage: CONF MANIFEST SUCCESS_DIR MTD_ROOT [STAGE] [ATTEMPT]\n' >&2
+[[ $# -ge 4 && $# -le 11 ]] || {
+    printf '[MTD-HPC ERROR] Internal array task usage: CONF MANIFEST SUCCESS_DIR MTD_ROOT [STAGE] [ATTEMPT] [SUBMIT_FQDN] [SUBMIT_SHORT] [SUBMIT_SLURM_NODE] [SUBMIT_USER] [TRANSFER_LOCK_DIR]\n' >&2
     exit 2
 }
 
@@ -15,6 +15,19 @@ MTD_HPC_SUCCESS_DIR="$3"
 MTD_HPC_MTD_ROOT="$4"
 MTD_HPC_STAGE_NAME="${5:-unknown}"
 MTD_HPC_ATTEMPT_LABEL="${6:-unknown}"
+MTD_HPC_SUBMIT_HOST_FQDN="${7:-${MTD_HPC_SUBMIT_HOST_FQDN:-}}"
+MTD_HPC_SUBMIT_HOST_SHORT="${8:-${MTD_HPC_SUBMIT_HOST_SHORT:-}}"
+MTD_HPC_SUBMIT_SLURM_NODE="${9:-${MTD_HPC_SUBMIT_SLURM_NODE:-}}"
+MTD_HPC_SUBMIT_USER="${10:-${MTD_HPC_SUBMIT_USER:-}}"
+MTD_HPC_TRANSFER_LOCK_DIR="${11:-${MTD_HPC_TRANSFER_LOCK_DIR:-}}"
+[[ "$MTD_HPC_SUBMIT_HOST_FQDN" == "-" ]] && MTD_HPC_SUBMIT_HOST_FQDN=""
+[[ "$MTD_HPC_SUBMIT_HOST_SHORT" == "-" ]] && MTD_HPC_SUBMIT_HOST_SHORT=""
+[[ "$MTD_HPC_SUBMIT_SLURM_NODE" == "-" ]] && MTD_HPC_SUBMIT_SLURM_NODE=""
+[[ "$MTD_HPC_SUBMIT_USER" == "-" ]] && MTD_HPC_SUBMIT_USER=""
+[[ "$MTD_HPC_TRANSFER_LOCK_DIR" == "-" ]] && MTD_HPC_TRANSFER_LOCK_DIR=""
+export MTD_HPC_SUBMIT_HOST_FQDN MTD_HPC_SUBMIT_HOST_SHORT
+export MTD_HPC_SUBMIT_SLURM_NODE MTD_HPC_SUBMIT_USER
+export MTD_HPC_TRANSFER_LOCK_DIR
 
 MTD_HPC_COMMON_SH="$MTD_HPC_MTD_ROOT/aux_scripts/hpc/mtd_hpc_common.sh"
 

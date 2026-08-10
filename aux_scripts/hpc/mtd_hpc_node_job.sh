@@ -16,7 +16,8 @@ Usage:
 
   mtd_hpc_node_job.sh fastp \
     --hpc-conf FILE --sample NAME --layout se|pe \
-    --read1 FILE [--read2 FILE] --output-read1 FILE [--output-read2 FILE] \
+    --read1 FILE --read1-size BYTES [--read2 FILE --read2-size BYTES] \
+    --output-read1 FILE [--output-read2 FILE] \
     --html FILE --json FILE --min-length INT \
     --validate-paired-ids 0|1 --pe-max-attempts INT
 
@@ -50,6 +51,8 @@ INPUT_SIGNATURE=""
 LAYOUT=""
 READ1=""
 READ2=""
+READ1_SIZE=""
+READ2_SIZE=""
 OUTPUT_READ1=""
 OUTPUT_READ2=""
 HTML_OUTPUT=""
@@ -87,6 +90,11 @@ node_job_exit() {
         rm -f -- "$PARTIAL_OUTPUT"
     fi
 
+    # Release cluster-wide mkdir transfer slots and the node-local stage-out
+    # flock explicitly so cancellation/error paths do not leave stale state.
+    mtd_hpc_stagein_group_end >/dev/null 2>&1 || true
+    mtd_hpc_stageout_lock_release >/dev/null 2>&1 || true
+
     mtd_hpc_cleanup_local_scratch "$LOCAL_SCRATCH" "$status" || true
     exit "$status"
 }
@@ -106,6 +114,8 @@ while [[ $# -gt 0 ]]; do
         --layout) LAYOUT="$2"; shift 2 ;;
         --read1) READ1="$2"; shift 2 ;;
         --read2) READ2="$2"; shift 2 ;;
+        --read1-size) READ1_SIZE="$2"; shift 2 ;;
+        --read2-size) READ2_SIZE="$2"; shift 2 ;;
         --output-read1) OUTPUT_READ1="$2"; shift 2 ;;
         --output-read2) OUTPUT_READ2="$2"; shift 2 ;;
         --html) HTML_OUTPUT="$2"; shift 2 ;;
@@ -187,10 +197,12 @@ case "$MODE" in
             humann_input="$LOCAL_SCRATCH/input/$(basename -- "$shared_input")"
             humann_output_dir="$LOCAL_SCRATCH/output"
 
+            mtd_hpc_stagein_group_begin
             mtd_hpc_stage_in_file \
                 "$shared_input" \
                 "$humann_input" \
                 "HUMAnN input"
+            mtd_hpc_stagein_group_end
         else
             mkdir -p -- "$shared_output_dir"
         fi
@@ -269,6 +281,7 @@ case "$MODE" in
             magicblast_query="$LOCAL_SCRATCH/input/query.R1.fastq"
             magicblast_output="$LOCAL_SCRATCH/output/result.sam"
 
+            mtd_hpc_stagein_group_begin
             mtd_hpc_stage_in_file "$shared_query" "$magicblast_query" "Magic-BLAST query"
 
             if [[ -n "$shared_query_mate" ]]; then
@@ -276,6 +289,7 @@ case "$MODE" in
                 mtd_hpc_stage_in_file \
                     "$shared_query_mate" "$magicblast_query_mate" "Magic-BLAST mate query"
             fi
+            mtd_hpc_stagein_group_end
         else
             mkdir -p -- "$(dirname -- "$shared_output")"
         fi
@@ -321,14 +335,23 @@ case "$MODE" in
             mtd_hpc_die "--validate-paired-ids must be 0 or 1"
         [[ "$PE_MAX_ATTEMPTS" =~ ^[0-9]+$ ]] && (( PE_MAX_ATTEMPTS >= 1 )) || \
             mtd_hpc_die "--pe-max-attempts must be an integer >= 1"
-        mtd_hpc_require_file "$READ1" "fastp R1 input"
+        [[ "$READ1_SIZE" =~ ^[0-9]+$ ]] && (( READ1_SIZE > 0 )) || \
+            mtd_hpc_die "--read1-size must be an integer > 0 for fastp"
         if [[ "$LAYOUT" == "pe" ]]; then
             [[ -n "$READ2" && -n "$OUTPUT_READ2" ]] || mtd_hpc_die "Paired fastp task requires R2 input and output"
-            mtd_hpc_require_file "$READ2" "fastp R2 input"
+            [[ "$READ2_SIZE" =~ ^[0-9]+$ ]] && (( READ2_SIZE > 0 )) || \
+                mtd_hpc_die "--read2-size must be an integer > 0 for paired fastp"
+        else
+            READ2_SIZE="-"
         fi
 
-        mtd_hpc_require_local_scratch_capacity \
-            "$MTD_HPC_FASTP_SCRATCH_MULTIPLIER" "fastp" "$READ1" "$READ2"
+        if [[ "$MTD_HPC_STAGE_LOCAL" != "1" ]]; then
+            mtd_hpc_require_file "$READ1" "fastp R1 input"
+            [[ "$LAYOUT" == "se" ]] || mtd_hpc_require_file "$READ2" "fastp R2 input"
+        fi
+
+        mtd_hpc_require_local_scratch_capacity_bytes \
+            "$MTD_HPC_FASTP_SCRATCH_MULTIPLIER" "fastp" "$READ1_SIZE" "$READ2_SIZE"
 
         shared_read1="$READ1"
         shared_read2="$READ2"
@@ -352,14 +375,19 @@ case "$MODE" in
             fastp_output_read1="$LOCAL_SCRATCH/output/read1.fq.gz"
             fastp_html="$LOCAL_SCRATCH/output/report.html"
             fastp_json="$LOCAL_SCRATCH/output/report.json"
-            mtd_hpc_stage_in_file "$shared_read1" "$fastp_read1" "fastp R1 input"
+
+            mtd_hpc_stagein_group_begin
+            mtd_hpc_stage_in_file \
+                "$shared_read1" "$fastp_read1" "fastp R1 input" "$READ1_SIZE"
 
             if [[ "$LAYOUT" == "pe" ]]; then
                 fastp_read2="$LOCAL_SCRATCH/input/read2.fastq"
                 [[ "$shared_read2" == *.gz ]] && fastp_read2+=".gz"
                 fastp_output_read2="$LOCAL_SCRATCH/output/read2.fq.gz"
-                mtd_hpc_stage_in_file "$shared_read2" "$fastp_read2" "fastp R2 input"
+                mtd_hpc_stage_in_file \
+                    "$shared_read2" "$fastp_read2" "fastp R2 input" "$READ2_SIZE"
             fi
+            mtd_hpc_stagein_group_end
         else
             mkdir -p -- \
                 "$(dirname -- "$shared_output_read1")" \
@@ -478,6 +506,8 @@ case "$MODE" in
             [[ "$INPUT_GZIP" == "1" ]] && kraken_read1+=".gz"
             kraken_report="$LOCAL_SCRATCH/output/report.txt"
             kraken_output="$LOCAL_SCRATCH/output/classification.kraken"
+
+            mtd_hpc_stagein_group_begin
             mtd_hpc_stage_in_file "$shared_read1" "$kraken_read1" "Kraken2 R1 input"
 
             if [[ "$LAYOUT" == "pe" ]]; then
@@ -490,6 +520,7 @@ case "$MODE" in
                 kraken_classified_pattern="$LOCAL_SCRATCH/output/classified.fq"
                 kraken_unclassified_pattern="$LOCAL_SCRATCH/output/unclassified.fq"
             fi
+            mtd_hpc_stagein_group_end
         else
             mkdir -p -- \
                 "$(dirname -- "$shared_report")" \
@@ -591,7 +622,9 @@ case "$MODE" in
             bracken_phylum="$LOCAL_SCRATCH/output/phylum.bracken"
             bracken_genus="$LOCAL_SCRATCH/output/genus.bracken"
             bracken_species="$LOCAL_SCRATCH/output/species.bracken"
+            mtd_hpc_stagein_group_begin
             mtd_hpc_stage_in_file "$shared_report" "$bracken_report" "Bracken report"
+            mtd_hpc_stagein_group_end
         else
             mkdir -p -- \
                 "$(dirname -- "$shared_phylum")" \
