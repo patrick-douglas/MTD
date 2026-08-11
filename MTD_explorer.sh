@@ -7680,10 +7680,42 @@ fi
             local de_dir
             local de_file
             local volcano_log
+            local comparison_name
+            local group_label1=""
+            local group_label2=""
+            local -a ev_group_args=()
 
             de_dir="$(dirname "$de_csv")"
             de_file="$(basename "$de_csv")"
             volcano_log="$de_dir/${de_file%.csv}.EV.volcano.log"
+            # EV.volcano.R creates an auxiliary/proof table ending in
+            # _gene_symbols_table.csv. Do not feed that generated table
+            # back into EnhancedVolcano on subsequent runs.
+            if [[ "$de_file" == *_gene_symbols_table.csv ]]; then
+                echo "[EV VOLCANO] Skipping auxiliary EV table:"
+                echo "  $de_csv"
+                continue
+            fi
+
+            # DEG_Anno_Plot.R creates comparison directories as:
+            #   <group1>_vs_<group2>
+            #
+            # Recover those labels automatically for EnhancedVolcano.
+            comparison_name="$(basename "$de_dir")"
+
+            if [[ "$comparison_name" == *_vs_* ]]; then
+                group_label1="${comparison_name%%_vs_*}"
+                group_label2="${comparison_name#*_vs_}"
+
+                ev_group_args=(
+                    --group_label1 "$group_label1"
+                    --group_label2 "$group_label2"
+                )
+            else
+                echo "${y}[WARNING] Could not infer EV group labels from comparison directory:${w}"
+                echo "  $comparison_name"
+                echo "${y}[WARNING] EV.volcano.R default labels will be used.${w}"
+            fi
 
             echo "------------------------------------------------------------"
             echo "[EV VOLCANO] Dataset:"
@@ -7700,6 +7732,15 @@ fi
             echo "  $EV_VOLCANO_LOGFC"
             echo "[EV VOLCANO] conda env:"
             echo "  $EV_VOLCANO_ENV"
+            echo "[EV VOLCANO] comparison:"
+            echo "  $comparison_name"
+
+            if [[ -n "$group_label1" && -n "$group_label2" ]]; then
+                echo "[EV VOLCANO] group 1:"
+                echo "  $group_label1"
+                echo "[EV VOLCANO] group 2:"
+                echo "  $group_label2"
+            fi
             echo "------------------------------------------------------------"
 
             if ! (
@@ -7711,11 +7752,12 @@ fi
 
                 cd "$de_dir" || exit 1
 
-                Rscript "$EV_VOLCANO_SCRIPT" \
+                    Rscript "$EV_VOLCANO_SCRIPT" \
                     --de_results "$de_file" \
                     --label_top "$EV_VOLCANO_LABEL_TOP" \
                     --padj "$EV_VOLCANO_PADJ" \
-                    --logfc "$EV_VOLCANO_LOGFC"
+                    --logfc "$EV_VOLCANO_LOGFC" \
+                    "${ev_group_args[@]}"
             ) > "$volcano_log" 2>&1
             then
                 echo "${y}[WARNING] EV volcano failed for:${w}"
