@@ -105,6 +105,45 @@ require_file() {
     fi
 }
 
+
+require_ssgsea_differential_result() {
+    local result_dir="$1"
+    local label="${2:-ssGSEA differential result}"
+    local table_file="$result_dir/ssGSEA_differential_scores.tsv"
+    local skipped_file="$result_dir/ssGSEA_differential_skipped.txt"
+    local group_count="${GROUP_COUNT:-0}"
+
+    if [[ -s "$table_file" ]]; then
+        echo "${g}[OK] $label:${w}"
+        echo "  $table_file"
+        return 0
+    fi
+
+    # A differential comparison is scientifically undefined with fewer
+    # than two groups. In that case, the plotting script emits an explicit
+    # skip marker and the main pipeline should continue normally.
+    if [[ "$group_count" =~ ^[0-9]+$ ]] &&
+       (( group_count < 2 )) &&
+       [[ -s "$skipped_file" ]]
+    then
+        echo "${y}[INFO] $label skipped because fewer than two groups are available.${w}"
+        echo "  Marker: $skipped_file"
+        sed 's/^/  /' "$skipped_file" || true
+        return 0
+    fi
+
+    if [[ -s "$skipped_file" ]]; then
+        echo "${r}[ERROR] $label was unexpectedly skipped despite $group_count detected groups.${w}" >&2
+        echo "Skip marker:" >&2
+        echo "  $skipped_file" >&2
+        sed 's/^/  /' "$skipped_file" >&2 || true
+        exit 1
+    fi
+
+    echo "${r}[MISSING] $label: $table_file${w}" >&2
+    exit 1
+}
+
 # ------------------------------------------------------------
 # Paired FASTQ record-count validation
 # ------------------------------------------------------------
@@ -7989,7 +8028,9 @@ if [[ "$RUN_SSGSEA_PLOTS" == "1" ]]; then
 
     require_file "$outputdr/ssGSEA/plots/ssGSEA_top_variable_heatmap.png" "ssGSEA top variable heatmap"
     require_file "$outputdr/ssGSEA/plots/ssGSEA_PCA_samples.png" "ssGSEA PCA plot"
-    require_file "$outputdr/ssGSEA/plots/ssGSEA_differential_scores.tsv" "ssGSEA differential score table"
+    require_ssgsea_differential_result \
+        "$outputdr/ssGSEA/plots" \
+        "ssGSEA differential score table"
 
     echo "${g}[OK] ssGSEA plots saved to:${w}"
     echo "  $outputdr/ssGSEA/plots"
@@ -8068,7 +8109,9 @@ if [[ "$RUN_SSGSEA_PLOTS" == "1" ]]; then
 
         require_file "$SSGSEA_GO_NAME_DIR/ssGSEA_top_variable_heatmap.png" "Corrected GO-name ssGSEA top variable heatmap"
         require_file "$SSGSEA_GO_NAME_DIR/ssGSEA_PCA_samples.png" "Corrected GO-name ssGSEA PCA plot"
-        require_file "$SSGSEA_GO_NAME_DIR/ssGSEA_differential_scores.tsv" "Corrected GO-name ssGSEA differential score table"
+        require_ssgsea_differential_result \
+            "$SSGSEA_GO_NAME_DIR" \
+            "Corrected GO-name ssGSEA differential score table"
 
         echo "${g}[OK] Corrected GO-name ssGSEA plots saved to:${w}"
         echo "  $SSGSEA_GO_NAME_DIR"

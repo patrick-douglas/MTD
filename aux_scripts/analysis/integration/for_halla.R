@@ -53,21 +53,94 @@ dir.create(
 # Read ssGSEA score matrix
 # ------------------------------------------------------------
 
-score <- read.table(
+gct_header <- readLines(
   scores_file,
-  row.names = 1,
+  n = 2L
+)
+
+if (
+  length(gct_header) < 2L ||
+    !grepl("^#1\\.", gct_header[1])
+) {
+  stop(
+    "Input ssGSEA score file does not look like a GCT file: ",
+    scores_file
+  )
+}
+
+gct_dimensions <- strsplit(
+  gct_header[2],
+  "[[:space:]]+"
+)[[1]]
+
+gct_dimensions <- gct_dimensions[
+  gct_dimensions != ""
+]
+
+if (length(gct_dimensions) < 2L) {
+  stop(
+    "Could not parse GCT dimensions from: ",
+    gct_header[2]
+  )
+}
+
+n_score_samples <- suppressWarnings(
+  as.integer(gct_dimensions[2])
+)
+
+if (
+  is.na(n_score_samples) ||
+    n_score_samples < 1L
+) {
+  stop(
+    "Invalid GCT sample count in second header line: ",
+    gct_header[2]
+  )
+}
+
+score_table <- read.delim(
+  scores_file,
   sep = "\t",
   header = TRUE,
   skip = 2,
   check.names = FALSE,
+  stringsAsFactors = FALSE,
   quote = "",
   comment.char = ""
 )
 
-score <- as.matrix(score)
+if (ncol(score_table) < n_score_samples + 1L) {
+  stop(
+    "GCT file has fewer columns than expected from its sample count."
+  )
+}
+
+score_row_names <- as.character(
+  score_table[[1]]
+)
+
+score_sample_columns <- tail(
+  colnames(score_table),
+  n_score_samples
+)
+
+score <- as.matrix(
+  score_table[
+    ,
+    score_sample_columns,
+    drop = FALSE
+  ]
+)
+
+rownames(score) <- score_row_names
 
 suppressWarnings(
   storage.mode(score) <- "numeric"
+)
+
+message(
+  "[FOR_HALLA] ssGSEA sample columns detected from GCT header: ",
+  n_score_samples
 )
 
 # ------------------------------------------------------------

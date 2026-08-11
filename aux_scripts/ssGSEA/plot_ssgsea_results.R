@@ -172,6 +172,143 @@ read_samplesheet <- function(file, score_samples) {
   meta
 }
 
+read_contrasts <- function(file, meta) {
+  ss <- read.csv(
+    file,
+    header = TRUE,
+    check.names = FALSE,
+    stringsAsFactors = FALSE,
+    na.strings = c("", "NA")
+  )
+
+  groups <- levels(meta$group)
+
+  empty_contrasts <- data.frame(
+    group1 = character(0),
+    group2 = character(0),
+    source = character(0),
+    stringsAsFactors = FALSE
+  )
+
+  if (length(groups) < 2L) {
+    message(
+      "[INFO] Differential ssGSEA: fewer than two groups; ",
+      "no pairwise contrasts are possible."
+    )
+    return(empty_contrasts)
+  }
+
+  cn_lower <- tolower(colnames(ss))
+  group1_index <- match("group1", cn_lower, nomatch = 0L)
+  group2_index <- match("group2", cn_lower, nomatch = 0L)
+
+  if (xor(group1_index > 0L, group2_index > 0L)) {
+    stop(
+      "Samplesheet must contain both group1 and group2 columns, ",
+      "or neither of them."
+    )
+  }
+
+  if (group1_index > 0L && group2_index > 0L) {
+    group1 <- trimws(as.character(ss[[group1_index]]))
+    group2 <- trimws(as.character(ss[[group2_index]]))
+
+    group1[is.na(group1)] <- ""
+    group2[is.na(group2)] <- ""
+
+    incomplete <- xor(group1 != "", group2 != "")
+
+    if (any(incomplete)) {
+      bad_rows <- which(incomplete) + 1L
+      stop(
+        "Incomplete group1/group2 comparison in samplesheet row(s): ",
+        paste(bad_rows, collapse = ", ")
+      )
+    }
+
+    explicit <- data.frame(
+      group1 = group1[group1 != "" & group2 != ""],
+      group2 = group2[group1 != "" & group2 != ""],
+      stringsAsFactors = FALSE
+    )
+
+    explicit <- unique(explicit)
+
+    if (nrow(explicit) > 0L) {
+      invalid_group <- (
+        !(explicit$group1 %in% groups) |
+          !(explicit$group2 %in% groups)
+      )
+
+      if (any(invalid_group)) {
+        invalid_pairs <- paste0(
+          explicit$group1[invalid_group],
+          " vs ",
+          explicit$group2[invalid_group]
+        )
+
+        stop(
+          "Samplesheet contains differential ssGSEA contrasts with groups ",
+          "that are not present among matched samples: ",
+          paste(invalid_pairs, collapse = "; ")
+        )
+      }
+
+      same_group <- explicit$group1 == explicit$group2
+
+      if (any(same_group)) {
+        invalid_pairs <- paste0(
+          explicit$group1[same_group],
+          " vs ",
+          explicit$group2[same_group]
+        )
+
+        stop(
+          "Differential ssGSEA contrasts must compare different groups: ",
+          paste(invalid_pairs, collapse = "; ")
+        )
+      }
+
+      explicit$source <- "samplesheet_group1_group2"
+
+      message(
+        "[INFO] Differential ssGSEA contrasts from samplesheet: ",
+        nrow(explicit)
+      )
+
+      return(explicit)
+    }
+  }
+
+  pair_matrix <- t(combn(groups, 2L))
+
+  automatic <- data.frame(
+    group1 = pair_matrix[, 1],
+    group2 = pair_matrix[, 2],
+    source = "automatic_all_pairwise",
+    stringsAsFactors = FALSE
+  )
+
+  message(
+    "[INFO] No explicit group1/group2 contrasts were supplied; ",
+    "using all pairwise group comparisons: ",
+    nrow(automatic)
+  )
+
+  automatic
+}
+
+safe_path_component <- function(x) {
+  value <- gsub("[^A-Za-z0-9._-]+", "_", as.character(x))
+  value <- gsub("^_+|_+$", "", value)
+
+  if (!nzchar(value)) {
+    value <- "group"
+  }
+
+  value
+}
+
 clean_matrix <- function(mat) {
   keep <- rowSums(is.finite(mat)) >= 2
   mat <- mat[keep, , drop = FALSE]
@@ -300,108 +437,354 @@ plot_pca <- function(mat, meta, outfile_base, pca_top_var = 500) {
   save_plot(p, outfile_base, width = 9, height = 7)
 }
 
-run_differential <- function(mat, meta, desc, outdir, top_diff = 20) {
-  groups <- levels(meta$group)
+run_differential <- function(
+  mat,
+  meta,
+  desc,
+  contrasts,
+  outdir,
+  top_diff = 20
+) {
+  combined_file <- file.path(
+    outdir,
+    "ssGSEA_differential_scores.tsv"
+  )
 
-  if (length(groups) != 2) {
+  skipped_file <- file.path(
+    outdir,
+    "ssGSEA_differential_skipped.txt"
+  )
+
+  comparison_file <- file.path(
+    outdir,
+    "ssGSEA_differential_comparisons.tsv"
+  )
+
+  unlink(
+    c(
+      combined_file,
+      skipped_file,
+      comparison_file
+    ),
+    force = TRUE
+  )
+
+  if (nrow(contrasts) == 0L) {
     msg <- paste0(
-      "Differential ssGSEA boxplots skipped because the samplesheet has ",
-      length(groups), " groups. This script currently makes differential plots only for two groups."
+      "Differential ssGSEA skipped because fewer than two groups ",
+      "were available after matching the samplesheet to the score matrix."
     )
 
-    writeLines(msg, file.path(outdir, "ssGSEA_differential_skipped.txt"))
+    writeLines(msg, skipped_file)
     message("[INFO] ", msg)
     return(invisible(NULL))
   }
 
-  g1 <- groups[1]
-  g2 <- groups[2]
+  write.table(
+    contrasts,
+    comparison_file,
+    sep = "\t",
+    quote = FALSE,
+    row.names = FALSE
+  )
 
-  x1_idx <- meta$sample[meta$group == g1]
-  x2_idx <- meta$sample[meta$group == g2]
+  message("[OK] Saved: ", comparison_file)
 
-  res_list <- lapply(rownames(mat), function(term) {
-    x1 <- as.numeric(mat[term, x1_idx])
-    x2 <- as.numeric(mat[term, x2_idx])
+  differential_root <- file.path(
+    outdir,
+    "differential"
+  )
 
-    p_t <- tryCatch(
-      t.test(x1, x2)$p.value,
-      error = function(e) NA_real_
+  dir.create(
+    differential_root,
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
+
+  all_results <- vector(
+    "list",
+    nrow(contrasts)
+  )
+
+  for (comparison_index in seq_len(nrow(contrasts))) {
+    g1 <- contrasts$group1[comparison_index]
+    g2 <- contrasts$group2[comparison_index]
+    comparison_source <- contrasts$source[comparison_index]
+    comparison_label <- paste0(g1, "_vs_", g2)
+
+    x1_idx <- meta$sample[as.character(meta$group) == g1]
+    x2_idx <- meta$sample[as.character(meta$group) == g2]
+
+    if (length(x1_idx) == 0L || length(x2_idx) == 0L) {
+      stop(
+        "Differential ssGSEA contrast has no matched samples: ",
+        g1,
+        " vs ",
+        g2
+      )
+    }
+
+    comparison_dir <- file.path(
+      differential_root,
+      paste0(
+        sprintf("%02d", comparison_index),
+        "_",
+        safe_path_component(g1),
+        "_vs_",
+        safe_path_component(g2)
+      )
     )
 
-    p_w <- tryCatch(
-      wilcox.test(x1, x2, exact = FALSE)$p.value,
-      error = function(e) NA_real_
+    dir.create(
+      comparison_dir,
+      recursive = TRUE,
+      showWarnings = FALSE
     )
 
-    data.frame(
-      term = term,
-      mean_group1 = mean(x1, na.rm = TRUE),
-      mean_group2 = mean(x2, na.rm = TRUE),
-      diff_group1_minus_group2 = mean(x1, na.rm = TRUE) - mean(x2, na.rm = TRUE),
-      pvalue_ttest = p_t,
-      pvalue_wilcox = p_w,
-      group1 = g1,
-      group2 = g2,
-      stringsAsFactors = FALSE
+    message(
+      "[DIFFERENTIAL ssGSEA] [",
+      comparison_index,
+      "/",
+      nrow(contrasts),
+      "] ",
+      g1,
+      " vs ",
+      g2,
+      " (",
+      length(x1_idx),
+      " vs ",
+      length(x2_idx),
+      " samples)"
     )
-  })
 
-  res <- do.call(rbind, res_list)
-  res$padj_ttest <- p.adjust(res$pvalue_ttest, method = "BH")
-  res$padj_wilcox <- p.adjust(res$pvalue_wilcox, method = "BH")
+    res_list <- lapply(rownames(mat), function(term) {
+      x1 <- as.numeric(mat[term, x1_idx])
+      x2 <- as.numeric(mat[term, x2_idx])
 
-  res <- merge(res, desc, by.x = "term", by.y = "term", all.x = TRUE)
-  res <- res[order(res$padj_ttest, -abs(res$diff_group1_minus_group2)), ]
+      p_t <- tryCatch(
+        t.test(x1, x2)$p.value,
+        error = function(e) NA_real_
+      )
 
-  out_tsv <- file.path(outdir, "ssGSEA_differential_scores.tsv")
-  write.table(res, out_tsv, sep = "\t", quote = FALSE, row.names = FALSE)
+      p_w <- tryCatch(
+        wilcox.test(x1, x2, exact = FALSE)$p.value,
+        error = function(e) NA_real_
+      )
 
-  message("[OK] Saved: ", out_tsv)
+      data.frame(
+        comparison_index = comparison_index,
+        comparison = comparison_label,
+        comparison_source = comparison_source,
+        group1 = g1,
+        group2 = g2,
+        n_group1 = length(x1),
+        n_group2 = length(x2),
+        term = term,
+        mean_group1 = mean(x1, na.rm = TRUE),
+        mean_group2 = mean(x2, na.rm = TRUE),
+        diff_group1_minus_group2 = (
+          mean(x1, na.rm = TRUE) -
+            mean(x2, na.rm = TRUE)
+        ),
+        pvalue_ttest = p_t,
+        pvalue_wilcox = p_w,
+        stringsAsFactors = FALSE
+      )
+    })
 
-  top_terms <- res$term[is.finite(res$padj_ttest)]
-  top_terms <- head(top_terms, min(top_diff, length(top_terms)))
+    res <- do.call(rbind, res_list)
 
-  if (length(top_terms) == 0) {
-    writeLines("No valid differential ssGSEA terms found.", file.path(outdir, "ssGSEA_differential_no_valid_terms.txt"))
-    return(invisible(res))
+    # Preserve the historical MTD behavior: BH correction is performed
+    # independently within each biological contrast across all tested terms.
+    res$padj_ttest <- p.adjust(
+      res$pvalue_ttest,
+      method = "BH"
+    )
+
+    res$padj_wilcox <- p.adjust(
+      res$pvalue_wilcox,
+      method = "BH"
+    )
+
+    res <- merge(
+      res,
+      desc,
+      by = "term",
+      all.x = TRUE,
+      sort = FALSE
+    )
+
+    res <- res[
+      order(
+        res$padj_ttest,
+        -abs(res$diff_group1_minus_group2),
+        na.last = TRUE
+      ),
+      ,
+      drop = FALSE
+    ]
+
+    comparison_tsv <- file.path(
+      comparison_dir,
+      "ssGSEA_differential_scores.tsv"
+    )
+
+    write.table(
+      res,
+      comparison_tsv,
+      sep = "\t",
+      quote = FALSE,
+      row.names = FALSE
+    )
+
+    message("[OK] Saved: ", comparison_tsv)
+
+    all_results[[comparison_index]] <- res
+
+    top_terms <- res$term[
+      is.finite(res$padj_ttest)
+    ]
+
+    top_terms <- head(
+      top_terms,
+      min(top_diff, length(top_terms))
+    )
+
+    if (length(top_terms) == 0L) {
+      writeLines(
+        paste0(
+          "No valid differential ssGSEA terms found for ",
+          g1,
+          " vs ",
+          g2,
+          "."
+        ),
+        file.path(
+          comparison_dir,
+          "ssGSEA_differential_no_valid_terms.txt"
+        )
+      )
+
+      next
+    }
+
+    pair_samples <- meta$sample[
+      as.character(meta$group) %in% c(g1, g2)
+    ]
+
+    pair_meta <- meta[
+      match(pair_samples, meta$sample),
+      ,
+      drop = FALSE
+    ]
+
+    pair_meta$group <- factor(
+      as.character(pair_meta$group),
+      levels = c(g1, g2)
+    )
+
+    long_list <- lapply(top_terms, function(term) {
+      data.frame(
+        term = term,
+        sample = pair_meta$sample,
+        group = pair_meta$group,
+        score = as.numeric(
+          mat[term, pair_meta$sample]
+        ),
+        stringsAsFactors = FALSE
+      )
+    })
+
+    df <- do.call(rbind, long_list)
+
+    df$term <- factor(
+      df$term,
+      levels = rev(top_terms)
+    )
+
+    df$group <- factor(
+      df$group,
+      levels = c(g1, g2)
+    )
+
+    p <- ggplot(df, aes(x = group, y = score)) +
+      geom_boxplot(outlier.shape = NA) +
+      geom_jitter(width = 0.12, size = 1.8, alpha = 0.8) +
+      facet_wrap(~ term, scales = "free_y", ncol = 4) +
+      theme_bw() +
+      labs(
+        title = paste0(
+          "Top differential ssGSEA GO scores: ",
+          g1,
+          " vs ",
+          g2
+        ),
+        x = "Group",
+        y = "ssGSEA score"
+      ) +
+      theme(
+        axis.text.x = element_text(
+          angle = 45,
+          hjust = 1
+        ),
+        strip.text = element_text(size = 7),
+        plot.title = element_text(hjust = 0.5)
+      )
+
+    h <- max(
+      7,
+      ceiling(length(top_terms) / 4) * 2.5
+    )
+
+    save_plot(
+      p,
+      file.path(
+        comparison_dir,
+        "ssGSEA_top_differential_boxplots"
+      ),
+      width = 13,
+      height = h
+    )
+
+    # Backward-compatible top-level boxplot names for a run that
+    # contains exactly one differential contrast.
+    if (nrow(contrasts) == 1L) {
+      save_plot(
+        p,
+        file.path(
+          outdir,
+          "ssGSEA_top_differential_boxplots"
+        ),
+        width = 13,
+        height = h
+      )
+    }
   }
 
-  long_list <- lapply(top_terms, function(term) {
-    data.frame(
-      term = term,
-      sample = meta$sample,
-      group = meta$group,
-      score = as.numeric(mat[term, meta$sample]),
-      stringsAsFactors = FALSE
-    )
-  })
+  combined <- do.call(
+    rbind,
+    all_results
+  )
 
-  df <- do.call(rbind, long_list)
+  write.table(
+    combined,
+    combined_file,
+    sep = "\t",
+    quote = FALSE,
+    row.names = FALSE
+  )
 
-  df$term <- factor(df$term, levels = rev(top_terms))
-  df$group <- factor(df$group, levels = groups)
+  message(
+    "[OK] Saved combined differential ssGSEA table: ",
+    combined_file
+  )
 
-  p <- ggplot(df, aes(x = group, y = score)) +
-    geom_boxplot(outlier.shape = NA) +
-    geom_jitter(width = 0.12, size = 1.8, alpha = 0.8) +
-    facet_wrap(~ term, scales = "free_y", ncol = 4) +
-    theme_bw() +
-    labs(
-      title = paste0("Top differential ssGSEA GO scores: ", g1, " vs ", g2),
-      x = "Group",
-      y = "ssGSEA score"
-    ) +
-    theme(
-      axis.text.x = element_text(angle = 45, hjust = 1),
-      strip.text = element_text(size = 7),
-      plot.title = element_text(hjust = 0.5)
-    )
+  message(
+    "[OK] Differential ssGSEA comparisons completed: ",
+    nrow(contrasts)
+  )
 
-  h <- max(7, ceiling(length(top_terms) / 4) * 2.5)
-  save_plot(p, file.path(outdir, "ssGSEA_top_differential_boxplots"), width = 13, height = h)
-
-  invisible(res)
+  invisible(combined)
 }
 
 gct <- read_gct_scores(scores_file)
@@ -409,6 +792,11 @@ mat <- clean_matrix(gct$mat)
 
 meta <- read_samplesheet(samplesheet_file, colnames(mat))
 mat <- mat[, meta$sample, drop = FALSE]
+
+contrasts <- read_contrasts(
+  samplesheet_file,
+  meta
+)
 
 desc <- gct$desc[gct$desc$term %in% rownames(mat), , drop = FALSE]
 
@@ -420,6 +808,18 @@ summary_lines <- c(
   paste0("n_samples\t", ncol(mat)),
   paste0("samples\t", paste(colnames(mat), collapse = ",")),
   paste0("groups\t", paste(levels(meta$group), collapse = ",")),
+  paste0("n_differential_contrasts\t", nrow(contrasts)),
+  paste0(
+    "differential_contrasts\t",
+    if (nrow(contrasts) == 0L) {
+      "none"
+    } else {
+      paste(
+        paste0(contrasts$group1, "_vs_", contrasts$group2),
+        collapse = ","
+      )
+    }
+  ),
   paste0("top_var\t", top_var),
   paste0("top_diff\t", top_diff),
   paste0("pca_top_var\t", pca_top_var)
@@ -454,6 +854,7 @@ run_differential(
   mat,
   meta,
   desc,
+  contrasts,
   outdir,
   top_diff = top_diff
 )
