@@ -1368,6 +1368,16 @@ inputdr=$(dirname "$samplesheet_file")
 
 mkdir -p "$outputdr"
 mkdir -p "$outputdr/temp"
+mkdir -p "$outputdr/methods"
+
+# ------------------------------------------------------------
+# Save samplesheet used for this analysis
+# ------------------------------------------------------------
+
+cp -f -- "$samplesheet_file" "$outputdr/methods/used_samplesheet.csv"
+
+echo "${g}[OK] Samplesheet used for this analysis saved to:${w}"
+echo "  $outputdr/methods/used_samplesheet.csv"
 
 cd "$outputdr/temp" || die "Could not enter temp directory: $outputdr/temp"
 
@@ -3655,15 +3665,50 @@ fi
 echo
 echo "${g}============================================"
 echo "[OK] FASTQ input validation completed"
-echo "Requested read layout:${w} $READ_LAYOUT_MODE"
-echo "${g}Detected read layout:${w} $detected_run_layout"
-echo "${g}Effective read layout:${w} $READ_LAYOUT"
+echo "Effective read layout:${w} $READ_LAYOUT"
 echo "FASTQ input manifest:"
 echo "  $FASTQ_INPUT_MANIFEST"
 echo "${g}============================================${w}"
 
 column -s $'\t' -t "$FASTQ_INPUT_MANIFEST" 2>/dev/null || \
     cat "$FASTQ_INPUT_MANIFEST"
+
+# ------------------------------------------------------------
+# Save FASTQ files used for this analysis
+# ------------------------------------------------------------
+
+USED_FASTQ_MANIFEST="$outputdr/methods/used_fastq_files.tsv"
+
+printf 'sample\tlayout\tread1_path\tread1_size_bytes\tread2_path\tread2_size_bytes\n' \
+    > "$USED_FASTQ_MANIFEST"
+
+while IFS=$'\t' read -r sample layout read1 read2; do
+    [[ "$sample" == "sample" ]] && continue
+
+    read1_abs="$(readlink -f -- "$read1")"
+    read1_size="$(stat -c '%s' -- "$read1_abs")"
+
+    if [[ "$layout" == "pe" && -n "$read2" && "$read2" != "-" ]]; then
+        read2_abs="$(readlink -f -- "$read2")"
+        read2_size="$(stat -c '%s' -- "$read2_abs")"
+    else
+        read2_abs="-"
+        read2_size="-"
+    fi
+
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$sample" \
+        "$layout" \
+        "$read1_abs" \
+        "$read1_size" \
+        "$read2_abs" \
+        "$read2_size" \
+        >> "$USED_FASTQ_MANIFEST"
+
+done < "$FASTQ_INPUT_MANIFEST"
+
+echo "${g}[OK] FASTQ files used for this analysis saved to:${w}"
+echo "  $USED_FASTQ_MANIFEST"
 
 # Rewrite the methods log now that the effective read layout
 # has been detected and validated.
