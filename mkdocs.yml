@@ -78,6 +78,7 @@ nav:
       - Installation: getting-started/installation.md
       - Verify installation: getting-started/verify-installation.md
       - Quick start: getting-started/quick-start.md
+      - Full user guide: user-guide/index.md
 
   - User guide:
       - Overview: user-guide/index.md
