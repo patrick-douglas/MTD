@@ -10,7 +10,41 @@ The main folder is:
 
 ```text
 methods/
+├── mtd_methods_run_parameters.csv
+├── used_samplesheet.csv
+└── used_fastq_files.tsv
 ```
+
+## Input provenance files
+
+Two files preserve the exact analysis inputs independently of the original input directory.
+
+### Samplesheet copy
+
+```text
+methods/used_samplesheet.csv
+```
+
+MTD Explorer copies the exact samplesheet supplied to `--input` into the output directory at run start. This allows the study design used by that result directory to be recovered even if the original samplesheet is later edited, renamed, or moved.
+
+### FASTQ manifest
+
+```text
+methods/used_fastq_files.tsv
+```
+
+After FASTQ detection and layout validation, MTD Explorer records one row per sample with these columns:
+
+```text
+sample
+layout
+read1_path
+read1_size_bytes
+read2_path
+read2_size_bytes
+```
+
+The manifest stores resolved absolute FASTQ paths and file sizes in bytes. For single-end samples, the R2 fields are recorded as `-`. The FASTQ files themselves are **not** copied into `methods/`; the manifest records which files were actually resolved and used.
 
 ## Main reproducibility table
 
@@ -99,12 +133,13 @@ Typical parameters include:
 ```text
 no_trim
 trim_length
-custom_raw_cache_path
-prepared_fastq_pattern
+read_layout
+prepared_fastq_pattern_se
+prepared_fastq_pattern_pe
+paired_fastq_record_validation
 ```
 
-These rows document whether [fastp][fastp] trimming was used, the minimum read
-length, and the downstream FASTQ naming pattern.
+These rows document whether [fastp][fastp] trimming was used, the minimum read length, the effective SE/PE layout, normalized downstream FASTQ patterns, and paired-record validation behavior.
 
 ## Host filtering
 
@@ -177,7 +212,10 @@ taxonomic_levels
 These rows are useful for reproducing microbiome abundance estimation.
 
 The read length and distribution file must match the intended [Bracken][bracken]
-database configuration.
+database configuration. The pipeline also records Bracken package metadata and
+the CLI version banner separately when available. This distinction matters because
+a packaged Bracken release can expose an older CLI banner; for reproducibility,
+prefer the recorded package version when identifying the installed Conda build.
 
 ## Detected microbiome read extraction
 
@@ -209,18 +247,23 @@ Typical parameters include:
 
 ```text
 host_alignment_mode
+read_layout
 blast_database
 hisat2_database
 gtf_file
+conda_environment
+paired_end_mode
 output
-gmt_file
+gmt_requested
+gmt_resolved
 gmt_mode
-protein_fasta
-annotation_gff
+master_gmt
+analysis_gmt
 ```
 
-These rows are important for reproducing host expression and gene-set activity
-results.
+The featureCounts rows record the dedicated `MTD_featurecounts` environment. Paired-end quantification is explicitly recorded as `-p plus --countReadPairs`, meaning paired alignments are counted as fragments/read pairs. The current runtime validates featureCounts 2.1.1.
+
+The ssGSEA rows distinguish the value requested by the user from the resolved mode/path and record the persistent host master GMT plus the analysis-specific filtered GMT when applicable. This is especially important now that `--ssgsea-gmt auto` is the default.
 
 ## Functional profiling
 
@@ -306,8 +349,9 @@ step-specific context.
 For reproducibility, inspect files in this order:
 
 ```text
+methods/used_samplesheet.csv
+methods/used_fastq_files.tsv
 methods/mtd_methods_run_parameters.csv
-methods/
 host_counts.txt
 Nonhost_DEG/
 Host_DEG/
@@ -316,7 +360,7 @@ ssGSEA/
 halla/
 ```
 
-Start with `methods/mtd_methods_run_parameters.csv`.
+Start with the saved samplesheet and FASTQ manifest to confirm the exact inputs, then inspect `methods/mtd_methods_run_parameters.csv` for parameters, databases, and captured software versions.
 
 Then inspect the output folders relevant to the result you want to reproduce.
 
@@ -367,6 +411,7 @@ expected for that environment or indicate a missing executable.
 - [ssGSEA outputs](ssgsea-outputs.md)
 - [HAllA integration outputs](halla-integration-outputs.md)
 - [Command-line reference](command-line.md)
+- [HPC / Slurm execution](hpc-slurm.md)
 
 [mtd-explorer]: https://github.com/patrick-douglas/MTD-Explorer
 [kraken2]: https://ccb.jhu.edu/software/kraken2/index.shtml

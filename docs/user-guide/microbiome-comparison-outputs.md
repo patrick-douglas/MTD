@@ -180,6 +180,12 @@ Use the comparison-specific CSV file for the underlying results:
 Nonhost_DEG/Liver_vs_Telencephalon/bracken_species_all_Liver_vs_Telencephalon.csv
 ```
 
+The EnhancedVolcano reprocessing step derives the displayed comparison labels
+from the comparison directory name. For example,
+`Liver_vs_Telencephalon` is labeled **Liver vs Telencephalon** instead of using
+generic group names. Auxiliary gene-symbol-style tables are excluded from the
+reprocessing scan when present, preventing duplicate volcano generation.
+
 ## Additional microbiome comparison outputs
 
 Other microbiome comparison figures may also be generated:

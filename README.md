@@ -26,7 +26,7 @@
   <a href="https://patrick-douglas.github.io/MTD-Explorer/">
     <img alt="Documentation" src="https://img.shields.io/badge/docs-MTD%20Explorer-0b3d66">
   </a>
-  <a href="https://github.com/patrick-douglas/MTD">
+  <a href="https://github.com/patrick-douglas/MTD-Explorer">
     <img alt="GitHub repository" src="https://img.shields.io/badge/repository-GitHub-black">
   </a>
 </p>
@@ -41,8 +41,9 @@ data.
 
 It builds upon the original **MTD** pipeline developed by Fei Wu, Yao-Zhong Liu,
 and Binhua Ling, and extends it with updated installation, host support,
-taxonomic exploration, functional profiling, reproducibility summaries, and
-documentation.
+single-end and paired-end workflows, taxonomic exploration, functional
+profiling, input provenance, reproducibility summaries, optional Slurm/HPC
+execution, pipeline benchmarking, and expanded documentation.
 
 The original MTD pipeline should be cited when using MTD Explorer.
 
@@ -58,6 +59,8 @@ Start with:
 - [Verify installation](https://patrick-douglas.github.io/MTD-Explorer/getting-started/verify-installation/)
 - [Quick start](https://patrick-douglas.github.io/MTD-Explorer/getting-started/quick-start/)
 - [User guide](https://patrick-douglas.github.io/MTD-Explorer/user-guide/)
+- [HPC / Slurm execution](https://patrick-douglas.github.io/MTD-Explorer/user-guide/hpc-slurm/)
+- [Pipeline benchmarking](https://patrick-douglas.github.io/MTD-Explorer/user-guide/benchmarking/)
 - [Academic references](https://patrick-douglas.github.io/MTD-Explorer/reference/)
 
 ## Main analysis layers
@@ -88,8 +91,8 @@ current MTD Explorer scope, tests, or claims.
 Clone the repository:
 
 ```bash
-git clone https://github.com/patrick-douglas/MTD.git
-cd MTD
+git clone https://github.com/patrick-douglas/MTD-Explorer.git
+cd MTD-Explorer
 ```
 
 Check the available command-line options:

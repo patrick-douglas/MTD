@@ -77,6 +77,19 @@ Depending on the selected host-processing mode, host reads may be aligned using
 [HISAT2][hisat2] or [Magic-BLAST][magic-blast], and counted with
 [featureCounts][featurecounts].
 
+Production gene counting uses the dedicated `MTD_featurecounts` Conda
+environment and [Subread][featurecounts] 2.1.1. This isolates the quantification
+runtime from the legacy `featureCounts` executable that may still be present in
+the main `MTD` environment for dependency compatibility.
+
+For paired-end input, MTD Explorer invokes featureCounts in fragment/read-pair
+mode with `-p --countReadPairs`. For single-end input, reads are counted in the
+standard single-read mode. In both layouts, the counting summary is retained as:
+
+```text
+host_counts.txt.summary
+```
+
 ## Normalized and transformed matrices
 
 The `Host_DEG/` directory usually contains processed host expression matrices:
@@ -278,6 +291,15 @@ Host_DEG/Liver_vs_Telencephalon/host_counts_Liver_vs_Telencephalon.EV.volcano.lo
 
 Use this log file if the enhanced volcano plot is missing, if gene labels do
 not appear as expected, or if the plotting step produced warnings.
+
+The EnhancedVolcano step derives the displayed comparison labels from the
+comparison directory name, so a folder such as `Liver_vs_Telencephalon` is
+plotted as **Liver vs Telencephalon** rather than with generic `group vs group`
+labels.
+
+Only the primary comparison table is used as the EnhancedVolcano input. The
+auxiliary `*_gene_symbols_table.csv` file is intentionally excluded from the
+volcano reprocessing scan so that the same comparison is not plotted twice.
 
 Some runs may also contain a standard volcano plot, such as:
 

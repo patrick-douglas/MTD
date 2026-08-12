@@ -44,7 +44,7 @@ After installing Git, download the MTD Explorer repository.
 ```bash
 cd ~
 git clone https://github.com/patrick-douglas/MTD-Explorer.git
-cd MTD
+cd MTD-Explorer
 ```
 
 HTTPS is the recommended method for users who have not configured an SSH key for GitHub.
@@ -56,7 +56,7 @@ Users with a GitHub SSH key already configured may use:
 ```bash
 cd ~
 git clone git@github.com:patrick-douglas/MTD-Explorer.git
-cd MTD
+cd MTD-Explorer
 ```
 
 Confirm that the repository was downloaded correctly:
@@ -219,12 +219,17 @@ bash Install.sh \
 
     These parameters alter how Kraken2 databases are built and should be changed only when there is a specific technical reason to use non-default database settings.
 
+The installer also accepts the environment variable
+`MTD_KRAKEN2_MASKER_THREADS` to control the number of threads used by `k2mask`
+during low-complexity masking. When it is not set, the installer uses its
+detected CPU thread count (`nproc`).
+
 ## Standard installation
 
 For a standard installation using the default Miniconda location and a Bracken read length of 75:
 
 ```bash
-cd ~/MTD
+cd ~/MTD-Explorer
 
 bash Install.sh \
   -o /home/user/MTD_install_cache
@@ -333,6 +338,52 @@ The installation cache should not be deleted after a successful installation. It
 - installing the pipeline on another computer;
 - validating downloaded reference files;
 - avoiding repeated large downloads.
+
+## Dedicated runtime environments
+
+The current installation isolates several tools whose modern dependencies should not replace packages in the legacy main `MTD` environment. In particular, MTD Explorer uses dedicated environments for fastp (`MTD_fastp`), Kraken2/Bracken (`MTD_kraken2`), HUMAnN/MetaPhlAn (`MTD_humann`), and host quantification with featureCounts (`MTD_featurecounts`).
+
+The installation checker currently validates these dedicated production runtimes:
+
+| Environment | Tool/package | Expected version |
+|---|---|---:|
+| `MTD_fastp` | fastp | `1.3.6` |
+| `MTD_featurecounts` | Subread / featureCounts | `2.1.1` |
+| `MTD_kraken2` | Kraken2 | `2.17.1` |
+| `MTD_kraken2` | Bracken package | `3.1p1` |
+
+The legacy Subread package may remain in the main `MTD` environment for dependency-stack stability, but production host quantification uses the `featureCounts` executable from `MTD_featurecounts`.
+
+Similarly, production Kraken2 and Bracken commands are taken from `MTD_kraken2`. The checker treats mismatches for the featureCounts, Kraken2, and Bracken production runtimes as installation failures; the fastp version check is currently reported as a warning-level version contract while the environment and executable remain required.
+
+!!! note "Bracken package version versus CLI banner"
+
+    The validated Bioconda package is `3.1p1`, but its current upstream
+    `bracken -v` banner can still report `v3.0.1`. MTD Explorer therefore
+    validates the Conda package metadata for Bracken rather than treating that
+    stale executable banner as the package version.
+
+## Kraken2 database cleanup after installation
+
+After the default microbial Kraken2 database and its Bracken distribution are successfully validated, the installer removes the redundant final-installation directory:
+
+```text
+kraken2DB_micro/library/bacteria/all
+```
+
+The consolidated database library remains available through `library/bacteria/library.fna`. This cleanup reduces the final installation footprint. It does **not** remove the corresponding persistent installation-cache copy, so cached source genomes can still be reused for later installation or rebuild operations.
+
+## Optional HPC node installation
+
+The ordinary installation remains the prerequisite for normal local use. If the pipeline will also run through Slurm, prepare the compute nodes separately after the main installation:
+
+```bash
+bash Installation/HPC/MTD_install_HPC_nodes.sh \
+  --node-list Installation/HPC/examples/nodes.txt \
+  --user your_user
+```
+
+Then validate the node-local runtime with `Installation/HPC/MTD_check_HPC_nodes.sh`. HPC node installation is optional and is documented separately in [HPC / Slurm execution](../user-guide/hpc-slurm.md).
 
 ## After installation
 

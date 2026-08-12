@@ -46,7 +46,8 @@ hide:
   analysis of host and microbial transcriptomes while adding expanded
   single-end and paired-end support, exploratory and comparison modes,
   custom host references and functional annotations, reusable installation
-  caches, validation tools, and updated reporting.
+  caches, validation tools, input provenance, optional Slurm/HPC execution,
+  and updated reporting.
 </p>
 
 <div class="mtd-origin-citation">

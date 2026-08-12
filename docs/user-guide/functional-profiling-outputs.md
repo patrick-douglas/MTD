@@ -13,6 +13,13 @@ The main folder is:
 hmn_genefamily_abundance_files/Nonhost_hmn_DEG/
 ```
 
+When `--hpc-conf FILE` is supplied, the per-sample [MetaPhlAn][metaphlan] and
+[HUMAnN][humann] profiling work can be submitted through the optional
+[Slurm HPC backend](hpc-slurm.md). The scientific result paths described on
+this page remain the same; the HPC backend changes where and how eligible
+per-sample work is executed, while omitting `--hpc-conf` keeps the normal local
+execution path.
+
 ## Main folders
 
 The functional outputs are usually split into two annotation layers:
@@ -129,10 +136,8 @@ Volcano_Liver_vs_Telencephalon.pdf
 ```
 
 The standard volcano plots are not shown on this page because they can be
-visually dense.
-
-Future MTD Explorer versions may replace them with clearer enhanced volcano
-plots.
+visually dense. Use the comparison-specific tables as the primary source for
+statistical interpretation.
 
 ## MaAsLin2 outputs
 
@@ -199,3 +204,5 @@ matrix was too sparse.
 [gene-ontology]: https://geneontology.org/
 [kegg]: https://www.genome.jp/kegg/
 [maaslin2]: https://huttenhower.sph.harvard.edu/maaslin/
+
+[metaphlan]: https://github.com/biobakery/MetaPhlAn

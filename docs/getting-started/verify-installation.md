@@ -22,7 +22,7 @@ MTD_check_installation.sh
 From the MTD Explorer directory:
 
 ```bash
-cd ~/MTD
+cd ~/MTD-Explorer
 bash MTD_check_installation.sh --help
 ```
 
@@ -40,7 +40,7 @@ installation, and persistent cache paths automatically.
 Run the default full verification with:
 
 ```bash
-cd ~/MTD
+cd ~/MTD-Explorer
 bash MTD_check_installation.sh
 ```
 
@@ -54,27 +54,23 @@ full
 
 MTD Explorer provides three verification levels.
 
-| Mode | Description |
+| Mode | Current scope |
 |---|---|
-| `quick` | Checks directory structure, package inventories, command availability, and script syntax |
-| `full` | Performs all quick checks and additionally tests R package loading and inspects HISAT2, BLAST, HUMAnN, and Kraken resources |
-| `deep` | Performs all full checks and additionally runs small Kraken2 classifications and validates all cached gzip files |
+| `quick` | Runtime and installed-database essentials |
+| `full` | Everything in `quick`, plus source checks, package checks, cache metadata, HUMAnN resources, and installation audit contracts |
+| `deep` | Everything in `full`, plus gzip integrity checks, `kraken2-inspect`, and safe remote freshness checks |
 
 ### Quick mode
 
-Use quick mode for a fast structural check:
+Use quick mode for a fast runtime check:
 
 ```bash
 bash MTD_check_installation.sh --mode quick
 ```
 
-This mode is useful after:
-
-- updating scripts;
-- changing file permissions;
-- modifying software environments;
-- transferring an existing installation;
-- checking whether the expected commands are available.
+This is useful after script updates, permission changes, environment repairs,
+or transfer of an existing installation when you primarily want to confirm that
+the required runtimes and installed databases are available.
 
 ### Full mode
 
@@ -102,38 +98,50 @@ Deep mode performs the most comprehensive validation:
 bash MTD_check_installation.sh --mode deep
 ```
 
-In addition to the full checks, deep mode performs small Kraken2
-classification tests and validates all gzip files in the persistent
-installation cache.
+It extends the full check with integrity-oriented and remote-freshness checks.
+Because these checks can inspect many cached files and query remote metadata,
+deep mode is most useful after a clean installation, interrupted downloads,
+cache migration, or suspected cache/database corruption.
 
-!!! note "Deep verification"
+To run deep mode without remote freshness checks:
 
-    Deep mode may take considerably longer than quick or full mode,
-    particularly when the installation cache contains many large
-    compressed files.
-
-    It is especially useful after:
-
-    - a clean installation;
-    - an interrupted database download;
-    - moving the cache to another disk;
-    - installing MTD Explorer on another computer;
-    - suspected cache corruption.
+```bash
+bash MTD_check_installation.sh --mode deep --no-network
+```
 
 ## Checker options
 
 | Option | Argument | Description |
 |---|---|---|
-| `-m`, `--mtd-dir` | `PATH` | MTD Explorer installation directory |
-| `-p`, `--conda-path` | `PATH` | Conda installation directory |
-| `-o`, `--offline-dir` | `PATH` | Persistent installation cache |
+| `--mtd-dir` | `PATH` | MTD Explorer repository/installation directory; default: directory containing the checker |
+| `--installer` | `PATH` | Explicit installer script; default: auto-detected inside `--mtd-dir` |
+| `--conda-path` | `PATH` | Miniconda directory; default: `condaPath`, then `$HOME/miniconda3` |
+| `-o`, `--offline-dir` | `PATH` | Persistent installation cache; default: `offlineCachePath` |
 | `-r`, `--read-length` | `INT` | Bracken read length; default: `75` |
-| `--mode` | `MODE` | Verification mode: `quick`, `full`, or `deep` |
+| `--hostid` | `TAXID` | Validate one installed custom-host reference; default: auto-detect numeric host references |
+| `--mode` | `quick`, `full`, `deep` | Verification level; default: `full` |
+| `--no-network` | — | Skip remote freshness checks in `deep` mode |
 | `--report-dir` | `PATH` | Directory where verification reports are written |
-| `--strict` | — | Return status `2` when warnings exist but no failures are detected |
-| `--keep-temp` | — | Preserve temporary test files inside the report directory |
-| `-h`, `--help` | — | Display the checker help and exit |
+| `--strict` | — | Treat warnings as final failure |
+| `--keep-temp` | — | Preserve temporary checker files |
 | `--version` | — | Display the checker version and exit |
+| `-h`, `--help` | — | Display the checker help and exit |
+
+!!! note "No `-m` or `-p` checker aliases"
+
+    In the current checker, `--mtd-dir` and `--conda-path` are long-form
+    options. The short flags `-m` and `-p` belong to other MTD Explorer
+    commands and should not be used here.
+
+## Exit status
+
+The checker currently uses these process exit codes:
+
+| Exit code | Meaning |
+|---|---|
+| `0` | No failures; warnings are allowed unless `--strict` is used |
+| `1` | One or more failures, or warnings when `--strict` is enabled |
+| `2` | Invalid checker arguments |
 
 ## Automatic path detection
 
@@ -145,7 +153,7 @@ When `--mtd-dir` is not provided, the checker uses the directory containing
 For a standard installation, this is normally sufficient:
 
 ```bash
-cd ~/MTD
+cd ~/MTD-Explorer
 bash MTD_check_installation.sh
 ```
 
@@ -153,7 +161,7 @@ A different installation directory can be specified explicitly:
 
 ```bash
 bash MTD_check_installation.sh \
-  --mtd-dir /path/to/MTD
+  --mtd-dir /path/to/MTD-Explorer
 ```
 
 ### Conda installation
@@ -161,7 +169,7 @@ bash MTD_check_installation.sh \
 When `--conda-path` is not provided, the checker searches for the Conda
 installation in the following order:
 
-1. the path recorded in `MTD/condaPath`;
+1. the path recorded in `MTD-Explorer/condaPath`;
 2. `$HOME/miniconda3`.
 
 A path can also be supplied explicitly:
@@ -176,7 +184,7 @@ bash MTD_check_installation.sh \
 When `--offline-dir` is not provided, the checker uses the path recorded in:
 
 ```text
-MTD/offlineCachePath
+MTD-Explorer/offlineCachePath
 ```
 
 The cache can be specified manually:
@@ -199,7 +207,7 @@ All primary paths can be supplied explicitly:
 
 ```bash
 bash MTD_check_installation.sh \
-  --mtd-dir /home/user/MTD \
+  --mtd-dir /home/user/MTD-Explorer \
   --conda-path /home/user/miniconda3 \
   --offline-dir /path/to/MTD_install_cache \
   --read-length 75 \
@@ -240,6 +248,43 @@ the checker should also use:
 bash MTD_check_installation.sh \
   --read-length 100
 ```
+
+## Dedicated runtime versions checked
+
+The current checker explicitly validates several isolated production runtimes:
+
+| Environment | Package | Expected version |
+|---|---|---|
+| `MTD_fastp` | fastp | `1.3.6` |
+| `MTD_featurecounts` | Subread / featureCounts | `2.1.1` |
+| `MTD_kraken2` | Kraken2 | `2.17.1` |
+| `MTD_kraken2` | Bracken package | `3.1p1` |
+
+The Bracken executable included by the validated package can still print an
+upstream `v3.0.1` banner. The checker intentionally verifies the Conda package
+metadata (`3.1p1`) instead of using that stale banner as the package version.
+
+Production host quantification uses `MTD_featurecounts`; an older
+`featureCounts` executable may remain in the main `MTD` environment for
+legacy dependency compatibility, but it is not the production quantification
+runtime.
+
+If a required isolated runtime is missing or has an incompatible version,
+rerun `Install.sh` and repeat the full checker.
+
+## HPC validation is separate
+
+`MTD_check_installation.sh` validates the ordinary MTD Explorer installation. It does not replace validation of node-local Slurm runtimes.
+
+For HPC nodes, use:
+
+```bash
+bash Installation/HPC/MTD_check_HPC_nodes.sh \
+  --node-list Installation/HPC/examples/nodes.txt \
+  --user your_user
+```
+
+See [HPC / Slurm execution](../user-guide/hpc-slurm.md) for the complete HPC validation workflow.
 
 ## Report directory
 
@@ -286,8 +331,8 @@ This option is mainly useful for debugging failed tests.
 
 By default, warnings do not necessarily produce a failing process status.
 
-With `--strict`, the checker returns exit status `2` when warnings are
-present but no failures are detected:
+With `--strict`, warnings are treated as final failure and the checker returns
+exit status `1`:
 
 ```bash
 bash MTD_check_installation.sh \

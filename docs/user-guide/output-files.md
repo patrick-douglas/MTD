@@ -31,9 +31,12 @@ MTD_results/
 ├── graphlan/
 ├── HUMAnN_output/
 ├── Host_DEG/
+├── Nonhost_DEG/
+├── ssGSEA/
 ├── halla/
 ├── exploratory/
 ├── methods/
+├── hpc/                 # only when --hpc-conf is used
 └── temp/
 ```
 
@@ -51,10 +54,13 @@ corresponding analysis step is enabled or when enough data are available.
 | `krona/` | Interactive taxonomic visualizations |
 | `graphlan/` | Taxonomic tree/cladogram-style visualizations |
 | `HUMAnN_output/` | Functional profiling outputs |
-| `Host_DEG/` | Host count matrix and host comparison outputs |
+| `Host_DEG/` | Host expression and host comparison outputs |
+| `Nonhost_DEG/` | Microbiome comparison and differential-abundance outputs |
+| `ssGSEA/` | Host gene-set enrichment scores, plots, GMT filtering records, and differential ssGSEA outputs |
 | `halla/` | Host–microbiome association-analysis inputs and outputs |
 | `exploratory/` | Non-comparison exploratory figures and QC outputs |
-| `methods/` | Run parameters, methods summary, software paths, and versions |
+| `methods/` | Run parameters plus saved samplesheet and resolved FASTQ provenance |
+| `hpc/` | Optional Slurm manifests, logs, accounting, success/failure markers, and retry records |
 | `temp/` | Intermediate working files |
 
 !!! warning
@@ -436,11 +442,15 @@ MTD Explorer writes run information to:
 methods/
 ```
 
-A key file is:
+The main reproducibility files are:
 
 ```text
 methods/mtd_methods_run_parameters.csv
+methods/used_samplesheet.csv
+methods/used_fastq_files.tsv
 ```
+
+`used_samplesheet.csv` is a copy of the exact samplesheet used for the run. `used_fastq_files.tsv` records the resolved absolute R1/R2 paths, effective layout, and file sizes in bytes for every sample. The FASTQ files themselves are not duplicated in `methods/`.
 
 This file records parameters and run metadata such as:
 
@@ -474,6 +484,18 @@ This file is useful for:
 
     It is one of the most useful folders when writing a manuscript or debugging
     a run later.
+
+## HPC operational outputs
+
+When `--hpc-conf` is enabled, Slurm controller records are written below:
+
+```text
+hpc/
+```
+
+This tree contains stage-specific manifests, task logs, job IDs, accounting records, success/failure markers, and retry information. These files describe **how distributed stages ran**; the main scientific outputs remain in their ordinary MTD Explorer directories.
+
+See [HPC / Slurm execution](hpc-slurm.md) for the execution model and troubleshooting workflow.
 
 ## Temporary files
 
@@ -513,16 +535,7 @@ fastq_input_manifest.tsv
 prepared_fastq_manifest.tsv
 ```
 
-These files record:
-
-```text
-sample
-layout
-read1
-read2
-```
-
-They are helpful when debugging input-file detection or paired-end resolution.
+These internal files record the sample, layout, and resolved read paths used while the pipeline is running. For a permanent run-level record, use `methods/used_fastq_files.tsv`, which stores absolute resolved paths and file sizes.
 
 ## Which files should I inspect first?
 
@@ -539,7 +552,10 @@ For a normal run, start with these files and folders:
 | Check functional profiling | `HUMAnN_output/` |
 | Check host expression outputs | `Host_DEG/` |
 | Check exploratory figures | `exploratory/` |
+| Confirm exact samplesheet | `methods/used_samplesheet.csv` |
+| Confirm exact FASTQ files | `methods/used_fastq_files.tsv` |
 | Check parameters and software versions | `methods/mtd_methods_run_parameters.csv` |
+| Diagnose a Slurm/HPC run | `hpc/` |
 
 ## Outputs by analysis mode
 

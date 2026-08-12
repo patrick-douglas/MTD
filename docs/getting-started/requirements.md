@@ -77,6 +77,16 @@ construction of the default Kraken2 and Bracken databases.
     Resource requirements for individual analyses depend on the number of
     samples, FASTQ file sizes, selected databases, and enabled analysis modules.
 
+## Optional Slurm / HPC requirements
+
+The hardware table above describes a complete ordinary MTD Explorer installation. The optional [Slurm][slurm] backend has additional cluster requirements.
+
+For HPC execution, prepared compute nodes currently need x86_64 Linux, Slurm access, a consistent node-local MTD Explorer runtime/database layout, and writable local scratch. Nodes may have different CPU counts and RAM; whole-node workers detect the resources exposed by Slurm after allocation.
+
+The default node-local prefix is `/MTD_explorer_HPC`. The repository, configuration, work directory, and final output directory must be visible where required by the jobs. Raw FASTQs may instead be fetched from the submission host when the remote-input staging option is enabled.
+
+See [HPC / Slurm execution](../user-guide/hpc-slurm.md) for node preparation, database synchronization, Slurm configuration, scratch-space safeguards, and validation.
+
 ## Storage planning
 
 Storage should be available for:
@@ -147,3 +157,5 @@ git --version
 
 Continue to the [installation guide](installation.md).
 
+
+[slurm]: https://slurm.schedmd.com/

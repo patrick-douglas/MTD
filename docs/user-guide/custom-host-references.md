@@ -25,7 +25,7 @@ genome, GTF, and protein FASTA automatically.
 For a species with complete curated metadata in `HostSpecies.csv`, run only:
 
 ```bash
-cd ~/MTD
+cd ~/MTD-Explorer
 
 bash Create_custom_host.sh \
   --ncbi-taxon-id <host_taxon_id>
@@ -48,7 +48,7 @@ Use manual mode when the Taxon ID is absent from `HostSpecies.csv`, or when the
 row does not contain complete automatic reference metadata.
 
 ```bash
-cd ~/MTD
+cd ~/MTD-Explorer
 
 bash Create_custom_host.sh \
   --ncbi-taxon-id <host_taxon_id> \
@@ -113,7 +113,7 @@ complete.
 Search by scientific name:
 
 ```bash
-cd ~/MTD
+cd ~/MTD-Explorer
 
 grep -i "Carollia" HostSpecies.csv
 grep -i "Sturnus" HostSpecies.csv
@@ -167,7 +167,7 @@ When automatic mode is used, MTD Explorer:
 The persistent cache is normally read from:
 
 ```bash
-~/MTD/offlineCachePath
+~/MTD-Explorer/offlineCachePath
 ```
 
 Manual override is still possible:
@@ -241,7 +241,7 @@ wget -c "<protein_fasta_url>" -O proteins.fa.gz
 Then use manual mode:
 
 ```bash
-cd ~/MTD
+cd ~/MTD-Explorer
 
 bash Create_custom_host.sh \
   --ncbi-taxon-id <host_taxon_id> \
@@ -425,6 +425,14 @@ MTD Explorer uses it to generate:
 This is why the genome FASTA, GTF, and protein FASTA should come from the same
 source and release whenever possible.
 
+The reference-matched GO master GMT is also the source used by the current
+`--ssgsea-gmt auto` default. During an MTD Explorer run, that persistent master
+GMT is filtered against the genes present in `host.gct` to create an
+analysis-specific GMT before ssGSEA is executed. Use `--ssgsea-gmt default`
+only when you intentionally want the legacy MSigDB C2 symbols GMT instead.
+See [ssGSEA outputs](ssgsea-outputs.md) for the generated files and filtering
+thresholds.
+
 ## KEGG limitation and workaround
 
 Some host species do not have a species-specific [KEGG][kegg] code or KEGG
@@ -507,7 +515,7 @@ bash MTD_check_installation.sh --full
 Then run MTD Explorer using the same Taxon ID:
 
 ```bash
-bash ~/MTD/MTD_explorer.sh \
+bash ~/MTD-Explorer/MTD_explorer.sh \
   -i /path/to/samplesheet.csv \
   -o /path/to/output_directory \
   -h <host_taxon_id>

@@ -49,6 +49,11 @@ The main difference is whether MTD Explorer should run analyses that depend on
 experimental group comparisons, such as differential abundance or differential
 expression steps using tools such as [DESeq2][deseq2].
 
+The analysis mode is independent of the optional execution backend. Supplying
+`--hpc-conf FILE` enables the [Slurm HPC backend](hpc-slurm.md) for supported
+per-sample stages, but it does not change whether the biological run resolves
+as `auto`, `comparison`, or `exploratory`.
+
 ## Automatic mode
 
 Automatic mode is the default.
@@ -68,7 +73,7 @@ exploratory mode.
 Example:
 
 ```bash
-bash ~/MTD/MTD_explorer.sh \
+bash ~/MTD-Explorer/MTD_explorer.sh \
   --input samplesheet.csv \
   --output MTD_results_auto \
   --hostid 9606 \
@@ -102,7 +107,7 @@ you want MTD Explorer to run group-dependent analysis steps.
 Example:
 
 ```bash
-bash ~/MTD/MTD_explorer.sh \
+bash ~/MTD-Explorer/MTD_explorer.sh \
   --input samplesheet.csv \
   --output MTD_results_comparison \
   --hostid 9606 \
@@ -172,7 +177,7 @@ The following aliases are also accepted:
 Example:
 
 ```bash
-bash ~/MTD/MTD_explorer.sh \
+bash ~/MTD-Explorer/MTD_explorer.sh \
   --input samplesheet.csv \
   --output MTD_results_exploratory \
   --hostid 9606 \
@@ -184,7 +189,7 @@ bash ~/MTD/MTD_explorer.sh \
 Equivalent command using the alias:
 
 ```bash
-bash ~/MTD/MTD_explorer.sh \
+bash ~/MTD-Explorer/MTD_explorer.sh \
   --input samplesheet.csv \
   --output MTD_results_exploratory \
   --hostid 9606 \
@@ -337,6 +342,13 @@ Treatment2 vs Control
     Group names in the comparison section must match the group names in the
     `group` column exactly.
 
+For ssGSEA differential plotting specifically, MTD Explorer now adapts to
+multi-group samplesheets. If valid `group1`/`group2` comparison rows are
+present, those contrasts are used. If no explicit valid pair is available,
+ssGSEA builds all pairwise group contrasts automatically. The resulting
+comparison plan is recorded in `ssGSEA/ssGSEA_differential_comparisons.tsv`.
+See [ssGSEA outputs](ssgsea-outputs.md) for the exact behavior and files.
+
 ## Relationship with metadata
 
 The analysis mode is controlled by the samplesheet groups, not by the optional
@@ -349,7 +361,7 @@ samplesheet.
 Example using metadata:
 
 ```bash
-bash ~/MTD/MTD_explorer.sh \
+bash ~/MTD-Explorer/MTD_explorer.sh \
   --input samplesheet.csv \
   --metadata metadata.csv \
   --output MTD_results_with_metadata \
@@ -365,7 +377,7 @@ bash ~/MTD/MTD_explorer.sh \
 This will fail:
 
 ```bash
-bash ~/MTD/MTD_explorer.sh \
+bash ~/MTD-Explorer/MTD_explorer.sh \
   --input one_group_samplesheet.csv \
   --output MTD_results \
   --hostid 9606 \
@@ -375,7 +387,7 @@ bash ~/MTD/MTD_explorer.sh \
 Use exploratory mode instead:
 
 ```bash
-bash ~/MTD/MTD_explorer.sh \
+bash ~/MTD-Explorer/MTD_explorer.sh \
   --input one_group_samplesheet.csv \
   --output MTD_results \
   --hostid 9606 \

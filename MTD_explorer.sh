@@ -496,8 +496,11 @@ Optional:
       --threads INT                        Number of CPU threads
                                            Default: nproc = ${threads}
       --hpc-conf FILE                      Enable the independent Slurm backend using FILE.
-                                           MetaPhlAn/HUMAnN and Magic-BLAST run on configured nodes.
-                                           Without this option, execution remains local.
+                                           fastp, Kraken2 host/microbiome classification,
+                                           Bracken, HUMAnN/MetaPhlAn, and optional Magic-BLAST
+                                           can run on configured Slurm nodes.
+                                           Other stages remain orchestrated locally; without
+                                           this option, the standard local pipeline is used.
       --ssgsea-gmt default|auto|FILE
                                            ssGSEA GMT selection.
 
@@ -582,8 +585,8 @@ Examples:
       --hostid 59463 \\
       --blast \\
       --no-trim \\
-      --kraken-host-db /home/me/MTD/kraken2DB_Carollia_Myotis/ \\
-      --kraken-micro-db /home/me/MTD/Kraken2DB_trematoda/ \\
+      --kraken-host-db /home/me/MTD-Explorer/kraken2DB_Carollia_Myotis/ \\
+      --kraken-micro-db /home/me/MTD-Explorer/Kraken2DB_trematoda/ \\
       --kraken-host-confidence 0.05 \\
       --kraken-host-min-hit-groups 3 \\
       --kraken-micro-confidence 0.10 \\

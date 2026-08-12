@@ -40,6 +40,22 @@ Use this page as a map of the documentation.
     </div>
   </a>
 
+  <a class="overview-start-card" href="hpc-slurm/">
+    <img
+      class="overview-start-icon"
+      src="../assets/images/user-guide/overview/command-line.webp"
+      alt=""
+    >
+    <h3>Run on Slurm HPC</h3>
+    <p>
+      Configure the optional HPC backend for distributed per-sample execution
+      on heterogeneous Slurm clusters.
+    </p>
+    <div class="overview-start-links">
+      <span>HPC / Slurm execution</span>
+    </div>
+  </a>
+
   <a class="overview-start-card" href="output-files/">
     <img
       class="overview-start-icon"
@@ -146,16 +162,18 @@ For a first complete analysis, read the documentation in this order:
 3. Input files
 4. Analysis modes
 5. Command-line reference
-6. Output files
-7. Taxonomic exploratory outputs
-8. Taxonomic visualizations
-9. Host expression outputs
-10. Microbiome comparison outputs
-11. Functional profiling outputs
-12. ssGSEA outputs
-13. HAllA integration outputs
-14. Methods and reproducibility outputs
-15. Academic references
+6. HPC / Slurm execution (when using `--hpc-conf`)
+7. Pipeline benchmarking (when measuring performance)
+8. Output files
+9. Taxonomic exploratory outputs
+10. Taxonomic visualizations
+11. Host expression outputs
+12. Microbiome comparison outputs
+13. Functional profiling outputs
+14. ssGSEA outputs
+15. HAllA integration outputs
+16. Methods and reproducibility outputs
+17. Academic references
 ```
 
 ## Result layers
@@ -166,6 +184,8 @@ MTD Explorer produces several result layers from the same RNA-seq dataset.
 | --- | --- | --- |
 | Input setup | `samplesheet.txt`, FASTQ files, metadata | [Input files](input-files.md) |
 | Analysis settings | command-line options | [Command-line reference](command-line.md) |
+| Optional HPC execution | `--hpc-conf`, Slurm jobs, node-local runtime | [HPC / Slurm execution](hpc-slurm.md) |
+| Performance benchmarking | local/HPC benchmark bundles | [Pipeline benchmarking](benchmarking.md) |
 | Custom host setup | `Create_custom_host.sh`, `HostSpecies.csv` | [Custom host references](custom-host-references.md) |
 | Custom microbiome setup | `Create_custom_micro.sh`, `--kraken-micro-db`, Kraken 2, Bracken | [Custom microbiome references](custom-microbiome-references.md) |
 | Supported hosts | `HostSpecies.csv` | [Supported host species](supported-host-species.md) |
@@ -190,6 +210,8 @@ MTD Explorer produces several result layers from the same RNA-seq dataset.
 | Which host Taxon IDs are curated? | [Supported host species](supported-host-species.md) |
 | How do I add a non-model host species? | [Custom host references](custom-host-references.md) |
 | Which command-line option controls trimming, Kraken2, Bracken, or read layout? | [Command-line reference](command-line.md) |
+| How do I distribute supported stages across a Slurm cluster? | [HPC / Slurm execution](hpc-slurm.md) |
+| How do I compare local and HPC pipeline performance? | [Pipeline benchmarking](benchmarking.md) |
 | Where are the main results saved? | [Output files](output-files.md) |
 | How do I inspect detected microbiome composition? | [Taxonomic exploratory outputs](taxonomic-exploratory-outputs.md) |
 | Where are Krona and GraPhlAn plots? | [Taxonomic visualizations](taxonomic-visualizations.md) |

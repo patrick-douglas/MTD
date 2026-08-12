@@ -64,7 +64,7 @@ Example:
 ```bash
 cd ~/MTD_projects/my_analysis
 
-bash ~/MTD/MTD_explorer.sh \
+bash ~/MTD-Explorer/MTD_explorer.sh \
   --input samplesheet.csv \
   --output MTD_results \
   --hostid 9606 \
@@ -309,7 +309,7 @@ files are copied, while uncompressed FASTQ files are compressed before
 downstream processing.
 
 ```bash
-bash ~/MTD/MTD_explorer.sh \
+bash ~/MTD-Explorer/MTD_explorer.sh \
   --input samplesheet.csv \
   --output MTD_results_no_trim \
   --hostid 9606 \
@@ -330,6 +330,26 @@ A run will stop if:
 - more than one R1 or R2 candidate is found for a sample;
 - single-end and paired-end files are detected for the same sample;
 - paired-end record counts do not match.
+
+## Permanent input provenance in the output
+
+After input validation, MTD Explorer preserves a run-specific provenance record under `methods/`.
+
+The exact samplesheet supplied to `--input` is copied to:
+
+```text
+methods/used_samplesheet.csv
+```
+
+The FASTQ files actually resolved for each sample are recorded in:
+
+```text
+methods/used_fastq_files.tsv
+```
+
+The FASTQ manifest stores the effective `se` or `pe` layout, absolute R1/R2 paths, and file sizes in bytes. For single-end samples, R2 path and size are written as `-`. The FASTQ contents themselves are not copied into `methods/`.
+
+This permanent manifest is different from the internal `temp/fastq_input_manifest.tsv`: the `methods/` file is intended to remain with the final result directory as an auditable record of the exact input files used.
 
 ## Common input problems
 
@@ -418,7 +438,7 @@ awk -F',' 'NR > 1 {print $2}' samplesheet.csv | sort -u
 Then run MTD Explorer with automatic read-layout detection:
 
 ```bash
-bash ~/MTD/MTD_explorer.sh \
+bash ~/MTD-Explorer/MTD_explorer.sh \
   --input samplesheet.csv \
   --output MTD_results \
   --hostid 9606 \
@@ -435,7 +455,7 @@ Example samplesheets are available in the repository:
 After cloning the repository, they are also available locally at:
 
 ```text
-~/MTD/examples/
+~/MTD-Explorer/examples/
 ```
 
 Use these files as templates for new analyses.

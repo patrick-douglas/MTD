@@ -48,7 +48,7 @@ fungi, or targeted, such as a virus-only database.
 ### Broad microbial database
 
 ```bash
-cd ~/MTD
+cd ~/MTD-Explorer
 
 bash Create_custom_micro.sh \
   --db-name kraken2DB_micro_custom \
@@ -60,7 +60,7 @@ bash Create_custom_micro.sh \
 ### Virus-only database
 
 ```bash
-cd ~/MTD
+cd ~/MTD-Explorer
 
 bash Create_custom_micro.sh \
   --db-name kraken2DB_viral_custom \
@@ -109,11 +109,11 @@ bash Create_custom_micro.sh \
 After the database is built, point MTD Explorer to it:
 
 ```bash
-bash ~/MTD/MTD_explorer.sh \
+bash ~/MTD-Explorer/MTD_explorer.sh \
   -i /path/to/samplesheet.csv \
   -o /path/to/output_directory \
   -h <host_taxon_id> \
-  --kraken-micro-db "$HOME/MTD/kraken2DB_micro_custom" \
+  --kraken-micro-db "$HOME/MTD-Explorer/kraken2DB_micro_custom" \
   --bracken-read-len 75
 ```
 
@@ -177,6 +177,13 @@ bash Create_custom_micro.sh \
   --threads 20 \
   --bracken-read-len 75
 ```
+
+If the resulting database will be used with `--hpc-conf FILE`, every Slurm node
+eligible for Kraken2/Bracken work must be able to resolve the database to its
+node-local copy. Databases inside the main MTD Explorer tree can be distributed
+with the HPC installer; databases stored elsewhere can be mapped with
+`MTD_HPC_PATH_MAPS`. See [HPC / Slurm execution](hpc-slurm.md) for database
+installation, propagation, and path-mapping details.
 
 ## Custom FASTA files and TaxIDs
 
@@ -273,11 +280,11 @@ Using the generic script, a cleaned viral FASTA can be turned into a database
 with:
 
 ```bash
-cd ~/MTD
+cd ~/MTD-Explorer
 
 bash Create_custom_micro.sh \
   --db-name kraken2DB_viral_extended_rvdb32_clean \
-  --add-fasta "$HOME/MTD/viral_extended_rvdb32_clean.fa" \
+  --add-fasta "$HOME/MTD-Explorer/viral_extended_rvdb32_clean.fa" \
   --threads 20 \
   --bracken-read-len 75
 ```
@@ -287,7 +294,7 @@ If the cleaned FASTA does not already contain TaxID-aware headers, use:
 ```bash
 bash Create_custom_micro.sh \
   --db-name kraken2DB_viral_extended_rvdb32_clean \
-  --add-fasta-with-taxid "$HOME/MTD/viral_extended_rvdb32_clean.fa:10239" \
+  --add-fasta-with-taxid "$HOME/MTD-Explorer/viral_extended_rvdb32_clean.fa:10239" \
   --threads 20 \
   --bracken-read-len 75
 ```
@@ -312,7 +319,7 @@ Use:
 
 ```bash
 bash Create_custom_micro.sh \
-  --output-db "$HOME/MTD/kraken2DB_micro_custom" \
+  --output-db "$HOME/MTD-Explorer/kraken2DB_micro_custom" \
   --rebuild-bracken-only \
   --threads 20 \
   --bracken-read-len 75
@@ -334,7 +341,7 @@ Use the same read length in MTD Explorer:
 
 ```bash
 bash Create_custom_micro.sh \
-  --output-db "$HOME/MTD/kraken2DB_micro_custom" \
+  --output-db "$HOME/MTD-Explorer/kraken2DB_micro_custom" \
   --validate-only \
   --bracken-read-len 75
 ```
@@ -342,7 +349,7 @@ bash Create_custom_micro.sh \
 Manual checks:
 
 ```bash
-DB="$HOME/MTD/kraken2DB_micro_custom"
+DB="$HOME/MTD-Explorer/kraken2DB_micro_custom"
 
 ls -lh "$DB"/hash.k2d "$DB"/opts.k2d "$DB"/taxo.k2d
 ls -lh "$DB"/database75mers.kmer_distrib
