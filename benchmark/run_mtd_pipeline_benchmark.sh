@@ -29,6 +29,7 @@ ANALYSIS_MODE="auto"
 USE_BLAST=1
 EXTRACT_READS=0
 ASSUME_YES=0
+RESUME_HEAVY=0
 EXECUTION_MODE="auto"
 HPC_CONF=""
 EXTRA_MTD_ARGS=()
@@ -63,12 +64,17 @@ Pipeline options:
       --hpc-conf FILE          Enable the Slurm backend with this configuration
 
 Benchmark options:
+      --resume-heavy          DEVELOPMENT ONLY: preserve the existing local
+                              pipeline output and pass --resume-heavy to MTD.
+                              Resume measurements are labeled non-official.
+                              Incompatible with HPC mode.
       --execution-mode MODE    auto, local, or hpc; default: auto
                               auto selects hpc when --hpc-conf is supplied
       --interval SECONDS      Resource sampling interval; default: 5
       --benchmark-root DIR    Benchmark output root
                               default: \$HOME/MTD_pipeline_benchmarks
   -y, --yes                   Delete an existing pipeline output without prompting
+                              or accept preservation in --resume-heavy mode
       --help                  Show this help
 
 Example for the standard Biomphalaria glabrata benchmark
@@ -112,6 +118,18 @@ hours or days and consume substantial storage:
 
 Extra MTD Explorer arguments may be added after --, for example:
   -- --metadata /path/to/metadata.csv --pdm spearman
+
+Development continuation of an interrupted local run:
+  bash benchmark/$PROGRAM_NAME \\
+    --machine master \\
+    --dataset Bglabrata_PRJNA1306560_extract_top5_development \\
+    --input /path/to/B.glabrata_fastq/samplesheet.csv \\
+    --output "\$HOME/test_MTD_explorer.Bglabrata.extract_top5" \\
+    --hostid 6526 \\
+    --threads 20 \\
+    --extract \\
+    --top-n 5 \\
+    --resume-heavy
 USAGE
 }
 
@@ -219,6 +237,10 @@ while (($# > 0)); do
             EXECUTION_MODE="${2,,}"
             shift 2
             ;;
+        --resume-heavy)
+            RESUME_HEAVY=1
+            shift
+            ;;
         --hpc-conf)
             (($# >= 2)) || die "$1 requires a value."
             HPC_CONF="$2"
@@ -265,6 +287,9 @@ for extra_arg in "${EXTRA_MTD_ARGS[@]}"; do
         --hpc-conf|--hpc-conf=*)
             die "Do not pass --hpc-conf after --. Use the benchmark option --hpc-conf instead."
             ;;
+        --resume-heavy)
+            die "Do not pass --resume-heavy after --. Use the benchmark option --resume-heavy instead."
+            ;;
     esac
 done
 
@@ -296,6 +321,10 @@ if [[ "$EXECUTION_MODE" == "hpc" ]]; then
     HPC_CONF="$(readlink -f -- "$HPC_CONF")"
 else
     [[ -z "$HPC_CONF" ]] || die "--hpc-conf cannot be used with --execution-mode local."
+fi
+
+if (( RESUME_HEAVY )) && [[ "$EXECUTION_MODE" != "local" ]]; then
+    die "--resume-heavy is a development feature for local benchmark runs only."
 fi
 
 [[ "$HOST_ID" =~ ^[0-9]+$ ]] || die "--hostid must be a positive integer."
@@ -396,6 +425,11 @@ do
         die "Current MTD_explorer.sh does not advertise required option: $required_option"
 done
 
+if (( RESUME_HEAVY )); then
+    grep -q -- "--resume-heavy" <<< "$HELP_OUTPUT" || \
+        die "Current MTD_explorer.sh does not advertise required option: --resume-heavy"
+fi
+
 if [[ "$EXECUTION_MODE" == "hpc" ]]; then
     grep -q -- "--hpc-conf" <<< "$HELP_OUTPUT" || \
         die "Current MTD_explorer.sh does not advertise required option: --hpc-conf"
@@ -442,7 +476,15 @@ else
     EXTRACT_LABEL="no_extract"
 fi
 
-BENCHMARK_LABEL="${MACHINE_SAFE}_${DATASET_SAFE}_${EXECUTION_MODE}_warm_host${HOST_ID}_${ALIGNMENT_LABEL}_${EXTRACT_LABEL}_${READ_LAYOUT}_controller_t${THREADS}_r${RUN_NUMBER}"
+if (( RESUME_HEAVY )); then
+    BENCHMARK_RUN_KIND="development_resume"
+    BENCHMARK_LABEL="${MACHINE_SAFE}_${DATASET_SAFE}_${EXECUTION_MODE}_${BENCHMARK_RUN_KIND}_warm_host${HOST_ID}_${ALIGNMENT_LABEL}_${EXTRACT_LABEL}_${READ_LAYOUT}_controller_t${THREADS}_r${RUN_NUMBER}"
+else
+    BENCHMARK_RUN_KIND="official_clean"
+    # Preserve the established official benchmark label for compatibility
+    # with existing reports and comparisons.
+    BENCHMARK_LABEL="${MACHINE_SAFE}_${DATASET_SAFE}_${EXECUTION_MODE}_warm_host${HOST_ID}_${ALIGNMENT_LABEL}_${EXTRACT_LABEL}_${READ_LAYOUT}_controller_t${THREADS}_r${RUN_NUMBER}"
+fi
 
 CMD=(
     bash "$PIPELINE_SCRIPT"
@@ -456,6 +498,10 @@ CMD=(
 
 if [[ "$EXECUTION_MODE" == "hpc" ]]; then
     CMD+=(--hpc-conf "$HPC_CONF")
+fi
+
+if (( RESUME_HEAVY )); then
+    CMD+=(--resume-heavy)
 fi
 
 if (( USE_BLAST )); then
@@ -480,6 +526,7 @@ printf '%s\n' "============================================================"
 printf '%s\n' "MTD EXPLORER PIPELINE BENCHMARK PRECHECK"
 printf '%-22s %s\n' "Machine/cluster:" "$MACHINE_NAME"
 printf '%-22s %s\n' "Execution mode:" "$EXECUTION_MODE"
+printf '%-22s %s\n' "Benchmark run kind:" "$BENCHMARK_RUN_KIND"
 if [[ "$EXECUTION_MODE" == "hpc" ]]; then
     printf '%-22s %s\n' "HPC configuration:" "$HPC_CONF"
 fi
@@ -512,7 +559,14 @@ printf '[COMMAND] '
 printf '%q ' "${CMD[@]}"
 printf '\n\n'
 
-if [[ -e "$PIPELINE_OUTPUT" || -L "$PIPELINE_OUTPUT" ]]; then
+if (( RESUME_HEAVY )); then
+    if [[ -e "$PIPELINE_OUTPUT" || -L "$PIPELINE_OUTPUT" ]]; then
+        printf '[PRESERVE] Existing pipeline output for development resume: %s\n' "$PIPELINE_OUTPUT"
+    else
+        printf '[CREATE] Pipeline output; no previous output exists to resume: %s\n' "$PIPELINE_OUTPUT"
+    fi
+    printf '[NON-OFFICIAL] Timings from this resumed run must not be used as the final clean benchmark.\n'
+elif [[ -e "$PIPELINE_OUTPUT" || -L "$PIPELINE_OUTPUT" ]]; then
     printf '[REMOVE] Existing pipeline output: %s\n' "$PIPELINE_OUTPUT"
 else
     printf '[CREATE] Pipeline output: %s\n' "$PIPELINE_OUTPUT"
@@ -521,11 +575,18 @@ printf '[PRESERVE] Input data and installed databases are not deleted.\n'
 printf '[PRESERVE] Benchmark results: %s\n' "$BENCHMARK_ROOT"
 
 if (( ! ASSUME_YES )); then
-    read -r -p "Type RUN to delete the previous pipeline output and start: " confirmation
-    [[ "$confirmation" == "RUN" ]] || die "Cancelled. Nothing was removed."
+    if (( RESUME_HEAVY )); then
+        read -r -p "Type RESUME to preserve the pipeline output and start a non-official development run: " confirmation
+        [[ "$confirmation" == "RESUME" ]] || die "Cancelled. Nothing was removed."
+    else
+        read -r -p "Type RUN to delete the previous pipeline output and start: " confirmation
+        [[ "$confirmation" == "RUN" ]] || die "Cancelled. Nothing was removed."
+    fi
 fi
 
-rm -rf -- "$PIPELINE_OUTPUT"
+if (( ! RESUME_HEAVY )); then
+    rm -rf -- "$PIPELINE_OUTPUT"
+fi
 mkdir -p -- "$(dirname "$PIPELINE_OUTPUT")"
 
 STEP_TEMP="$BENCHMARK_ROOT/.${BENCHMARK_LABEL}.pipeline_steps.$$.tsv"
@@ -586,6 +647,16 @@ BUNDLE_PATH=""
 
 if [[ -n "$LATEST_BENCHMARK" && -d "$LATEST_BENCHMARK" ]]; then
     cp -- "$STEP_TEMP" "$LATEST_BENCHMARK/pipeline_steps_raw.tsv"
+
+    {
+        printf 'key\tvalue\n'
+        printf 'benchmark_run_kind\t%s\n' "$BENCHMARK_RUN_KIND"
+        printf 'resume_heavy\t%s\n' "$RESUME_HEAVY"
+        printf 'official_clean_benchmark\t%s\n' "$(( RESUME_HEAVY == 0 ? 1 : 0 ))"
+        if (( RESUME_HEAVY )); then
+            printf 'warning\tDevelopment resume; timings are not a clean full-pipeline benchmark.\n'
+        fi
+    } > "$LATEST_BENCHMARK/benchmark_run_mode.tsv"
 
     {
         printf '#!/usr/bin/env bash\n'
@@ -651,6 +722,12 @@ echo
 printf '%s\n' "============================================================"
 printf '%s\n' "MTD PIPELINE BENCHMARK FINISHED"
 printf 'Exit status: %s\n' "$BENCHMARK_STATUS"
+printf 'Benchmark run kind: %s\n' "$BENCHMARK_RUN_KIND"
+if (( RESUME_HEAVY )); then
+    printf 'Official benchmark: no (development resume)\n'
+else
+    printf 'Official benchmark: yes (clean pipeline output)\n'
+fi
 if [[ -n "$LATEST_BENCHMARK" && -d "$LATEST_BENCHMARK" ]]; then
     printf 'Results: %s\n' "$LATEST_BENCHMARK"
     [[ -s "$LATEST_BENCHMARK/pipeline_summary.tsv" ]] && \

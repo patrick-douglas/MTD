@@ -356,6 +356,423 @@ run_cmd() {
 }
 
 # ------------------------------------------------------------
+# Safe checkpoints for expensive stages
+# ------------------------------------------------------------
+# Resume checkpoints are deliberately local-only. The main process validates
+# an output before omitting a sample from a local loop. A marker is written
+# only after validation.
+
+MTD_CHECKPOINT_SCHEMA="1"
+MTD_STATE_DIR=""
+
+sha256_file() {
+    local path="$1"
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum -- "$path" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 -- "$path" | awk '{print $1}'
+    else
+        die "Neither sha256sum nor shasum is available. SHA-256 is required for --resume-heavy."
+    fi
+}
+
+sha256_stream() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 | awk '{print $1}'
+    else
+        die "Neither sha256sum nor shasum is available."
+    fi
+}
+
+fingerprint_values() {
+    # Values used here are controlled paths/parameters and must not contain
+    # embedded newlines. Prefixing each value with its length prevents
+    # ambiguous concatenations.
+    local value=""
+    for value in "$@"; do
+        printf '%s:%s\n' "${#value}" "$value"
+    done | sha256_stream
+}
+
+resource_signature() {
+    local path="$1"
+    local parent=""
+    local prefix=""
+
+    if [[ -f "$path" ]]; then
+        printf 'file\t%s\t%s\t%s\n' \
+            "$(readlink -f -- "$path")" \
+            "$(stat -Lc '%s' -- "$path")" \
+            "$(stat -Lc '%Y' -- "$path")" | sha256_stream
+    elif [[ -d "$path" ]]; then
+        find "$(readlink -f -- "$path")" -type f \
+            -printf '%P\t%s\t%T@\n' 2>/dev/null | LC_ALL=C sort | sha256_stream
+    else
+        # Alignment databases are commonly represented by a prefix rather
+        # than by one existing path (for example genome_tran.*.ht2).
+        parent="$(dirname -- "$path")"
+        prefix="$(basename -- "$path")"
+        if [[ -d "$parent" ]]; then
+            find "$(readlink -f -- "$parent")" -maxdepth 1 -type f \
+                -name "${prefix}*" -printf '%f\t%s\t%T@\n' 2>/dev/null |
+                LC_ALL=C sort | sha256_stream
+        else
+            printf 'missing\t%s\n' "$path" | sha256_stream
+        fi
+    fi
+}
+
+checkpoint_paths() {
+    local stage="$1"
+    local sample="$2"
+
+    CHECKPOINT_SAMPLE_DIR="$MTD_STATE_DIR/stages/$stage/$sample"
+    CHECKPOINT_FINGERPRINT_FILE="$CHECKPOINT_SAMPLE_DIR/fingerprint.sha256"
+    CHECKPOINT_OUTPUTS_FILE="$CHECKPOINT_SAMPLE_DIR/outputs.tsv"
+    CHECKPOINT_DONE_FILE="$CHECKPOINT_SAMPLE_DIR/done"
+    CHECKPOINT_RUNNING_FILE="$CHECKPOINT_SAMPLE_DIR/running"
+}
+
+checkpoint_matches() {
+    local stage="$1"
+    local sample="$2"
+    local expected_fingerprint="$3"
+    local saved_fingerprint=""
+
+    [[ "$RESUME_HEAVY" == "1" ]] || return 1
+
+    checkpoint_paths "$stage" "$sample"
+    [[ -s "$CHECKPOINT_DONE_FILE" && -s "$CHECKPOINT_FINGERPRINT_FILE" && \
+       -s "$CHECKPOINT_OUTPUTS_FILE" ]] || return 1
+
+    saved_fingerprint="$(tr -d '[:space:]' < "$CHECKPOINT_FINGERPRINT_FILE")"
+    [[ "$saved_fingerprint" == "$expected_fingerprint" ]]
+}
+
+checkpoint_begin() {
+    local stage="$1"
+    local sample="$2"
+
+    checkpoint_paths "$stage" "$sample"
+    mkdir -p -- "$CHECKPOINT_SAMPLE_DIR"
+    rm -f -- "$CHECKPOINT_DONE_FILE"
+    printf 'pid=%s\nstarted_utc=%s\n' \
+        "$$" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+        > "$CHECKPOINT_RUNNING_FILE"
+}
+
+checkpoint_complete() {
+    local stage="$1"
+    local sample="$2"
+    local fingerprint="$3"
+    shift 3
+    local output=""
+
+    checkpoint_paths "$stage" "$sample"
+    mkdir -p -- "$CHECKPOINT_SAMPLE_DIR"
+
+    printf '%s\n' "$fingerprint" > "${CHECKPOINT_FINGERPRINT_FILE}.tmp"
+    mv -f -- "${CHECKPOINT_FINGERPRINT_FILE}.tmp" "$CHECKPOINT_FINGERPRINT_FILE"
+
+    printf 'path\tsize_bytes\tmtime_epoch\n' > "${CHECKPOINT_OUTPUTS_FILE}.tmp"
+    for output in "$@"; do
+        [[ -z "$output" || "$output" == "-" ]] && continue
+        [[ -e "$output" ]] || die "Cannot record missing checkpoint output: $output"
+        printf '%s\t%s\t%s\n' \
+            "$(readlink -f -- "$output")" \
+            "$(stat -Lc '%s' -- "$output")" \
+            "$(stat -Lc '%Y' -- "$output")" \
+            >> "${CHECKPOINT_OUTPUTS_FILE}.tmp"
+    done
+    mv -f -- "${CHECKPOINT_OUTPUTS_FILE}.tmp" "$CHECKPOINT_OUTPUTS_FILE"
+
+    printf 'schema=%s\ncompleted_utc=%s\n' \
+        "$MTD_CHECKPOINT_SCHEMA" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+        > "${CHECKPOINT_DONE_FILE}.tmp"
+    mv -f -- "${CHECKPOINT_DONE_FILE}.tmp" "$CHECKPOINT_DONE_FILE"
+    rm -f -- "$CHECKPOINT_RUNNING_FILE"
+}
+
+checkpoint_reject() {
+    local stage="$1"
+    local sample="$2"
+
+    checkpoint_paths "$stage" "$sample"
+    rm -f -- \
+        "$CHECKPOINT_DONE_FILE" "$CHECKPOINT_FINGERPRINT_FILE" \
+        "$CHECKPOINT_OUTPUTS_FILE" "$CHECKPOINT_RUNNING_FILE"
+}
+
+validate_fastp_json() {
+    local json_file="$1"
+
+    python3 - "$json_file" <<'PY_FASTP_JSON'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+
+summary = data.get("summary", {})
+for key in ("before_filtering", "after_filtering"):
+    block = summary.get(key)
+    if not isinstance(block, dict) or "total_reads" not in block:
+        raise SystemExit(f"missing fastp summary.{key}.total_reads")
+    if not isinstance(block["total_reads"], (int, float)) or block["total_reads"] < 0:
+        raise SystemExit(f"invalid fastp total_reads in {key}")
+PY_FASTP_JSON
+}
+
+validate_fastp_outputs() {
+    local sample="$1"
+    local layout="$2"
+    local read1="$3"
+    local read2="$4"
+    local html="$5"
+    local json="$6"
+
+    [[ -s "$read1" && -s "$html" && -s "$json" ]] || return 1
+    count_fastq_records "$read1" >/dev/null || return 1
+    validate_fastp_json "$json" || return 1
+
+    if [[ "$layout" == "pe" ]]; then
+        [[ -s "$read2" ]] || return 1
+        ( validate_fastq_pair "$read1" "$read2" "resumed fastp output for sample $sample" ) || return 1
+        if [[ "$FASTP_VALIDATE_PAIRED_IDS" == "1" ]]; then
+            check_fastq_pair_ids "$read1" "$read2" "resumed fastp output for sample $sample" || return 1
+        fi
+    fi
+}
+
+validate_kraken_outputs() {
+    local sample="$1"
+    local layout="$2"
+    local report="$3"
+    local kraken_output="$4"
+    local classified1="$5"
+    local classified2="$6"
+    local unclassified1="$7"
+    local unclassified2="$8"
+
+    [[ -s "$report" && -s "$kraken_output" ]] || return 1
+    awk -F $'\t' '
+        NF < 6 {bad=1}
+        END {exit (NR == 0 || bad)}
+    ' "$report" || return 1
+    awk -F $'\t' '
+        ($1 != "C" && $1 != "U") || NF < 5 {bad=1}
+        END {exit (NR == 0 || bad)}
+    ' "$kraken_output" || return 1
+    [[ -e "$classified1" && -e "$unclassified1" ]] || return 1
+    count_fastq_records "$classified1" >/dev/null || return 1
+    count_fastq_records "$unclassified1" >/dev/null || return 1
+
+    if [[ "$layout" == "pe" ]]; then
+        [[ -e "$classified2" && -e "$unclassified2" ]] || return 1
+        ( validate_fastq_pair "$classified1" "$classified2" "resumed Kraken classified pair for sample $sample" ) || return 1
+        ( validate_fastq_pair "$unclassified1" "$unclassified2" "resumed Kraken unclassified pair for sample $sample" ) || return 1
+    fi
+}
+
+validate_humann_table() {
+    local table="$1"
+
+    python3 - "$table" <<'PY_HUMANN_TABLE'
+import math
+import sys
+
+path = sys.argv[1]
+header = None
+rows = 0
+with open(path, "r", encoding="utf-8", errors="strict", newline="") as handle:
+    for raw in handle:
+        if raw.startswith("#"):
+            fields = raw.rstrip("\r\n").split("\t")
+            if len(fields) >= 2:
+                header = fields
+            continue
+        fields = raw.rstrip("\r\n").split("\t")
+        if not fields or fields == [""]:
+            continue
+        if header is None or len(fields) != len(header):
+            raise SystemExit("invalid HUMAnN table shape")
+        for value in fields[1:]:
+            number = float(value)
+            if not math.isfinite(number) or number < 0:
+                raise SystemExit("invalid HUMAnN abundance")
+        rows += 1
+
+if header is None or rows == 0:
+    raise SystemExit("empty HUMAnN table")
+PY_HUMANN_TABLE
+}
+
+validate_humann_outputs() {
+    local gene_families="$1"
+    local pathway_abundance="$2"
+
+    [[ -s "$gene_families" && -s "$pathway_abundance" ]] || return 1
+    validate_humann_table "$gene_families" || return 1
+    validate_humann_table "$pathway_abundance" || return 1
+}
+
+validate_sam_output() {
+    local sam_file="$1"
+    [[ -s "$sam_file" ]] || return 1
+    samtools view -H "$sam_file" >/dev/null 2>&1 || return 1
+    samtools view -c "$sam_file" >/dev/null 2>&1
+}
+
+build_run_input_manifest() {
+    local destination="$1"
+    local metadata_path="-"
+    local metadata_hash="-"
+    local contaminant_hash="-"
+    local sample=""
+    local layout=""
+    local read1=""
+    local read2=""
+    local read1_abs=""
+    local read2_abs="-"
+
+    if [[ -n "${metadata:-}" ]]; then
+        require_file "$metadata" "Metadata input"
+        metadata_path="$(readlink -f -- "$metadata")"
+        metadata_hash="$(sha256_file "$metadata_path")"
+    fi
+
+    if [[ -s "$MTDIR/conta_ls.txt" ]]; then
+        contaminant_hash="$(sha256_file "$MTDIR/conta_ls.txt")"
+    fi
+
+    {
+        printf 'record\tkey\tvalue1\tvalue2\tvalue3\tvalue4\n'
+        printf 'run\tcheckpoint_schema\t%s\t-\t-\t-\n' "$MTD_CHECKPOINT_SCHEMA"
+        printf 'run\tsamplesheet\t%s\t%s\t-\t-\n' \
+            "$(readlink -f -- "$samplesheet_file")" \
+            "$(sha256_file "$samplesheet_file")"
+        printf 'run\tmetadata\t%s\t%s\t-\t-\n' "$metadata_path" "$metadata_hash"
+        printf 'run\thostid\t%s\t-\t-\t-\n' "$hostid"
+        printf 'run\tread_layout\t%s\t-\t-\t-\n' "$READ_LAYOUT"
+        printf 'run\tno_trim\t%s\t-\t-\t-\n' "$no_trimm"
+        printf 'run\ttrim_length\t%s\t-\t-\t-\n' "$length"
+        printf 'run\thost_alignment\t%s\t-\t-\t-\n' "$blast"
+        printf 'run\tkraken_host\t%s\t%s\t%s\t%s\n' \
+            "$(readlink -f -- "$DB_host")" \
+            "$(resource_signature "$DB_host")" \
+            "$KRAKEN_HOST_CONF" "$KRAKEN_HOST_MIN_HIT_GROUPS"
+        printf 'run\tkraken_micro\t%s\t%s\t%s\t%s\n' \
+            "$(readlink -f -- "$DB_micro")" \
+            "$(resource_signature "$DB_micro")" \
+            "$KRAKEN_MICRO_CONF" "$KRAKEN_MICRO_MIN_HIT_GROUPS"
+        printf 'run\tcontaminants\t%s\t%s\t-\t-\n' \
+            "$MTDIR/conta_ls.txt" "$contaminant_hash"
+        printf 'run\thumann_databases\t%s\t%s\t%s\t%s\n' \
+            "$(readlink -f -- "$HUMANN_DB_ROOT")" \
+            "$(resource_signature "$HUMANN_DB_ROOT")" \
+            "$HUMANN_METAPHLAN_INDEX" \
+            "$(run_humann_tool "$HUMANN_BIN" --version 2>&1 | head -n 1 | tr '\t' ' ')"
+        printf 'run\thost_reference\t%s\t%s\t%s\t%s\n' \
+            "$gtf" "$(resource_signature "$gtf")" \
+            "$([[ "$blast" == "blast" ]] && printf '%s' "$DB_blast" || printf '%s' "$DB_hisat2")" \
+            "$([[ "$blast" == "blast" ]] && resource_signature "$DB_blast" || resource_signature "$DB_hisat2")"
+
+        while IFS=$'\t' read -r sample layout read1 read2; do
+            [[ "$sample" == "sample" ]] && continue
+            read1_abs="$(readlink -f -- "$read1")"
+            if [[ "$layout" == "pe" ]]; then
+                read2_abs="$(readlink -f -- "$read2")"
+                printf 'sample\t%s\t%s\t%s\t%s\t%s;%s\n' \
+                    "$sample" "$layout" "$read1_abs" "$(sha256_file "$read1_abs")" \
+                    "$read2_abs" "$(sha256_file "$read2_abs")"
+            else
+                printf 'sample\t%s\t%s\t%s\t%s\t-;-\n' \
+                    "$sample" "$layout" "$read1_abs" "$(sha256_file "$read1_abs")"
+            fi
+        done < "$FASTQ_INPUT_MANIFEST"
+    } > "$destination"
+}
+
+restart_without_resume_heavy() {
+    local -a restart_args=()
+    local arg=""
+
+    for arg in "${ORIGINAL_ARGS[@]}"; do
+        [[ "$arg" == "--resume-heavy" ]] && continue
+        restart_args+=( "$arg" )
+    done
+
+    cd "$LAUNCH_DIR" || die "Could not return to launch directory for a clean restart."
+    export MTD_CONFIRMED_INPUT_RESET=1
+    exec bash "$0" "${restart_args[@]}"
+}
+
+confirm_full_reset_after_input_change() {
+    local reason="$1"
+    local answer=""
+
+    echo
+    echo "${r}[RESUME] Existing heavy-stage results cannot be reused.${w}"
+    echo "Reason: $reason"
+    echo
+
+    if [[ -t 0 ]]; then
+        read -r -p "Delete the previous output and restart everything from zero? (y/n): " answer
+        if [[ "$answer" =~ ^[Yy]$ ]]; then
+            restart_without_resume_heavy
+        fi
+        die "Resume cancelled; the previous output directory was preserved."
+    fi
+
+    die "A clean restart is required. Re-run without --resume-heavy to confirm replacement of the output directory."
+}
+
+clean_derived_outputs_for_resume() {
+    local -a derived_dirs=(
+        "$outputdr/kraken"
+        "$outputdr/graphlan"
+        "$outputdr/krona"
+        "$outputdr/exploratory"
+        "$outputdr/hmn_pathway_abundance_files"
+        "$outputdr/hmn_genefamily_abundance_files"
+        "$outputdr/Host_DEG"
+        "$outputdr/Nonhost_DEG"
+        "$outputdr/ssGSEA"
+        "$outputdr/halla"
+        "$outputdr/hpc/bracken"
+        "$outputdr/temp/Report_non-host_bracken_species_normalized"
+        "$outputdr/temp/bracken_transformed"
+        "$outputdr/temp/bracken_raw_results"
+        "$outputdr/temp/graphlan_mpa_input"
+        "$outputdr/temp/BAM"
+    )
+    local -a derived_files=()
+
+    rm -rf -- "${derived_dirs[@]}"
+
+    shopt -s nullglob
+    derived_files=(
+        "$outputdr"/bracken_*
+        "$outputdr/Combined.mpa"
+        "$outputdr/host_counts.txt"
+        "$outputdr/host_counts.txt.summary"
+        "$outputdr/temp"/*.bracken
+        "$outputdr/temp"/*_bracken_*.txt
+        "$outputdr/temp/bracken_species_all0.biom"
+        "$outputdr/temp/HUMAnN_output"/humann_*.tsv
+    )
+    if (( ${#derived_files[@]} > 0 )); then
+        rm -rf -- "${derived_files[@]}"
+    fi
+    shopt -u nullglob
+
+    echo "${g}[RESUME] Derived analyses were cleared and will be regenerated.${w}"
+}
+
+# ------------------------------------------------------------
 # Default settings
 # ------------------------------------------------------------
 
@@ -365,6 +782,7 @@ read_len=75                            # Bracken read length
 threads="$(nproc)"                     # CPU threads
 blast="hisat"                          # default host alignment method
 no_trimm=0                             # default flag
+RESUME_HEAVY=0                         # opt-in reuse of validated expensive stages
 metadata=""                            # optional metadata file
 analysis_mode="auto"                   # auto, comparison, exploratory
 NO_COMPARISON=0                        # set automatically later
@@ -529,6 +947,12 @@ Host processing:
 
   -b, --blast                              Use Magic-BLAST instead of HISAT2
   -t, --no-trim                            Skip fastp trimming
+      --resume-heavy                       Reuse validated per-sample outputs from expensive stages.
+                                           The samplesheet and every resolved FASTQ are compared
+                                           with the previous run using SHA-256 before reuse.
+                                           Derived tables, statistics, and figures are regenerated.
+                                           Local backend only. With --hpc-conf, resume is disabled
+                                           and the normal overwrite confirmation is used.
 Kraken2 host filtering:
       --kraken-host-db DIR                 Optional custom Kraken2 host-filtering database.
                                            If not provided, DB_host is selected automatically from --hostid.
@@ -605,6 +1029,7 @@ EOF
 }
 
 # Save original command line before parsing arguments
+ORIGINAL_ARGS=( "$@" )
 ORIGINAL_COMMAND="$(printf '%q ' "$0" "$@")"
 LAUNCH_DIR="$(pwd)"
 SCRIPT_NAME="$(basename "$0")"
@@ -731,6 +1156,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -t|--no-trim)
             no_trimm=1
+            shift
+            ;;
+        --resume-heavy)
+            RESUME_HEAVY=1
             shift
             ;;
         --kraken-host-db|--host-kraken-db)
@@ -951,7 +1380,24 @@ esac
 # Output directory behavior
 # ------------------------------------------------------------
 
+if [[ "$RESUME_HEAVY" == "1" && -n "$HPC_CONF" ]]; then
+    echo "${y}[WARNING] --resume-heavy is supported only by the normal local backend.${w}"
+    echo "${y}[WARNING] HPC mode will use the original overwrite behavior.${w}"
+    RESUME_HEAVY=0
+fi
+
+OUTPUT_DIR_EXISTED=0
+
 if [[ -d "$outputdr" ]]; then
+    OUTPUT_DIR_EXISTED=1
+
+    if [[ "$RESUME_HEAVY" == "1" ]]; then
+        echo "${y}[RESUME] Preserving existing output directory for validation:${w}"
+        echo "  $outputdr"
+    elif [[ "${MTD_CONFIRMED_INPUT_RESET:-0}" == "1" ]]; then
+        rm -rf -- "$outputdr"
+        echo "Directory deleted after confirmed input-change reset."
+    else
     echo "The output directory '$outputdr' already exists."
     read -p "Do you want to delete it and overwrite the files? (y/n): " answer
 
@@ -961,6 +1407,7 @@ if [[ -d "$outputdr" ]]; then
     else
         echo "Operation cancelled by the user. Exiting."
         exit 1
+    fi
     fi
 fi
 
@@ -1377,10 +1824,12 @@ mkdir -p "$outputdr/methods"
 # Save samplesheet used for this analysis
 # ------------------------------------------------------------
 
-cp -f -- "$samplesheet_file" "$outputdr/methods/used_samplesheet.csv"
+if [[ "$RESUME_HEAVY" != "1" || "$OUTPUT_DIR_EXISTED" != "1" ]]; then
+    cp -f -- "$samplesheet_file" "$outputdr/methods/used_samplesheet.csv"
 
-echo "${g}[OK] Samplesheet used for this analysis saved to:${w}"
-echo "  $outputdr/methods/used_samplesheet.csv"
+    echo "${g}[OK] Samplesheet used for this analysis saved to:${w}"
+    echo "  $outputdr/methods/used_samplesheet.csv"
+fi
 
 cd "$outputdr/temp" || die "Could not enter temp directory: $outputdr/temp"
 
@@ -1511,6 +1960,7 @@ echo "  HPC backend:                    $([[ -n "$HPC_CONF" ]] && echo enabled |
 echo "  HPC configuration:              ${HPC_CONF:-none}"
 echo "  host alignment mode:            $blast"
 echo "  no_trim:                        $no_trimm"
+echo "  resume heavy local stages:      $RESUME_HEAVY"
 echo "  sequencing read layout request: $READ_LAYOUT_MODE"
 echo "  automatic SRA download:         enabled for SRR/ERR/DRR when no local FASTQ exists"
 echo "  SRA FASTQ conversion mode:      fasterq-dump default split-3"
@@ -1648,6 +2098,13 @@ write_methods_log() {
             "no_trim" \
             "$no_trimm" \
             "If 1, fastp trimming is skipped"
+
+        csv_row \
+            "Input and output" \
+            "$SCRIPT_NAME" \
+            "resume_heavy" \
+            "$RESUME_HEAVY" \
+            "If 1, validated local heavy-stage outputs may be reused; HPC mode always uses normal overwrite behavior"
 
         csv_row \
             "Read preparation" \
@@ -2026,7 +2483,9 @@ write_methods_log() {
     echo "  $methods_csv"
 }
 
-write_methods_log
+if [[ "$RESUME_HEAVY" != "1" || "$OUTPUT_DIR_EXISTED" != "1" ]]; then
+    write_methods_log
+fi
 
 # ------------------------------------------------------------
 # Exploratory-only taxonomic figures
@@ -3677,6 +4136,59 @@ column -s $'\t' -t "$FASTQ_INPUT_MANIFEST" 2>/dev/null || \
     cat "$FASTQ_INPUT_MANIFEST"
 
 # ------------------------------------------------------------
+# Establish the identity of this run before any heavy output is reused.
+# ------------------------------------------------------------
+
+if [[ -z "$HPC_CONF" ]]; then
+    MTD_STATE_DIR="$outputdr/.mtd_state"
+    RUN_INPUT_MANIFEST="$MTD_STATE_DIR/run_inputs.tsv"
+    RUN_INPUT_MANIFEST_CURRENT="$MTD_STATE_DIR/run_inputs.current.tsv"
+
+    mkdir -p -- "$MTD_STATE_DIR"
+
+    echo "${g}[STATE] Calculating SHA-256 identities for run inputs.${w}"
+    echo "This reads every resolved FASTQ once and can take a few minutes."
+    build_run_input_manifest "$RUN_INPUT_MANIFEST_CURRENT"
+
+    if [[ "$RESUME_HEAVY" == "1" && "$OUTPUT_DIR_EXISTED" == "1" ]]; then
+        if [[ ! -s "$RUN_INPUT_MANIFEST" ]]; then
+            confirm_full_reset_after_input_change \
+                "the existing output predates the checkpoint manifest"
+        fi
+
+        if ! cmp -s -- "$RUN_INPUT_MANIFEST" "$RUN_INPUT_MANIFEST_CURRENT"; then
+            echo
+            echo "${r}[RESUME] Previous and current run inputs differ:${w}"
+            diff -u -- "$RUN_INPUT_MANIFEST" "$RUN_INPUT_MANIFEST_CURRENT" || true
+            confirm_full_reset_after_input_change \
+                "samples, input contents, databases, or heavy-stage parameters changed"
+        fi
+
+        echo "${g}[RESUME] Run inputs and heavy-stage design match the previous execution.${w}"
+        clean_derived_outputs_for_resume
+    fi
+
+    mv -f -- "$RUN_INPUT_MANIFEST_CURRENT" "$RUN_INPUT_MANIFEST"
+    RUN_INPUT_FINGERPRINT="$(sha256_file "$RUN_INPUT_MANIFEST")"
+else
+    MTD_STATE_DIR=""
+    RUN_INPUT_MANIFEST=""
+    RUN_INPUT_FINGERPRINT="hpc-resume-disabled"
+fi
+
+# This copy is intentionally delayed until after the previous manifest has
+# been compared, so an incompatible resume attempt cannot overwrite evidence
+# describing the earlier run.
+cp -f -- "$samplesheet_file" "$outputdr/methods/used_samplesheet.csv"
+
+echo "${g}[OK] Samplesheet used for this analysis saved to:${w}"
+echo "  $outputdr/methods/used_samplesheet.csv"
+if [[ -n "$RUN_INPUT_MANIFEST" ]]; then
+    echo "${g}[OK] Run input manifest saved to:${w}"
+    echo "  $RUN_INPUT_MANIFEST"
+fi
+
+# ------------------------------------------------------------
 # Save FASTQ files used for this analysis
 # ------------------------------------------------------------
 
@@ -4140,6 +4652,7 @@ else
     conda activate MTD_fastp
 
     mkdir -p "$outputdr/fastp"
+    FASTP_TOOL_ID="$(fastp --version 2>&1 | head -n 1 | tr '\t' ' ')"
 
     sample_index=0
     for i in $lsn; do
@@ -4151,6 +4664,17 @@ else
         fastp_report_base="Trimmed_${i}"
         fastp_html="$outputdr/fastp/${fastp_report_base}.fastp.html"
         fastp_json="$outputdr/fastp/${fastp_report_base}.fastp.json"
+        fastp_fingerprint="$(fingerprint_values \
+            "$MTD_CHECKPOINT_SCHEMA" fastp "$i" "$RUN_INPUT_FINGERPRINT" \
+            "$INPUT_LAYOUT" "$length" "$FASTP_TOOL_ID")"
+
+        if [[ "$INPUT_LAYOUT" == "pe" ]]; then
+            fastp_output_read1="$PIPELINE_TEMP_DIR/Trimmed_${i}_R1.fq.gz"
+            fastp_output_read2="$PIPELINE_TEMP_DIR/Trimmed_${i}_R2.fq.gz"
+        else
+            fastp_output_read1="$PIPELINE_TEMP_DIR/Trimmed_${i}.fq.gz"
+            fastp_output_read2="-"
+        fi
 
         echo "============================================================"
         echo "[FASTP] Sample: $i"
@@ -4187,6 +4711,18 @@ else
             echo "HTML:      $fastp_html"
             echo "JSON:      $fastp_json"
             echo "============================================================"
+
+            if checkpoint_matches fastp "$i" "$fastp_fingerprint" && \
+               validate_fastp_outputs \
+                    "$i" pe "$out_fq1" "$out_fq2" "$fastp_html" "$fastp_json"
+            then
+                echo "${g}[RESUME] [fastp] Sample $i validated — skipping.${w}"
+            else
+                if [[ "$RESUME_HEAVY" == "1" ]]; then
+                    echo "${y}[RESUME] [fastp] Sample $i is missing, stale, or invalid — rerunning.${w}"
+                fi
+                checkpoint_reject fastp "$i"
+                checkpoint_begin fastp "$i"
 
             if ! [[ "$FASTP_PE_MAX_ATTEMPTS" =~ ^[0-9]+$ ]] || [[ "$FASTP_PE_MAX_ATTEMPTS" -lt 1 ]]; then
                 echo "${y}[WARNING] Invalid FASTP_PE_MAX_ATTEMPTS value:${w} $FASTP_PE_MAX_ATTEMPTS"
@@ -4251,6 +4787,7 @@ else
                 echo "  3. Use an alternative PE trimmer such as Trimmomatic in a future MTD Explorer run."
                 exit 1
             fi
+            fi
 
             require_file "$out_fq1" "fastp R1 output for sample $i"
             require_file "$out_fq2" "fastp R2 output for sample $i"
@@ -4269,12 +4806,26 @@ else
             echo "JSON:   $fastp_json"
             echo "============================================================"
 
-            if ! fastp \
-                "${fastp_common_args[@]}" \
-                -i "$INPUT_READ1" \
-                -o "$out_fq"
+            if checkpoint_matches fastp "$i" "$fastp_fingerprint" && \
+               validate_fastp_outputs \
+                    "$i" se "$out_fq" "-" "$fastp_html" "$fastp_json"
             then
-                die "fastp failed for single-end sample: $i"
+                echo "${g}[RESUME] [fastp] Sample $i validated — skipping.${w}"
+            else
+                if [[ "$RESUME_HEAVY" == "1" ]]; then
+                    echo "${y}[RESUME] [fastp] Sample $i is missing, stale, or invalid — rerunning.${w}"
+                fi
+                checkpoint_reject fastp "$i"
+                checkpoint_begin fastp "$i"
+                rm -f -- "$out_fq" "$fastp_html" "$fastp_json"
+
+                if ! fastp \
+                    "${fastp_common_args[@]}" \
+                    -i "$INPUT_READ1" \
+                    -o "$out_fq"
+                then
+                    die "fastp failed for single-end sample: $i"
+                fi
             fi
 
             require_file "$out_fq" "fastp SE output for sample $i"
@@ -4288,6 +4839,13 @@ else
 
         require_file "$fastp_html" "fastp HTML report for sample $i"
         require_file "$fastp_json" "fastp JSON report for sample $i"
+        validate_fastp_outputs \
+            "$i" "$INPUT_LAYOUT" \
+            "$fastp_output_read1" "$fastp_output_read2" \
+            "$fastp_html" "$fastp_json" || \
+            die "fastp output validation failed for sample: $i"
+        checkpoint_complete fastp "$i" "$fastp_fingerprint" \
+            "$fastp_output_read1" "$fastp_output_read2" "$fastp_html" "$fastp_json"
     done
     fi
 fi
@@ -4304,6 +4862,22 @@ echo "${g}============================================${w}"
 
 column -s $'\t' -t "$PREPARED_FASTQ_MANIFEST" 2>/dev/null || \
     cat "$PREPARED_FASTQ_MANIFEST"
+
+# Dependency identities make invalidation flow downstream. For example, a
+# fastp version change invalidates Kraken2 checkpoints; a Kraken2 version
+# change invalidates HUMAnN/MetaPhlAn and Magic-BLAST checkpoints.
+READ_PREPARATION_STAGE_ID="$(fingerprint_values \
+    "$RUN_INPUT_FINGERPRINT" read_preparation "$no_trimm" \
+    "${FASTP_TOOL_ID:-not_used}")"
+KRAKEN_HOST_STAGE_ID="$(fingerprint_values \
+    "$READ_PREPARATION_STAGE_ID" kraken_host "$KRAKEN2_VERSION" \
+    "$KRAKEN_HOST_CONF" "$KRAKEN_HOST_MIN_HIT_GROUPS")"
+KRAKEN_MICRO_RAW_STAGE_ID="$(fingerprint_values \
+    "$KRAKEN_HOST_STAGE_ID" kraken_micro_raw "$KRAKEN2_VERSION" \
+    "$KRAKEN_MICRO_CONF" "$KRAKEN_MICRO_MIN_HIT_GROUPS")"
+KRAKEN_MICRO_FINAL_STAGE_ID="$(fingerprint_values \
+    "$KRAKEN_MICRO_RAW_STAGE_ID" kraken_micro_final "$KRAKEN2_VERSION" \
+    "$KRAKEN_MICRO_CONF" "$KRAKEN_MICRO_MIN_HIT_GROUPS")"
 
 show_progress 20 "Classifying host reads with Kraken2"
 echo "Host DB: $DB_host"
@@ -4406,6 +4980,10 @@ for i in $lsn; do
         nonhost_read2="-"
     fi
 
+    kraken_host_fingerprint="$(fingerprint_values \
+        "$MTD_CHECKPOINT_SCHEMA" kraken_host "$i" \
+        "$KRAKEN_HOST_STAGE_ID" "$PREPARED_LAYOUT")"
+
     echo "============================================================"
     echo "[HOST] Sample: $i"
     echo "Layout: $PREPARED_LAYOUT"
@@ -4430,6 +5008,25 @@ for i in $lsn; do
     echo "============================================================"
 
     if [[ -z "$HPC_CONF" ]]; then
+        if checkpoint_matches kraken_host "$i" "$kraken_host_fingerprint" && \
+           validate_kraken_outputs \
+                "$i" "$PREPARED_LAYOUT" "$report" "$kraken_output" \
+                "$host_read1" "$host_read2" "$nonhost_read1" "$nonhost_read2"
+        then
+            echo "${g}[RESUME] [Kraken host] Sample $i validated — skipping.${w}"
+        else
+            if [[ "$RESUME_HEAVY" == "1" ]]; then
+                echo "${y}[RESUME] [Kraken host] Sample $i is missing, stale, or invalid — rerunning.${w}"
+            fi
+            checkpoint_reject kraken_host "$i"
+            checkpoint_begin kraken_host "$i"
+            rm -f -- \
+                "$report" "$kraken_output" \
+                "$host_read1" "$nonhost_read1"
+            if [[ "$PREPARED_LAYOUT" == "pe" ]]; then
+                rm -f -- "$host_read2" "$nonhost_read2"
+            fi
+
         kraken_host_args=(
             --db "$DB_host"
             --use-names
@@ -4459,6 +5056,7 @@ for i in $lsn; do
 
         if ! kraken2 "${kraken_host_args[@]}"; then
             die "Kraken2 host filtering failed for sample: $i"
+        fi
         fi
     fi
 
@@ -4507,6 +5105,15 @@ for i in $lsn; do
                 "$host_read2" \
                 "Kraken2 host-classified pair for sample $i"
         fi
+    fi
+    if [[ -z "$HPC_CONF" ]]; then
+        validate_kraken_outputs \
+            "$i" "$PREPARED_LAYOUT" "$report" "$kraken_output" \
+            "$host_read1" "$host_read2" "$nonhost_read1" "$nonhost_read2" || \
+            die "Kraken2 host output validation failed for sample: $i"
+        checkpoint_complete kraken_host "$i" "$kraken_host_fingerprint" \
+            "$report" "$kraken_output" \
+            "$host_read1" "$host_read2" "$nonhost_read1" "$nonhost_read2"
     fi
     host_unclassified_pct="$(
         awk '$4 == "U" {
@@ -4729,6 +5336,10 @@ for i in $lsn; do
         raw_unclassified_read2="-"
     fi
 
+    kraken_micro_raw_fingerprint="$(fingerprint_values \
+        "$MTD_CHECKPOINT_SCHEMA" kraken_micro_raw "$i" \
+        "$KRAKEN_MICRO_RAW_STAGE_ID" "$READ_LAYOUT")"
+
     echo "============================================================"
     echo "[MICRO RAW] Sample: $i"
     echo "Layout: $READ_LAYOUT"
@@ -4770,6 +5381,26 @@ for i in $lsn; do
     fi
 
     if [[ -z "$HPC_CONF" ]]; then
+        if checkpoint_matches kraken_micro_raw "$i" "$kraken_micro_raw_fingerprint" && \
+           validate_kraken_outputs \
+                "$i" "$READ_LAYOUT" "$report" "$kraken_output" \
+                "$raw_classified_read1" "$raw_classified_read2" \
+                "$raw_unclassified_read1" "$raw_unclassified_read2"
+        then
+            echo "${g}[RESUME] [Kraken microbiome raw] Sample $i validated — skipping.${w}"
+        else
+            if [[ "$RESUME_HEAVY" == "1" ]]; then
+                echo "${y}[RESUME] [Kraken microbiome raw] Sample $i is missing, stale, or invalid — rerunning.${w}"
+            fi
+            checkpoint_reject kraken_micro_raw "$i"
+            checkpoint_begin kraken_micro_raw "$i"
+            rm -f -- \
+                "$report" "$kraken_output" \
+                "$raw_classified_read1" "$raw_unclassified_read1"
+            if [[ "$READ_LAYOUT" == "pe" ]]; then
+                rm -f -- "$raw_classified_read2" "$raw_unclassified_read2"
+            fi
+
         kraken_micro_args=(
             --db "$DB_micro"
             --use-names
@@ -4798,6 +5429,7 @@ for i in $lsn; do
 
         if ! kraken2 "${kraken_micro_args[@]}"; then
             die "Kraken2 raw microbiome classification failed for sample: $i"
+        fi
         fi
     fi
 
@@ -4831,6 +5463,18 @@ for i in $lsn; do
                 die "Expected single-end raw microbiome output was not created for sample '$i': $output_file"
             fi
         done
+    fi
+
+    if [[ -z "$HPC_CONF" ]]; then
+        validate_kraken_outputs \
+            "$i" "$READ_LAYOUT" "$report" "$kraken_output" \
+            "$raw_classified_read1" "$raw_classified_read2" \
+            "$raw_unclassified_read1" "$raw_unclassified_read2" || \
+            die "Raw microbiome Kraken2 output validation failed for sample: $i"
+        checkpoint_complete kraken_micro_raw "$i" "$kraken_micro_raw_fingerprint" \
+            "$report" "$kraken_output" \
+            "$raw_classified_read1" "$raw_classified_read2" \
+            "$raw_unclassified_read1" "$raw_unclassified_read2"
     fi
 
     micro_unclassified_pct="$(
@@ -5417,6 +6061,10 @@ if [[ "$valid_contaminant_list" == "1" ]]; then
             final_unclassified_pattern="$FINAL_UNCLASSIFIED_R1"
         fi
 
+        kraken_micro_final_fingerprint="$(fingerprint_values \
+            "$MTD_CHECKPOINT_SCHEMA" kraken_micro_final "$i" \
+            "$KRAKEN_MICRO_FINAL_STAGE_ID" "$READ_LAYOUT")"
+
         echo "============================================================"
         echo "[MICRO FINAL] Sample: $i"
         echo "Layout: $READ_LAYOUT"
@@ -5434,6 +6082,26 @@ if [[ "$valid_contaminant_list" == "1" ]]; then
         echo "============================================================"
 
         if [[ -z "$HPC_CONF" ]]; then
+            if checkpoint_matches kraken_micro_final "$i" "$kraken_micro_final_fingerprint" && \
+               validate_kraken_outputs \
+                    "$i" "$READ_LAYOUT" "$FINAL_KRAKEN_REPORT" "$FINAL_KRAKEN_OUTPUT" \
+                    "$FINAL_CLASSIFIED_R1" "$FINAL_CLASSIFIED_R2" \
+                    "$FINAL_UNCLASSIFIED_R1" "$FINAL_UNCLASSIFIED_R2"
+            then
+                echo "${g}[RESUME] [Kraken microbiome final] Sample $i validated — skipping.${w}"
+            else
+                if [[ "$RESUME_HEAVY" == "1" ]]; then
+                    echo "${y}[RESUME] [Kraken microbiome final] Sample $i is missing, stale, or invalid — rerunning.${w}"
+                fi
+                checkpoint_reject kraken_micro_final "$i"
+                checkpoint_begin kraken_micro_final "$i"
+                rm -f -- \
+                    "$FINAL_KRAKEN_REPORT" "$FINAL_KRAKEN_OUTPUT" \
+                    "$FINAL_CLASSIFIED_R1" "$FINAL_UNCLASSIFIED_R1"
+                if [[ "$READ_LAYOUT" == "pe" ]]; then
+                    rm -f -- "$FINAL_CLASSIFIED_R2" "$FINAL_UNCLASSIFIED_R2"
+                fi
+
             kraken_final_args=(
                 --db "$DB_micro"
                 --use-names
@@ -5462,6 +6130,7 @@ if [[ "$valid_contaminant_list" == "1" ]]; then
 
             if ! kraken2 "${kraken_final_args[@]}"; then
                 die "Final Kraken2 microbiome classification failed for sample: $i"
+            fi
             fi
         fi
 
@@ -5493,6 +6162,17 @@ if [[ "$valid_contaminant_list" == "1" ]]; then
                     die "Expected final single-end Kraken2 output was not created for sample '$i': $output_file"
                 fi
             done
+        fi
+        if [[ -z "$HPC_CONF" ]]; then
+            validate_kraken_outputs \
+                "$i" "$READ_LAYOUT" "$FINAL_KRAKEN_REPORT" "$FINAL_KRAKEN_OUTPUT" \
+                "$FINAL_CLASSIFIED_R1" "$FINAL_CLASSIFIED_R2" \
+                "$FINAL_UNCLASSIFIED_R1" "$FINAL_UNCLASSIFIED_R2" || \
+                die "Final microbiome Kraken2 output validation failed for sample: $i"
+            checkpoint_complete kraken_micro_final "$i" "$kraken_micro_final_fingerprint" \
+                "$FINAL_KRAKEN_REPORT" "$FINAL_KRAKEN_OUTPUT" \
+                "$FINAL_CLASSIFIED_R1" "$FINAL_CLASSIFIED_R2" \
+                "$FINAL_UNCLASSIFIED_R1" "$FINAL_UNCLASSIFIED_R2"
         fi
     done
 
@@ -6851,6 +7531,12 @@ else
         show_sample_progress "MetaPhlAn/HUMAnN" "$sample_index" "$total_samples" "$i"
 
         humann_input="$HUMANN_INPUT_DIR/${i}.fq"
+        humann_genefamilies="$HUMANN_RESULTS_DIR/${i}_genefamilies.tsv"
+        humann_pathabundance="$HUMANN_RESULTS_DIR/${i}_pathabundance.tsv"
+        humann_fingerprint="$(fingerprint_values \
+            "$MTD_CHECKPOINT_SCHEMA" humann_metaphlan "$i" "$KRAKEN_MICRO_FINAL_STAGE_ID" \
+            "$READ_LAYOUT" "$HUMANN_METAPHLAN_OPTIONS" \
+            "$(run_humann_tool "$HUMANN_BIN" --version 2>&1 | head -n 1)")"
 
         require_file \
             "$humann_input" \
@@ -6864,19 +7550,33 @@ else
         echo "Threads: $threads"
         echo "============================================================"
 
-        if ! run_humann_tool "$HUMANN_BIN" \
-            --input "$humann_input" \
-            --output "$HUMANN_RESULTS_DIR" \
-            --threads "$threads" \
-            --metaphlan "$HUMANN_ENV_DIR/bin" \
-            --metaphlan-options "$HUMANN_METAPHLAN_OPTIONS" \
-            --verbose
+        if checkpoint_matches humann_metaphlan "$i" "$humann_fingerprint" && \
+           validate_humann_outputs "$humann_genefamilies" "$humann_pathabundance"
         then
-            die "HUMAnN failed for sample: $i"
-        fi
+            echo "${g}[RESUME] [HUMAnN/MetaPhlAn] Sample $i validated — skipping.${w}"
+        else
+            if [[ "$RESUME_HEAVY" == "1" ]]; then
+                echo "${y}[RESUME] [HUMAnN/MetaPhlAn] Sample $i is missing, stale, or invalid — rerunning.${w}"
+            fi
+            checkpoint_reject humann_metaphlan "$i"
+            checkpoint_begin humann_metaphlan "$i"
+            rm -f -- \
+                "$HUMANN_RESULTS_DIR/${i}_genefamilies.tsv" \
+                "$HUMANN_RESULTS_DIR/${i}_pathabundance.tsv" \
+                "$HUMANN_RESULTS_DIR/${i}_pathcoverage.tsv"
+            rm -rf -- "$HUMANN_RESULTS_DIR/${i}_humann_temp"
 
-        humann_genefamilies="$HUMANN_RESULTS_DIR/${i}_genefamilies.tsv"
-        humann_pathabundance="$HUMANN_RESULTS_DIR/${i}_pathabundance.tsv"
+            if ! run_humann_tool "$HUMANN_BIN" \
+                --input "$humann_input" \
+                --output "$HUMANN_RESULTS_DIR" \
+                --threads "$threads" \
+                --metaphlan "$HUMANN_ENV_DIR/bin" \
+                --metaphlan-options "$HUMANN_METAPHLAN_OPTIONS" \
+                --verbose
+            then
+                die "HUMAnN failed for sample: $i"
+            fi
+        fi
 
         require_file \
             "$humann_genefamilies" \
@@ -6885,6 +7585,11 @@ else
         require_file \
             "$humann_pathabundance" \
             "HUMAnN pathway abundance output for sample $i"
+
+        validate_humann_outputs "$humann_genefamilies" "$humann_pathabundance" || \
+            die "HUMAnN output validation failed for sample: $i"
+        checkpoint_complete humann_metaphlan "$i" "$humann_fingerprint" \
+            "$humann_genefamilies" "$humann_pathabundance"
 
         echo "${g}[OK] HUMAnN completed for sample:${w} $i"
     done
@@ -7172,8 +7877,9 @@ if [[ "$blast" == "blast" ]]; then
 
             sam_file="${i}.sam"
             host_sam_files+=("$sam_file")
-
-            rm -f -- "$sam_file"
+            host_alignment_fingerprint="$(fingerprint_values \
+                "$MTD_CHECKPOINT_SCHEMA" host_alignment "$i" "$KRAKEN_HOST_STAGE_ID" \
+                magicblast "$(magicblast -version 2>&1 | head -n 1)")"
 
             echo "============================================================"
             echo "[MAGIC-BLAST] Sample: $i"
@@ -7215,13 +7921,31 @@ if [[ "$blast" == "blast" ]]; then
 
             echo "============================================================"
 
-            if ! magicblast "${magicblast_args[@]}"; then
-                die "Magic-BLAST failed for sample: $i"
+            if checkpoint_matches host_alignment "$i" "$host_alignment_fingerprint" && \
+               validate_sam_output "$sam_file"
+            then
+                echo "${g}[RESUME] [Magic-BLAST] Sample $i validated — skipping.${w}"
+            else
+                if [[ "$RESUME_HEAVY" == "1" ]]; then
+                    echo "${y}[RESUME] [Magic-BLAST] Sample $i is missing, stale, or invalid — rerunning.${w}"
+                fi
+                checkpoint_reject host_alignment "$i"
+                checkpoint_begin host_alignment "$i"
+                rm -f -- "$sam_file"
+
+                if ! magicblast "${magicblast_args[@]}"; then
+                    die "Magic-BLAST failed for sample: $i"
+                fi
             fi
 
             require_file \
                 "$sam_file" \
                 "Magic-BLAST SAM output for sample $i"
+
+            validate_sam_output "$sam_file" || \
+                die "Magic-BLAST SAM validation failed for sample: $i"
+            checkpoint_complete host_alignment "$i" "$host_alignment_fingerprint" \
+                "$sam_file"
 
             echo "${g}[OK] Magic-BLAST completed for sample:${w} $i"
         done
@@ -7235,10 +7959,11 @@ else
 
         sam_file="${i}.sam"
         hisat2_summary="${i}_hisat2_summary.txt"
+        host_alignment_fingerprint="$(fingerprint_values \
+            "$MTD_CHECKPOINT_SCHEMA" host_alignment "$i" "$READ_PREPARATION_STAGE_ID" \
+            hisat2 "$(hisat2 --version 2>&1 | head -n 1)")"
 
         host_sam_files+=("$sam_file")
-
-        rm -f -- "$sam_file" "$hisat2_summary"
 
         echo "============================================================"
         echo "[HISAT2] Sample: $i"
@@ -7274,8 +7999,21 @@ else
 
         echo "============================================================"
 
-        if ! hisat2 "${hisat2_args[@]}"; then
-            die "HISAT2 alignment failed for sample: $i"
+        if checkpoint_matches host_alignment "$i" "$host_alignment_fingerprint" && \
+           validate_sam_output "$sam_file" && [[ -s "$hisat2_summary" ]]
+        then
+            echo "${g}[RESUME] [HISAT2] Sample $i validated — skipping.${w}"
+        else
+            if [[ "$RESUME_HEAVY" == "1" ]]; then
+                echo "${y}[RESUME] [HISAT2] Sample $i is missing, stale, or invalid — rerunning.${w}"
+            fi
+            checkpoint_reject host_alignment "$i"
+            checkpoint_begin host_alignment "$i"
+            rm -f -- "$sam_file" "$hisat2_summary"
+
+            if ! hisat2 "${hisat2_args[@]}"; then
+                die "HISAT2 alignment failed for sample: $i"
+            fi
         fi
 
         require_file \
@@ -7285,6 +8023,11 @@ else
         require_file \
             "$hisat2_summary" \
             "HISAT2 summary for sample $i"
+
+        validate_sam_output "$sam_file" || \
+            die "HISAT2 SAM validation failed for sample: $i"
+        checkpoint_complete host_alignment "$i" "$host_alignment_fingerprint" \
+            "$sam_file" "$hisat2_summary"
 
         echo "${g}[OK] HISAT2 completed for sample:${w} $i"
     done
