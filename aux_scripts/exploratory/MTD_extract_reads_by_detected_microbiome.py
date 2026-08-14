@@ -14,7 +14,7 @@ from pathlib import Path
 # KrakenTools subprocess reads Kraken and FASTA/FASTQ files. Keep the
 # internal concurrency conservative to avoid saturating the storage
 # device or opening too many large files simultaneously.
-MAX_PARALLEL_EXTRACTION_JOBS = 5
+MAX_PARALLEL_EXTRACTION_JOBS = (os.cpu_count() // 4) * 2
 
 
 KNOWN_RANKING_COLUMNS = {
