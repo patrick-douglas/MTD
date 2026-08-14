@@ -3356,15 +3356,30 @@ plots4gsea <- function(edb, data, datax, edb0, genelist, group1, group2) {
   # layer parameters. Numeric fold-change colour mappings remain
   # untouched.
 
+  strip_as_is_columns <- function(x) {
+    if (!is.data.frame(x)) {
+      return(x)
+    }
+
+    for (column_name in names(x)) {
+      if (inherits(x[[column_name]], "AsIs")) {
+        x[[column_name]] <- as.vector(x[[column_name]])
+      }
+    }
+
+    x
+  }
+
   fix_legacy_cnetplot_as_is <- function(plot_object) {
 
-    if (
-      is.null(plot_object) ||
-      is.null(plot_object$layers) ||
-      length(plot_object$layers) == 0
-    ) {
+    if (is.null(plot_object)) {
       return(plot_object)
     }
+
+    # Some enrichplot 1.14.x objects carry I()/AsIs values in the plot or
+    # layer data rather than in the layer-local mapping. Strip the class from
+    # data columns first; this is harmless for numeric fold-change columns.
+    plot_object$data <- strip_as_is_columns(plot_object$data)
 
     fixed_layers <- 0L
     identity_layer_number <- 0L
@@ -3374,14 +3389,29 @@ plots4gsea <- function(edb, data, datax, edb0, genelist, group1, group2) {
       "#B3B3B3"
     )
 
+    if (
+      is.null(plot_object$layers) ||
+      length(plot_object$layers) == 0
+    ) {
+      message(
+        "[CNETPLOT] Legacy AsIs colour layers repaired: 0"
+      )
+      return(plot_object)
+    }
+
     for (layer_index in seq_along(plot_object$layers)) {
 
       layer <- plot_object$layers[[layer_index]]
+
+      if (is.data.frame(layer$data)) {
+        layer$data <- strip_as_is_columns(layer$data)
+      }
 
       if (
         is.null(layer$mapping) ||
         length(layer$mapping) == 0
       ) {
+        plot_object$layers[[layer_index]] <- layer
         next
       }
 
@@ -3393,75 +3423,42 @@ plots4gsea <- function(edb, data, datax, edb0, genelist, group1, group2) {
       )
 
       if (length(colour_mapping_name) == 0) {
+        plot_object$layers[[layer_index]] <- layer
         next
       }
 
       colour_mapping_name <- colour_mapping_name[1]
-
       mapping_expression <- layer$mapping[[colour_mapping_name]]
 
       mapping_text <- tryCatch(
-        {
-          rlang::as_label(
-            mapping_expression
-          )
-        },
+        rlang::as_label(mapping_expression),
         error = function(e) {
-          paste(
-            deparse(mapping_expression),
-            collapse = ""
-          )
+          paste(deparse(mapping_expression), collapse = "")
         }
       )
 
-      is_identity_mapping <- grepl(
-        "I\\s*\\(",
-        mapping_text
-      )
-
-      if (!is_identity_mapping) {
+      if (!grepl("I\\s*\\(", mapping_text)) {
+        plot_object$layers[[layer_index]] <- layer
         next
       }
 
-      identity_layer_number <- (
-        identity_layer_number + 1L
-      )
+      identity_layer_number <- identity_layer_number + 1L
 
       fixed_colour <- default_identity_colours[
-        min(
-          identity_layer_number,
-          length(default_identity_colours)
-        )
+        min(identity_layer_number, length(default_identity_colours))
       ]
 
-      if (
-        grepl(
-          "#E5C494",
-          mapping_text,
-          fixed = TRUE
-        )
-      ) {
+      if (grepl("#E5C494", mapping_text, fixed = TRUE)) {
         fixed_colour <- "#E5C494"
       }
 
-      if (
-        grepl(
-          "#B3B3B3",
-          mapping_text,
-          fixed = TRUE
-        )
-      ) {
+      if (grepl("#B3B3B3", mapping_text, fixed = TRUE)) {
         fixed_colour <- "#B3B3B3"
       }
 
-      # Remove aes(colour = I(...)).
       layer$mapping[[colour_mapping_name]] <- NULL
-
-      # Add the same colour outside aes().
       layer$aes_params$colour <- fixed_colour
-
       plot_object$layers[[layer_index]] <- layer
-
       fixed_layers <- fixed_layers + 1L
     }
 
@@ -3471,6 +3468,280 @@ plots4gsea <- function(edb, data, datax, edb0, genelist, group1, group2) {
     )
 
     plot_object
+  }
+
+  build_mtd_cnetplot_fallback <- function(
+    enrichment_object,
+    fold_change,
+    show_category,
+    output_prefix
+  ) {
+    if (!requireNamespace("igraph", quietly = TRUE)) {
+      stop(
+        "Native cnetplot failed and the igraph fallback is unavailable."
+      )
+    }
+
+    result_table <- as.data.frame(
+      enrichment_object@result,
+      stringsAsFactors = FALSE,
+      check.names = FALSE
+    )
+
+    if (nrow(result_table) == 0) {
+      stop("No enrichment terms are available for the cnetplot fallback.")
+    }
+
+    result_table <- head(
+      result_table,
+      min(show_category, nrow(result_table))
+    )
+
+    gene_column <- intersect(
+      c("core_enrichment", "geneID"),
+      names(result_table)
+    )
+
+    if (length(gene_column) == 0) {
+      stop(
+        "No core_enrichment/geneID column is available for the cnetplot fallback."
+      )
+    }
+
+    gene_column <- gene_column[1]
+
+    term_labels <- if ("Description" %in% names(result_table)) {
+      as.character(result_table$Description)
+    } else if ("ID" %in% names(result_table)) {
+      as.character(result_table$ID)
+    } else {
+      paste0("Term ", seq_len(nrow(result_table)))
+    }
+
+    term_labels[is.na(term_labels) | term_labels == ""] <- paste0(
+      "Term ",
+      which(is.na(term_labels) | term_labels == "")
+    )
+    term_labels <- make.unique(term_labels, sep = " | ")
+
+    max_genes_per_term <- suppressWarnings(
+      as.integer(
+        Sys.getenv(
+          "MTD_CNET_MAX_GENES_PER_TERM",
+          "25"
+        )
+      )
+    )
+
+    if (is.na(max_genes_per_term) || max_genes_per_term < 5L) {
+      max_genes_per_term <- 25L
+    }
+
+    edge_list <- vector("list", nrow(result_table))
+
+    for (term_index in seq_len(nrow(result_table))) {
+      genes <- unlist(
+        strsplit(
+          as.character(result_table[[gene_column]][term_index]),
+          "[/;]"
+        ),
+        use.names = FALSE
+      )
+
+      genes <- unique(trimws(genes))
+      genes <- genes[!is.na(genes) & genes != "" & genes != "-"]
+
+      if (length(genes) == 0) {
+        next
+      }
+
+      gene_scores <- suppressWarnings(
+        as.numeric(fold_change[genes])
+      )
+
+      gene_rank <- order(
+        abs(gene_scores),
+        decreasing = TRUE,
+        na.last = TRUE
+      )
+
+      genes <- genes[gene_rank]
+      genes <- head(genes, max_genes_per_term)
+
+      edge_list[[term_index]] <- data.frame(
+        term = term_labels[term_index],
+        gene = genes,
+        stringsAsFactors = FALSE
+      )
+    }
+
+    edge_table <- do.call(rbind, edge_list)
+
+    if (is.null(edge_table) || nrow(edge_table) == 0) {
+      stop("No term-gene edges were available for the cnetplot fallback.")
+    }
+
+    edge_table <- unique(edge_table)
+    edge_table$from <- paste0("TERM::", edge_table$term)
+    edge_table$to <- paste0("GENE::", edge_table$gene)
+
+    graph <- igraph::graph_from_data_frame(
+      edge_table[, c("from", "to")],
+      directed = FALSE
+    )
+
+    set.seed(1L)
+    graph_layout <- igraph::layout_with_fr(graph)
+
+    vertex_names <- igraph::V(graph)$name
+    vertex_data <- data.frame(
+      vertex = vertex_names,
+      x = graph_layout[, 1],
+      y = graph_layout[, 2],
+      is_term = startsWith(vertex_names, "TERM::"),
+      stringsAsFactors = FALSE
+    )
+
+    vertex_data$label <- sub("^(TERM|GENE)::", "", vertex_data$vertex)
+
+    edge_ends <- igraph::ends(
+      graph,
+      igraph::E(graph),
+      names = TRUE
+    )
+
+    edge_plot_data <- data.frame(
+      from = edge_ends[, 1],
+      to = edge_ends[, 2],
+      stringsAsFactors = FALSE
+    )
+
+    edge_plot_data$x <- vertex_data$x[
+      match(edge_plot_data$from, vertex_data$vertex)
+    ]
+    edge_plot_data$y <- vertex_data$y[
+      match(edge_plot_data$from, vertex_data$vertex)
+    ]
+    edge_plot_data$xend <- vertex_data$x[
+      match(edge_plot_data$to, vertex_data$vertex)
+    ]
+    edge_plot_data$yend <- vertex_data$y[
+      match(edge_plot_data$to, vertex_data$vertex)
+    ]
+
+    term_data <- vertex_data[vertex_data$is_term, , drop = FALSE]
+    gene_data <- vertex_data[!vertex_data$is_term, , drop = FALSE]
+    gene_data$fold_change <- suppressWarnings(
+      as.numeric(fold_change[gene_data$label])
+    )
+
+    write.table(
+      edge_table[, c("term", "gene")],
+      paste0(output_prefix, "_edges.tsv"),
+      sep = "\t",
+      quote = FALSE,
+      row.names = FALSE
+    )
+
+    p <- ggplot2::ggplot() +
+      ggplot2::geom_segment(
+        data = edge_plot_data,
+        ggplot2::aes(
+          x = x,
+          y = y,
+          xend = xend,
+          yend = yend
+        ),
+        linewidth = 0.25,
+        alpha = 0.35
+      ) +
+      ggplot2::geom_point(
+        data = term_data,
+        ggplot2::aes(x = x, y = y),
+        shape = 21,
+        size = 5,
+        stroke = 0.8,
+        fill = "white"
+      )
+
+    finite_gene_scores <- is.finite(gene_data$fold_change)
+
+    if (any(finite_gene_scores)) {
+      p <- p +
+        ggplot2::geom_point(
+          data = gene_data,
+          ggplot2::aes(
+            x = x,
+            y = y,
+            colour = fold_change
+          ),
+          size = 1.7,
+          alpha = 0.9
+        ) +
+        ggplot2::scale_colour_gradient2(
+          low = "blue",
+          mid = "grey90",
+          high = "red",
+          midpoint = 0,
+          name = "Fold change"
+        )
+    } else {
+      p <- p +
+        ggplot2::geom_point(
+          data = gene_data,
+          ggplot2::aes(x = x, y = y),
+          size = 1.7,
+          alpha = 0.9
+        )
+    }
+
+    if (requireNamespace("ggrepel", quietly = TRUE)) {
+      p <- p + ggrepel::geom_text_repel(
+        data = term_data,
+        ggplot2::aes(
+          x = x,
+          y = y,
+          label = label
+        ),
+        size = 3,
+        max.overlaps = Inf,
+        box.padding = 0.5,
+        point.padding = 0.3
+      )
+    } else {
+      p <- p + ggplot2::geom_text(
+        data = term_data,
+        ggplot2::aes(
+          x = x,
+          y = y,
+          label = label
+        ),
+        size = 3,
+        check_overlap = TRUE
+      )
+    }
+
+    p +
+      ggplot2::labs(
+        title = paste0("Category-gene network: ", edb0),
+        subtitle = paste0(
+          nrow(term_data),
+          " terms; up to ",
+          max_genes_per_term,
+          " genes per term"
+        )
+      ) +
+      ggplot2::theme_void() +
+      ggplot2::theme(
+        plot.title = ggplot2::element_text(
+          hjust = 0.5,
+          face = "bold"
+        ),
+        plot.subtitle = ggplot2::element_text(
+          hjust = 0.5
+        ),
+        legend.position = "right"
+      )
   }
 
   message(
@@ -3882,16 +4153,56 @@ tryCatch({
       p.net
     )
 
+    native_cnet_error <- NULL
+
+    tryCatch(
+      {
+        # Force ggplot evaluation before opening the output device. This
+        # catches the enrichplot 1.14.x AsIs/scales incompatibility early.
+        invisible(ggplot2::ggplot_build(p.net))
+      },
+      error = function(e) {
+        native_cnet_error <<- e
+      }
+    )
+
+    if (!is.null(native_cnet_error)) {
+      message(
+        "[CNETPLOT] Native enrichplot rendering failed: ",
+        conditionMessage(native_cnet_error)
+      )
+      message(
+        "[CNETPLOT] Using bounded igraph/ggplot compatibility fallback."
+      )
+
+      p.net <- build_mtd_cnetplot_fallback(
+        enrichment_object = datax,
+        fold_change = genelist,
+        show_category = plot_terms,
+        output_prefix = paste0(
+          edb,
+          "/GSEA_",
+          edb0,
+          "_net"
+        )
+      )
+    }
+
     if (nres < 25) {
       ggsave(
         paste0(edb, "/GSEA_", edb0, "_net.pdf"),
-        plot = p.net
+        plot = p.net,
+        width = 10,
+        height = 8,
+        limitsize = FALSE
       )
     } else {
       ggsave(
         paste0(edb, "/GSEA_", edb0, "_net.pdf"),
         plot = p.net,
-        scale = 2
+        width = 14,
+        height = 11,
+        limitsize = FALSE
       )
     }
   }, error = function(e) {
@@ -4122,13 +4433,11 @@ tryCatch({
           t(tree_similarity)
       ) / 2
 
-      tree_similarity <- pmax(
-        0,
-        pmin(
-          1,
-          tree_similarity
-        )
-      )
+      # Clamp values without pmin()/pmax() with a scalar first argument.
+      # In R 4.1 this can drop the matrix dimensions, after which
+      # diag(x) <- 1 fails with "only matrix diagonals can be replaced".
+      tree_similarity[tree_similarity < 0] <- 0
+      tree_similarity[tree_similarity > 1] <- 1
 
       diag(tree_similarity) <- 1
 
@@ -4785,6 +5094,217 @@ pathview.p <- function(
     patch_pathview_mlf()
   }
 
+  pathview_species_preflight <- function(species_code) {
+    species_code <- trimws(as.character(species_code)[1])
+
+    if (is.na(species_code) || species_code == "") {
+      return(
+        list(
+          supported = FALSE,
+          source = "empty KEGG species code",
+          detail = "No KEGG species code was provided."
+        )
+      )
+    }
+
+    # Cache Pathview species support for the duration of this R session.
+    # pathview.p() can be called several times for the same host (official
+    # KEGG pathways, KEGG modules, etc.). Without a session cache, every
+    # call for an unsupported species may repeat the same network probe.
+    cache_option_name <- "MTD.pathview_species_preflight_cache"
+
+    get_preflight_cache <- function() {
+      cache <- getOption(cache_option_name, list())
+
+      if (!is.list(cache)) {
+        cache <- list()
+      }
+
+      cache
+    }
+
+    cache_preflight_result <- function(result) {
+      cache <- get_preflight_cache()
+      cache[[species_code]] <- result
+
+      do.call(
+        options,
+        stats::setNames(
+          list(cache),
+          cache_option_name
+        )
+      )
+
+      result
+    }
+
+    preflight_cache <- get_preflight_cache()
+    cached_result <- preflight_cache[[species_code]]
+
+    if (is.list(cached_result) && !is.null(cached_result$supported)) {
+      cached_result$cached <- TRUE
+      return(cached_result)
+    }
+
+    if (species_code == "mlf") {
+      return(
+        cache_preflight_result(
+          list(
+            supported = TRUE,
+            source = "MTD local Myotis patch",
+            detail = "mlf is supplied by the MTD compatibility patch.",
+            cached = FALSE
+          )
+        )
+      )
+    }
+
+    load_local_korg_codes <- function(package_name) {
+      if (!requireNamespace(package_name, quietly = TRUE)) {
+        return(character())
+      }
+
+      data_environment <- new.env(parent = baseenv())
+
+      suppressWarnings(
+        try(
+          utils::data(
+            "korg",
+            package = package_name,
+            envir = data_environment
+          ),
+          silent = TRUE
+        )
+      )
+
+      if (!exists("korg", envir = data_environment, inherits = FALSE)) {
+        return(character())
+      }
+
+      korg <- get("korg", envir = data_environment, inherits = FALSE)
+
+      if (is.null(dim(korg)) || is.null(colnames(korg))) {
+        return(character())
+      }
+
+      code_column <- intersect(
+        c("kegg.code", "kegg_code", "code"),
+        colnames(korg)
+      )
+
+      if (length(code_column) == 0) {
+        return(character())
+      }
+
+      codes <- trimws(as.character(korg[, code_column[1]]))
+      unique(codes[!is.na(codes) & codes != ""])
+    }
+
+    local_codes <- unique(
+      c(
+        load_local_korg_codes("pathview"),
+        load_local_korg_codes("gage")
+      )
+    )
+
+    if (species_code %in% local_codes) {
+      return(
+        cache_preflight_result(
+          list(
+            supported = TRUE,
+            source = "local pathview/gage korg table",
+            detail = paste0(
+              species_code,
+              " is present in the installed local species table."
+            ),
+            cached = FALSE
+          )
+        )
+      )
+    }
+
+    # Some pathview versions attempt to download a refreshed korg table for
+    # unknown species. Probe at most once with a short timeout instead of
+    # allowing a 300-second timeout for every enriched pathway.
+    probe_timeout <- suppressWarnings(
+      as.integer(
+        Sys.getenv(
+          "MTD_PATHVIEW_SPECIES_PROBE_TIMEOUT",
+          "8"
+        )
+      )
+    )
+
+    if (is.na(probe_timeout) || probe_timeout < 1L) {
+      probe_timeout <- 8L
+    }
+
+    old_timeout <- getOption("timeout")
+    on.exit(options(timeout = old_timeout), add = TRUE)
+    options(timeout = probe_timeout)
+
+    probe_error <- NULL
+
+    probe_result <- tryCatch(
+      suppressWarnings(
+        pathview::kegg.species.code(
+          species = species_code,
+          na.rm = FALSE,
+          code.only = TRUE
+        )
+      ),
+      error = function(e) {
+        probe_error <<- conditionMessage(e)
+        NA_character_
+      }
+    )
+
+    probe_result <- trimws(as.character(probe_result))
+    probe_result <- probe_result[
+      !is.na(probe_result) & probe_result != ""
+    ]
+
+    if (species_code %in% probe_result) {
+      return(
+        cache_preflight_result(
+          list(
+            supported = TRUE,
+            source = "short pathview species probe",
+            detail = paste0(
+              species_code,
+              " was resolved by pathview within ",
+              probe_timeout,
+              " seconds."
+            ),
+            cached = FALSE
+          )
+        )
+      )
+    }
+
+    cache_preflight_result(
+      list(
+        supported = FALSE,
+        source = "pathview species preflight",
+        detail = if (is.null(probe_error)) {
+          paste0(
+            species_code,
+            " is absent from the installed local species table and was not ",
+            "resolved by the short pathview probe."
+          )
+        } else {
+          paste0(
+            species_code,
+            " is absent from the installed local species table; short probe ",
+            "failed: ",
+            probe_error
+          )
+        },
+        cached = FALSE
+      )
+    )
+  }
+
   gene_data <- kegg_gene_list
   gene_data <- gene_data[!is.na(gene_data)]
   gene_data <- gene_data[!is.na(names(gene_data))]
@@ -4862,6 +5382,52 @@ pathview.p <- function(
     " (maximum ",
     max_pathways,
     ")"
+  )
+
+  pathview_support <- pathview_species_preflight(ko.db)
+
+  if (!isTRUE(pathview_support$supported)) {
+    skip_message <- paste0(
+      "[PATHVIEW] Species ",
+      ko.db,
+      " is not supported by the installed Pathview species table. ",
+      "Skipping Pathview rendering before pathway-level calls. ",
+      "Official KEGG enrichment results remain available. Detail: ",
+      pathview_support$detail
+    )
+
+    # Report the expensive preflight failure once per R session. Cached
+    # calls still create their local marker file below, but do not repeat
+    # the same warning in the main pipeline log.
+    if (!isTRUE(pathview_support$cached)) {
+      message(skip_message)
+    }
+
+    writeLines(
+      c(
+        skip_message,
+        paste0("Preflight source: ", pathview_support$source),
+        paste0(
+          "Probe timeout (seconds): ",
+          Sys.getenv("MTD_PATHVIEW_SPECIES_PROBE_TIMEOUT", "8")
+        )
+      ),
+      paste0(
+        "Pathview_skipped_unsupported_species_",
+        gsub("[^A-Za-z0-9_.-]", "_", ko.db),
+        ".txt"
+      )
+    )
+
+    return(invisible(NULL))
+  }
+
+  message(
+    "[PATHVIEW] Species preflight passed for ",
+    ko.db,
+    " (",
+    pathview_support$source,
+    ")."
   )
 
   for (g in seq_len(nrow(pathview_results))) {

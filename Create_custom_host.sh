@@ -204,8 +204,143 @@ load_persistent_installation_cache() {
 }
 
 # ------------------------------------------------------------
-# Persistent NCBI Ensembl -> Entrez mapping
+# Persistent NCBI host GID -> Entrez mapping
 # ------------------------------------------------------------
+# Most Ensembl references map directly through gene2ensembl.gz. Some
+# Ensembl Genomes references use external/legacy gene IDs in the GTF
+# (for example VectorBase BGLAX IDs). In those cases, NCBI gene_info
+# provides an exact dbXref/symbol/locus-tag fallback to NCBI GeneID.
+
+download_ncbi_gene_gzip() {
+    local label="$1"
+    local url="$2"
+    local destination="$3"
+    local partial_file="${destination}.part"
+
+    mkdir -p "$(dirname "$destination")"
+
+    if [[ -s "$destination" ]]; then
+        if gzip -t "$destination" >/dev/null 2>&1; then
+            echo "[NCBI GENE] Reusing persistent $label cache:"
+            echo "  $destination"
+            return 0
+        fi
+
+        echo "[WARNING] Removing corrupt NCBI $label cache:"
+        echo "  $destination"
+        rm -f "$destination"
+    fi
+
+    echo "[NCBI GENE] Downloading official $label"
+    echo "  URL:         $url"
+    echo "  Destination: $destination"
+
+    rm -f "$partial_file"
+
+    if command -v aria2c >/dev/null 2>&1; then
+        if ! aria2c \
+            --continue=true \
+            --max-connection-per-server=8 \
+            --split=8 \
+            --min-split-size=10M \
+            --retry-wait=20 \
+            --max-tries=50 \
+            --timeout=60 \
+            --connect-timeout=30 \
+            --allow-overwrite=true \
+            --auto-file-renaming=false \
+            --dir "$(dirname "$partial_file")" \
+            --out "$(basename "$partial_file")" \
+            "$url"
+        then
+            rm -f "$partial_file"
+            return 1
+        fi
+
+    elif command -v curl >/dev/null 2>&1; then
+        if ! curl \
+            --fail \
+            --location \
+            --connect-timeout 30 \
+            --retry 10 \
+            --retry-delay 10 \
+            --retry-connrefused \
+            --output "$partial_file" \
+            "$url"
+        then
+            rm -f "$partial_file"
+            return 1
+        fi
+
+    elif command -v wget >/dev/null 2>&1; then
+        if ! wget \
+            --tries=20 \
+            --waitretry=10 \
+            --timeout=60 \
+            --output-document="$partial_file" \
+            "$url"
+        then
+            rm -f "$partial_file"
+            return 1
+        fi
+
+    else
+        echo "[WARNING] aria2c, curl and wget are unavailable."
+        return 1
+    fi
+
+    if ! gzip -t "$partial_file" >/dev/null 2>&1; then
+        echo "[WARNING] Downloaded $label failed gzip validation."
+        rm -f "$partial_file"
+        return 1
+    fi
+
+    mv -f "$partial_file" "$destination"
+
+    echo "[OK] Persistent NCBI $label cache created:"
+    echo "  $destination"
+}
+
+select_ncbi_gene_info_resource() {
+    local division="${1:-}"
+
+    case "$division" in
+        EnsemblMetazoa)
+            printf '%s\t%s\n' \
+                "All_Invertebrates.gene_info.gz" \
+                "https://ftp.ncbi.nlm.nih.gov/gene/DATA/GENE_INFO/Invertebrates/All_Invertebrates.gene_info.gz"
+            ;;
+        EnsemblPlants)
+            printf '%s\t%s\n' \
+                "All_Plants.gene_info.gz" \
+                "https://ftp.ncbi.nlm.nih.gov/gene/DATA/GENE_INFO/Plants/All_Plants.gene_info.gz"
+            ;;
+        EnsemblFungi)
+            printf '%s\t%s\n' \
+                "All_Fungi.gene_info.gz" \
+                "https://ftp.ncbi.nlm.nih.gov/gene/DATA/GENE_INFO/Fungi/All_Fungi.gene_info.gz"
+            ;;
+        EnsemblProtists)
+            printf '%s\t%s\n' \
+                "All_Protozoa.gene_info.gz" \
+                "https://ftp.ncbi.nlm.nih.gov/gene/DATA/GENE_INFO/Protozoa/All_Protozoa.gene_info.gz"
+            ;;
+        EnsemblBacteria)
+            printf '%s\t%s\n' \
+                "All_Archaea_Bacteria.gene_info.gz" \
+                "https://ftp.ncbi.nlm.nih.gov/gene/DATA/GENE_INFO/Archaea_Bacteria/All_Archaea_Bacteria.gene_info.gz"
+            ;;
+        *)
+            # For EnsemblMain and manual/unknown references, gene2ensembl
+            # normally succeeds. The complete gene_info file is downloaded
+            # only when the direct mapping failed or had poor coverage.
+            printf '%s\t%s\n' \
+                "gene_info.gz" \
+                "https://ftp.ncbi.nlm.nih.gov/gene/DATA/gene_info.gz"
+            ;;
+    esac
+}
+
 prepare_ncbi_gid_to_entrez_mapping() {
     local requested_taxid="$1"
     local reference_taxid="$2"
@@ -214,17 +349,23 @@ prepare_ncbi_gid_to_entrez_mapping() {
 
     local helper
     local cache_dir
-    local cache_file
-    local partial_file
+    local gene2ensembl_cache
     local output_file
     local summary_file
     local legacy_cache
+    local direct_success=0
+    local need_gene_info=0
+    local coverage=""
+    local min_coverage="${MTD_NCBI_GID_MIN_COVERAGE:-95}"
+    local gene_info_name=""
+    local gene_info_url=""
+    local gene_info_cache=""
+    local gene_info_resource=""
 
     helper="$MTDIR/aux_scripts/host_reference/build_gid_to_entrez_from_ncbi.py"
 
     cache_dir="$offline_files_folder/NCBI_gene"
-    cache_file="$cache_dir/gene2ensembl.gz"
-    partial_file="${cache_file}.part"
+    gene2ensembl_cache="$cache_dir/gene2ensembl.gz"
 
     output_file="$functional_dir/GID_to_ENTREZ_taxid_${requested_taxid}.tsv"
     summary_file="$functional_dir/GID_to_ENTREZ_taxid_${requested_taxid}.summary.tsv"
@@ -233,11 +374,12 @@ prepare_ncbi_gid_to_entrez_mapping() {
 
     GID_TO_ENTREZ_MAP=""
     GID_TO_ENTREZ_SUMMARY=""
-    NCBI_GENE2ENSEMBL_CACHE="$cache_file"
+    NCBI_GENE2ENSEMBL_CACHE="$gene2ensembl_cache"
+    NCBI_GENE_INFO_CACHE=""
     ENTREZ_REFERENCE_TAXID="$reference_taxid"
 
     if [[ ! -s "$helper" ]]; then
-        echo "[WARNING] NCBI Ensembl-to-Entrez helper was not found:"
+        echo "[WARNING] NCBI GID-to-Entrez helper was not found:"
         echo "  $helper"
         echo "[WARNING] Official KEGG input mapping will be unavailable."
         return 0
@@ -245,101 +387,26 @@ prepare_ncbi_gid_to_entrez_mapping() {
 
     mkdir -p "$cache_dir" "$functional_dir"
 
-    # Adopt the older local cache when available, avoiding another 274 MB
+    # Adopt the older local cache when available, avoiding another large
     # download after upgrading an existing MTD Explorer installation.
-    if [[ ! -s "$cache_file" && -s "$legacy_cache" ]]; then
-        echo "[NCBI GENE] Importing existing local cache:"
+    if [[ ! -s "$gene2ensembl_cache" && -s "$legacy_cache" ]]; then
+        echo "[NCBI GENE] Importing existing local gene2ensembl cache:"
         echo "  Source:      $legacy_cache"
-        echo "  Destination: $cache_file"
+        echo "  Destination: $gene2ensembl_cache"
 
-        if ! cp --reflink=auto -f "$legacy_cache" "$cache_file" 2>/dev/null; then
-            cp -f "$legacy_cache" "$cache_file"
+        if ! cp --reflink=auto -f "$legacy_cache" "$gene2ensembl_cache" 2>/dev/null; then
+            cp -f "$legacy_cache" "$gene2ensembl_cache"
         fi
     fi
 
-    if [[ -s "$cache_file" ]]; then
-        if gzip -t "$cache_file" >/dev/null 2>&1; then
-            echo "[NCBI GENE] Reusing persistent gene2ensembl cache:"
-            echo "  $cache_file"
-        else
-            echo "[WARNING] Removing corrupt NCBI gene2ensembl cache:"
-            echo "  $cache_file"
-            rm -f "$cache_file"
-        fi
-    fi
-
-    if [[ ! -s "$cache_file" ]]; then
-        echo "[NCBI GENE] Downloading official gene2ensembl.gz"
-        echo "  Destination: $cache_file"
-
-        rm -f "$partial_file"
-
-        if command -v aria2c >/dev/null 2>&1; then
-            if ! aria2c \
-                --continue=true \
-                --max-connection-per-server=8 \
-                --split=8 \
-                --min-split-size=10M \
-                --retry-wait=20 \
-                --max-tries=50 \
-                --timeout=60 \
-                --connect-timeout=30 \
-                --allow-overwrite=true \
-                --auto-file-renaming=false \
-                --dir "$cache_dir" \
-                --out "$(basename "$partial_file")" \
-                "https://ftp.ncbi.nlm.nih.gov/gene/DATA/gene2ensembl.gz"
-            then
-                echo "[WARNING] NCBI gene2ensembl download failed."
-                rm -f "$partial_file"
-                return 0
-            fi
-
-        elif command -v curl >/dev/null 2>&1; then
-            if ! curl \
-                --fail \
-                --location \
-                --connect-timeout 30 \
-                --retry 10 \
-                --retry-delay 10 \
-                --retry-connrefused \
-                --output "$partial_file" \
-                "https://ftp.ncbi.nlm.nih.gov/gene/DATA/gene2ensembl.gz"
-            then
-                echo "[WARNING] NCBI gene2ensembl download failed."
-                rm -f "$partial_file"
-                return 0
-            fi
-
-        elif command -v wget >/dev/null 2>&1; then
-            if ! wget \
-                --tries=20 \
-                --waitretry=10 \
-                --timeout=60 \
-                --output-document="$partial_file" \
-                "https://ftp.ncbi.nlm.nih.gov/gene/DATA/gene2ensembl.gz"
-            then
-                echo "[WARNING] NCBI gene2ensembl download failed."
-                rm -f "$partial_file"
-                return 0
-            fi
-
-        else
-            echo "[WARNING] aria2c, curl and wget are unavailable."
-            echo "[WARNING] NCBI Ensembl-to-Entrez mapping was skipped."
-            return 0
-        fi
-
-        if ! gzip -t "$partial_file" >/dev/null 2>&1; then
-            echo "[WARNING] Downloaded gene2ensembl.gz failed validation."
-            rm -f "$partial_file"
-            return 0
-        fi
-
-        mv -f "$partial_file" "$cache_file"
-
-        echo "[OK] Persistent NCBI gene2ensembl cache created:"
-        echo "  $cache_file"
+    if ! download_ncbi_gene_gzip \
+        "gene2ensembl.gz" \
+        "https://ftp.ncbi.nlm.nih.gov/gene/DATA/gene2ensembl.gz" \
+        "$gene2ensembl_cache"
+    then
+        echo "[WARNING] NCBI gene2ensembl download failed."
+        echo "[WARNING] Official KEGG input mapping will be unavailable."
+        return 0
     fi
 
     echo "============================================================"
@@ -349,22 +416,109 @@ prepare_ncbi_gid_to_entrez_mapping() {
     echo "GTF gene list:   $gtf_genes"
     echo "============================================================"
 
-    if ! conda run \
-        --no-capture-output \
-        -n MTD \
-        python3 "$helper" \
-            --gene2ensembl "$cache_file" \
+    # First pass: the lightweight/direct Ensembl mapping. This avoids
+    # downloading gene_info for the normal Ensembl-ID case. Run the helper
+    # directly from the MTD environment so an expected no-overlap probe does
+    # not get reported by `conda run` as a command execution error.
+    local mtd_python="$condapath/envs/MTD/bin/python3"
+    local direct_status=0
+
+    if [[ ! -x "$mtd_python" ]]; then
+        echo "[WARNING] MTD Python executable was not found:"
+        echo "  $mtd_python"
+        echo "[WARNING] Falling back to the active python3 executable."
+        mtd_python="$(command -v python3 || true)"
+    fi
+
+    if [[ -z "$mtd_python" || ! -x "$mtd_python" ]]; then
+        echo "[WARNING] No usable Python 3 executable was found for NCBI mapping."
+        echo "[WARNING] Official KEGG input mapping will be unavailable."
+        return 0
+    fi
+
+    if "$mtd_python" "$helper" \
+            --probe-direct \
+            --gene2ensembl "$gene2ensembl_cache" \
             --reference-taxid "$reference_taxid" \
             --requested-taxid "$requested_taxid" \
             --gtf-genes "$gtf_genes" \
             --output "$output_file" \
             --summary "$summary_file"
     then
-        echo "[WARNING] No usable NCBI Ensembl-to-Entrez map was created."
-        echo "[WARNING] Host reference creation will continue."
-        echo "[WARNING] Official KEGG enrichment may be unavailable."
+        direct_success=1
+
+        coverage="$({
+            awk -F'\t' \
+                '$1 == "gtf_mapping_coverage_pct" {print $2; exit}' \
+                "$summary_file" 2>/dev/null || true
+        } | tr -d '\r')"
+
+        if [[ -z "$coverage" ]]; then
+            coverage="0"
+        fi
+
+        if awk -v observed="$coverage" -v required="$min_coverage" \
+            'BEGIN { exit !((observed + 0) < (required + 0)) }'
+        then
+            echo "[NCBI GENE] Direct mapping coverage ${coverage}% is below ${min_coverage}%."
+            echo "[NCBI GENE] Trying gene_info fallback for unmatched external IDs."
+            need_gene_info=1
+        fi
+    else
+        direct_status=$?
+
+        if [[ "$direct_status" -eq 3 ]]; then
+            echo "[NCBI GENE] Direct gene2ensembl mapping did not match this GTF namespace."
+        else
+            echo "[WARNING] Direct gene2ensembl probe failed with status $direct_status."
+            echo "[WARNING] Trying gene_info fallback before giving up."
+        fi
+
+        echo "[NCBI GENE] Trying gene_info fallback for external/legacy IDs."
         rm -f "$output_file" "$summary_file"
-        return 0
+        need_gene_info=1
+    fi
+
+    if [[ "$need_gene_info" == "1" ]]; then
+        gene_info_resource="$(select_ncbi_gene_info_resource "${CSV_ENSEMBL_DIVISION:-}")"
+        IFS=$'\t' read -r gene_info_name gene_info_url <<< "$gene_info_resource"
+        gene_info_cache="$cache_dir/$gene_info_name"
+        NCBI_GENE_INFO_CACHE="$gene_info_cache"
+
+        echo "[NCBI GENE] Ensembl division: ${CSV_ENSEMBL_DIVISION:-unknown/manual}"
+        echo "[NCBI GENE] gene_info fallback: $gene_info_name"
+
+        if download_ncbi_gene_gzip \
+            "$gene_info_name" \
+            "$gene_info_url" \
+            "$gene_info_cache"
+        then
+            if ! "$mtd_python" "$helper" \
+                    --gene2ensembl "$gene2ensembl_cache" \
+                    --gene-info "$gene_info_cache" \
+                    --reference-taxid "$reference_taxid" \
+                    --requested-taxid "$requested_taxid" \
+                    --gtf-genes "$gtf_genes" \
+                    --output "$output_file" \
+                    --summary "$summary_file"
+            then
+                echo "[WARNING] NCBI gene_info fallback did not create a usable mapping."
+
+                if [[ "$direct_success" != "1" ]]; then
+                    rm -f "$output_file" "$summary_file"
+                else
+                    echo "[WARNING] Keeping the lower-coverage direct gene2ensembl mapping."
+                fi
+            fi
+        else
+            echo "[WARNING] NCBI gene_info fallback download failed."
+
+            if [[ "$direct_success" != "1" ]]; then
+                rm -f "$output_file" "$summary_file"
+            else
+                echo "[WARNING] Keeping the lower-coverage direct gene2ensembl mapping."
+            fi
+        fi
     fi
 
     if [[ -s "$output_file" ]]; then
@@ -373,6 +527,12 @@ prepare_ncbi_gid_to_entrez_mapping() {
 
     if [[ -s "$summary_file" ]]; then
         GID_TO_ENTREZ_SUMMARY="$summary_file"
+    fi
+
+    if [[ -z "$GID_TO_ENTREZ_MAP" ]]; then
+        echo "[WARNING] No usable NCBI GID -> Entrez map was created."
+        echo "[WARNING] Host reference creation will continue."
+        echo "[WARNING] Official KEGG enrichment may be unavailable."
     fi
 }
 
@@ -1961,6 +2121,10 @@ FUNCTIONAL_MANIFEST="$FUNCTIONAL_DIR/functional_annotation_manifest.tsv"
     printf 'protein_fasta_cache\t%s\n' "$protein_fasta"
     printf 'eggnog_annotations\t%s\n' "$PERSISTENT_EGGNOG_ANNOT"
     printf 'master_gmt\t%s\n' "$MASTER_GMT"
+    printf 'gid_to_entrez_mapping\t%s\n' "${GID_TO_ENTREZ_MAP:-}"
+    printf 'gid_to_entrez_summary\t%s\n' "${GID_TO_ENTREZ_SUMMARY:-}"
+    printf 'ncbi_gene2ensembl_cache\t%s\n' "${NCBI_GENE2ENSEMBL_CACHE:-}"
+    printf 'ncbi_gene_info_cache\t%s\n' "${NCBI_GENE_INFO_CACHE:-}"
     printf 'created_at\t%s\n' "$(date -Is)"
 } > "$FUNCTIONAL_MANIFEST"
 
