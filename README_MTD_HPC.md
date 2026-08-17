@@ -149,26 +149,39 @@ bash Installation/HPC/MTD_install_HPC_nodes.sh \
 By default, the node installer copies these repository paths when present:
 
 - `HUMAnN/ref_database/`;
-- `kraken2DB_micro/`;
+- **every complete repository-root `kraken2DB_*` directory**, including
+  `kraken2DB_micro` and all custom host databases such as `kraken2DB_6526`;
 - directories matching `*_blastdb` or `blastdb_*`.
 
-Host or custom Kraken2 databases can be added with repeated `--database`
-arguments. The destination is relative to
-`/MTD_explorer_HPC/databases/`:
+A repository-root Kraken2 directory is considered complete only when
+`hash.k2d`, `opts.k2d` and `taxo.k2d` are all present and non-empty. If a
+`kraken2DB_*` directory exists but is incomplete, the installer stops before
+node configuration instead of silently omitting it.
 
-```bash
-bash Installation/HPC/MTD_install_HPC_nodes.sh \
-  --node-list Installation/HPC/examples/nodes.txt \
-  --user me \
-  --database "$HOME/MTD-Explorer/kraken2DB_6526=MTD-Explorer/kraken2DB_6526"
+For example, if the main installation contains:
+
+```text
+$HOME/MTD-Explorer/
+├── kraken2DB_micro/
+├── kraken2DB_6526/
+└── kraken2DB_59463/
 ```
 
-A database located inside the MTD Explorer repository is mapped automatically
-to the same relative path below
-`/MTD_explorer_HPC/databases/MTD-Explorer/`.
+the installer automatically synchronizes them as:
 
-For a database outside the repository, synchronize it and declare the matching
-source-to-node mapping in `Installation/HPC/MTD_hpc_slurm.conf`:
+```text
+/MTD_explorer_HPC/databases/MTD-Explorer/kraken2DB_micro/
+/MTD_explorer_HPC/databases/MTD-Explorer/kraken2DB_6526/
+/MTD_explorer_HPC/databases/MTD-Explorer/kraken2DB_59463/
+```
+
+No repeated `--database` option is required for those repository-root Kraken2
+databases.
+
+`--database SOURCE=RELATIVE` remains available for additional databases outside
+the automatically discovered repository paths. For example, for a database
+outside the repository, synchronize it and declare the matching source-to-node
+mapping in `Installation/HPC/MTD_hpc_slurm.conf`:
 
 ```bash
 bash Installation/HPC/MTD_install_HPC_nodes.sh \
@@ -210,6 +223,22 @@ The checker validates ownership, architecture, node-local scratch, Miniconda,
 the three environments, Python, HUMAnN, MetaPhlAn, Magic-BLAST, fastp, Kraken2
 and Bracken. It also validates every node-local Kraken2 database it finds and
 reports available Bracken read-length distributions.
+
+The installer records the full list of Kraken2 databases selected for
+synchronization in each node manifest and also passes that list to the final
+validation. Final validation therefore fails if any expected database directory,
+`hash.k2d`, `opts.k2d` or `taxo.k2d` is missing or empty on a node. Later
+standalone checker runs automatically reuse the requirements recorded in the
+node manifest, so a deleted or incomplete required database cannot be hidden by
+the presence of a different valid Kraken2 database. The checker can also enforce
+a database manually with the repeatable option:
+
+```bash
+bash Installation/HPC/MTD_check_HPC_nodes.sh \
+  --node node01 \
+  --user me \
+  --require-kraken-db MTD-Explorer/kraken2DB_6526
+```
 
 ## 4. Configure Slurm
 

@@ -32,12 +32,14 @@ Options:
                                direct: SSH to root@HOST for root operations.
   --database SOURCE=RELATIVE   Copy an additional database directory with
                                rsync into PREFIX/databases/RELATIVE. Repeatable.
+                               Complete repository-root kraken2DB_* databases
+                               are discovered automatically.
   --database-distribution MODE
                                direct or propagate. Default: direct.
                                propagate uses complete nodes from --node-list
                                as one-at-a-time sources for pending nodes.
-  --skip-default-databases     Do not auto-copy HUMAnN/ref_database, the
-                               default kraken2DB_micro directory, or host
+  --skip-default-databases     Do not auto-copy HUMAnN/ref_database, complete
+                               repository-root kraken2DB_* databases, or host
                                Magic-BLAST database directories.
   --force-recreate-env         Remove and recreate all node-local MTD envs.
   --dry-run                    Validate nodes and print mutating commands.
@@ -283,13 +285,37 @@ remote_owner_quoted() {
     remote_query "$node" "$remote_command"
 }
 
+is_complete_kraken2_database() {
+    local database_dir="$1"
+    [[ -d "$database_dir" ]] &&
+        [[ -s "$database_dir/hash.k2d" ]] &&
+        [[ -s "$database_dir/opts.k2d" ]] &&
+        [[ -s "$database_dir/taxo.k2d" ]]
+}
+
 # Build database copy list. Relative targets mirror the main repository.
+# Every complete repository-root kraken2DB_* directory is synchronized
+# automatically, including custom host databases created after installation.
+AUTO_KRAKEN_DB_TARGETS=()
 if (( SKIP_DEFAULT_DATABASES == 0 )); then
     [[ -d "$REPO_ROOT/HUMAnN/ref_database" ]] && \
         DATABASE_SPECS+=("$REPO_ROOT/HUMAnN/ref_database=MTD-Explorer/HUMAnN/ref_database")
 
-    [[ -d "$REPO_ROOT/kraken2DB_micro" ]] && \
-        DATABASE_SPECS+=("$REPO_ROOT/kraken2DB_micro=MTD-Explorer/kraken2DB_micro")
+    shopt -s nullglob
+    kraken_candidates=( "$REPO_ROOT"/kraken2DB_* )
+    shopt -u nullglob
+
+    for candidate in "${kraken_candidates[@]}"; do
+        [[ -d "$candidate" ]] || continue
+
+        if ! is_complete_kraken2_database "$candidate"; then
+            fatal "Repository Kraken2 database is incomplete: $candidate (required: hash.k2d, opts.k2d, taxo.k2d)"
+        fi
+
+        relative_target="MTD-Explorer/$(basename "$candidate")"
+        DATABASE_SPECS+=("$candidate=$relative_target")
+        AUTO_KRAKEN_DB_TARGETS+=("$relative_target")
+    done
 
     for candidate in \
         "$REPO_ROOT"/*_blastdb \
@@ -303,6 +329,7 @@ fi
 # Validate and deduplicate database mappings before contacting nodes.
 declare -A seen_targets=()
 validated_database_specs=()
+REQUIRED_KRAKEN_DB_TARGETS=()
 for spec in "${DATABASE_SPECS[@]}"; do
     [[ "$spec" == *=* ]] || fatal "Invalid --database specification: $spec"
     source_path="${spec%%=*}"
@@ -317,6 +344,16 @@ for spec in "${DATABASE_SPECS[@]}"; do
         info "Skipping duplicate database target: $relative_target"
         continue
     fi
+
+    case "$(basename "$relative_target")" in
+        kraken2DB_*)
+            if ! is_complete_kraken2_database "$source_path"; then
+                fatal "Kraken2 database mapping is incomplete: $source_path -> $relative_target (required: hash.k2d, opts.k2d, taxo.k2d)"
+            fi
+            REQUIRED_KRAKEN_DB_TARGETS+=("$relative_target")
+            ;;
+    esac
+
     seen_targets[$relative_target]=1
     validated_database_specs+=("$source_path=$relative_target")
 done
@@ -327,6 +364,11 @@ info "Repository: $REPO_ROOT"
 info "Node-local prefix: $PREFIX"
 info "Nodes: ${nodes[*]}"
 info "Database directories: ${#DATABASE_SPECS[@]}"
+info "Auto-detected repository Kraken2 databases: ${#AUTO_KRAKEN_DB_TARGETS[@]}"
+for relative_target in "${AUTO_KRAKEN_DB_TARGETS[@]}"; do
+    info "  Kraken2: $relative_target"
+done
+info "Required Kraken2 databases for final validation: ${#REQUIRED_KRAKEN_DB_TARGETS[@]}"
 info "Database distribution: $DATABASE_DISTRIBUTION"
 
 CACHE_DIR="$REPO_ROOT/Installation/HPC/cache"
@@ -657,7 +699,12 @@ kraken2_environment=$PREFIX/envs/MTD_kraken2
 database_root=$PREFIX/databases
 scratch_root=$PREFIX/tmp
 configured_at=$configured_at
+required_kraken_db_count=${#REQUIRED_KRAKEN_DB_TARGETS[@]}
 MANIFEST
+    for relative_target in "${REQUIRED_KRAKEN_DB_TARGETS[@]}"; do
+        printf 'required_kraken_db=%s\n' "$relative_target" >> "$manifest_local"
+    done
+
     chown "$OWNER_USER:$OWNER_GROUP" "$manifest_local"
     copy_as_owner scp -q "${SSH_OPTIONS[@]}" \
         "$manifest_local" "$SSH_USER@$node:$PREFIX/config/node_manifest.txt"
@@ -666,7 +713,17 @@ MANIFEST
     remote_root "$node" chown -R "$OWNER_UID:$OWNER_GID" "$PREFIX"
 
     info "Running final node validation: $node"
-    run_as_owner bash "$SCRIPT_DIR/MTD_check_HPC_nodes.sh"         --node "$node"         --user "$OWNER_USER"         --ssh-user "$SSH_USER"         --prefix "$PREFIX"
+    checker_args=(
+        --node "$node"
+        --user "$OWNER_USER"
+        --ssh-user "$SSH_USER"
+        --prefix "$PREFIX"
+    )
+    for relative_target in "${REQUIRED_KRAKEN_DB_TARGETS[@]}"; do
+        checker_args+=( --require-kraken-db "$relative_target" )
+    done
+
+    run_as_owner bash "$SCRIPT_DIR/MTD_check_HPC_nodes.sh" "${checker_args[@]}"
 
     ok "Node configured: $node"
 done

@@ -15,10 +15,13 @@ The node installer creates separate environments for:
 
 It also synchronizes the configured node-local databases and prepares
 `/MTD_explorer_HPC/tmp` for stage-in, local processing and atomic stage-out.
+Every complete repository-root `kraken2DB_*` directory is discovered
+automatically and synchronized to the same relative path on each node.
 
 These scripts do not clone or require
 [HpcGridRunner](https://github.com/patrick-douglas/HpcGridRunner) or
 [AutoHPC](https://github.com/patrick-douglas/AutoHPC).
 
 See [`README_MTD_HPC.md`](../../README_MTD_HPC.md) for node installation,
-Kraken2 database mappings, Slurm policies, validation, retry behavior and usage.
+automatic Kraken2 database discovery, additional database mappings, Slurm
+policies, validation, retry behavior and usage.

@@ -4,8 +4,17 @@ set -Eeuo pipefail
 usage() {
     cat <<'USAGE'
 Usage:
-  MTD_check_HPC_nodes.sh --node HOST [--user USER] [--prefix DIR]
-  MTD_check_HPC_nodes.sh --node-list FILE [--user USER] [--prefix DIR]
+  MTD_check_HPC_nodes.sh --node HOST [--user USER] [--prefix DIR] \
+    [--require-kraken-db RELATIVE]
+  MTD_check_HPC_nodes.sh --node-list FILE [--user USER] [--prefix DIR] \
+    [--require-kraken-db RELATIVE]
+
+Options:
+  --require-kraken-db RELATIVE
+      Require a complete Kraken2 database below PREFIX/databases/RELATIVE.
+      Repeatable. The node check fails if hash.k2d, opts.k2d or taxo.k2d
+      is missing or empty. When omitted, requirements recorded in the
+      node manifest by MTD_install_HPC_nodes.sh are enforced automatically.
 USAGE
 }
 
@@ -14,6 +23,7 @@ NODE_LIST=""
 OWNER_USER="${SUDO_USER:-${USER:-}}"
 PREFIX="/MTD_explorer_HPC"
 SSH_USER=""
+REQUIRED_KRAKEN_DBS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -27,6 +37,8 @@ while [[ $# -gt 0 ]]; do
         --prefix=*) PREFIX="${1#*=}"; shift ;;
         --ssh-user) SSH_USER="$2"; shift 2 ;;
         --ssh-user=*) SSH_USER="${1#*=}"; shift ;;
+        --require-kraken-db) REQUIRED_KRAKEN_DBS+=("$2"); shift 2 ;;
+        --require-kraken-db=*) REQUIRED_KRAKEN_DBS+=("${1#*=}"); shift ;;
         --help) usage; exit 0 ;;
         *) printf '[ERROR] Unknown option: %s\n' "$1" >&2; usage; exit 2 ;;
     esac
@@ -37,6 +49,17 @@ done
     exit 2
 }
 [[ -n "$SSH_USER" ]] || SSH_USER="$OWNER_USER"
+
+for required_db in "${REQUIRED_KRAKEN_DBS[@]}"; do
+    [[ -n "$required_db" && "$required_db" != /* ]] || {
+        printf '[ERROR] --require-kraken-db must be a non-empty relative path: %s\n' "$required_db" >&2
+        exit 2
+    }
+    [[ "/$required_db/" != *"/../"* && "/$required_db/" != *"/./"* ]] || {
+        printf '[ERROR] Unsafe --require-kraken-db path: %s\n' "$required_db" >&2
+        exit 2
+    }
+done
 
 nodes=()
 if [[ -n "$NODE" ]]; then
@@ -56,10 +79,19 @@ for node in "${nodes[@]}"; do
     printf '\n============================================================\n'
     printf 'Node: %s\n' "$node"
     printf '============================================================\n'
-    ssh -o BatchMode=yes -o ConnectTimeout=20 "$SSH_USER@$node" bash -s -- "$PREFIX" "$OWNER_USER" <<'REMOTE'
+    ssh -o BatchMode=yes -o ConnectTimeout=20 "$SSH_USER@$node" \
+        bash -s -- "$PREFIX" "$OWNER_USER" "${#REQUIRED_KRAKEN_DBS[@]}" "${REQUIRED_KRAKEN_DBS[@]}" <<'REMOTE'
 set -Eeuo pipefail
 prefix="$1"
 owner="$2"
+required_kraken_count="$3"
+shift 3
+required_kraken_dbs=("$@")
+
+(( ${#required_kraken_dbs[@]} == required_kraken_count )) || {
+    printf '[ERROR] Internal required Kraken2 database argument mismatch.\n' >&2
+    exit 1
+}
 
 [[ "$(uname -m)" == "x86_64" || "$(uname -m)" == "amd64" ]]
 test -d "$prefix"
@@ -69,7 +101,20 @@ test -d "$prefix/envs/MTD-Explorer-HPC/conda-meta"
 test -d "$prefix/envs/MTD_fastp/conda-meta"
 test -d "$prefix/envs/MTD_kraken2/conda-meta"
 test -d "$prefix/databases"
-test -s "$prefix/config/node_manifest.txt"
+manifest="$prefix/config/node_manifest.txt"
+test -s "$manifest"
+
+# A normal standalone checker invocation inherits the exact Kraken2 database
+# requirements recorded by the installer. Explicit --require-kraken-db
+# arguments override this discovery and are primarily used during installation.
+if (( required_kraken_count == 0 )); then
+    while IFS='=' read -r manifest_key manifest_value; do
+        [[ "$manifest_key" == "required_kraken_db" ]] || continue
+        [[ -n "$manifest_value" ]] || continue
+        required_kraken_dbs+=("$manifest_value")
+    done < "$manifest"
+    required_kraken_count="${#required_kraken_dbs[@]}"
+fi
 
 command -v rsync >/dev/null 2>&1
 command -v flock >/dev/null 2>&1
@@ -122,6 +167,30 @@ kraken2_env="$prefix/envs/MTD_kraken2"
 "$conda_bin" run --prefix "$kraken2_env" kraken2 --version
 if ! "$conda_bin" run --prefix "$kraken2_env" bracken -v; then
     "$conda_bin" run --prefix "$kraken2_env" bracken -h >/dev/null
+fi
+
+if (( required_kraken_count > 0 )); then
+    printf '[INFO] Required Kraken2 databases: %s\n' "$required_kraken_count"
+
+    for relative_db in "${required_kraken_dbs[@]}"; do
+        required_db="$prefix/databases/$relative_db"
+
+        if [[ ! -d "$required_db" ]]; then
+            printf '[ERROR] Required Kraken2 database directory is missing: %s\n' \
+                "$required_db" >&2
+            exit 1
+        fi
+
+        for core_file in hash.k2d opts.k2d taxo.k2d; do
+            if [[ ! -s "$required_db/$core_file" ]]; then
+                printf '[ERROR] Required Kraken2 database is incomplete; missing or empty: %s\n' \
+                    "$required_db/$core_file" >&2
+                exit 1
+            fi
+        done
+
+        printf '[OK] Required Kraken2 database: %s\n' "$required_db"
+    done
 fi
 
 kraken_db_count=0
