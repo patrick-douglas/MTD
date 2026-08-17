@@ -178,15 +178,16 @@ count_fastq_records() {
     fi
 
     if [[ "$fq" == *.gz ]]; then
-        if ! gzip -t -- "$fq"; then
+        # gzip -cd checks CRC/truncation while awk counts. pipefail keeps a
+        # gzip failure visible without reading the complete file twice.
+        if ! line_count="$(
+            set -o pipefail
+            gzip -cd -- "$fq" |
+            awk 'END { print NR + 0 }'
+        )"; then
             echo "${r}[ERROR] Invalid or corrupted gzip FASTQ: $fq${w}" >&2
             return 1
         fi
-
-        line_count="$(
-            gzip -cd -- "$fq" |
-            awk 'END { print NR + 0 }'
-        )"
     else
         line_count="$(
             awk 'END { print NR + 0 }' "$fq"
@@ -209,40 +210,127 @@ count_fastq_records() {
 }
 
 
+validate_fastq_streams_once() {
+    local read1="$1"
+    local read2="$2"
+    local label="${3:-FASTQ}"
+    local check_ids="${4:-0}"
+
+    python3 - "$read1" "$read2" "$label" "$check_ids" <<'PY_FASTQ_STREAMS'
+import gzip
+import sys
+
+read1, read2, label, check_ids_raw = sys.argv[1:5]
+check_ids = check_ids_raw == "1"
+paired = read2 != "-"
+
+
+def open_maybe_gz(path):
+    if path.endswith(".gz"):
+        return gzip.open(path, "rb")
+    return open(path, "rb")
+
+
+def read_record(handle, path):
+    header = handle.readline()
+    if not header:
+        return None
+
+    sequence = handle.readline()
+    plus = handle.readline()
+    quality = handle.readline()
+    if not sequence or not plus or not quality:
+        raise RuntimeError(f"incomplete FASTQ record in {path}")
+
+    return header, sequence, plus, quality
+
+
+def norm_id(header):
+    value = header.strip()
+    if value.startswith(b"@"):
+        value = value[1:]
+    value = value.split(None, 1)[0]
+    if value.endswith((b"/1", b"/2")):
+        value = value[:-2]
+    return value
+
+
+records = 0
+mismatches = 0
+examples = []
+
+try:
+    with open_maybe_gz(read1) as first:
+        if paired:
+            with open_maybe_gz(read2) as second:
+                while True:
+                    rec1 = read_record(first, read1)
+                    rec2 = read_record(second, read2)
+
+                    if rec1 is None and rec2 is None:
+                        break
+                    if rec1 is None or rec2 is None:
+                        raise RuntimeError("paired FASTQ files have different record counts")
+
+                    records += 1
+                    if check_ids:
+                        id1 = norm_id(rec1[0])
+                        id2 = norm_id(rec2[0])
+                        if id1 != id2:
+                            mismatches += 1
+                            if len(examples) < 20:
+                                examples.append((records, id1, id2))
+        else:
+            while read_record(first, read1) is not None:
+                records += 1
+except Exception as exc:
+    print("[ERROR] FASTQ validation failed.", file=sys.stderr)
+    print("Label:", label, file=sys.stderr)
+    print("R1:", read1, file=sys.stderr)
+    if paired:
+        print("R2:", read2, file=sys.stderr)
+    print("Reason:", str(exc), file=sys.stderr)
+    raise SystemExit(2)
+
+if mismatches:
+    print("[ERROR] Paired FASTQ IDs are desynchronized.", file=sys.stderr)
+    print("Label:", label, file=sys.stderr)
+    print("R1:", read1, file=sys.stderr)
+    print("R2:", read2, file=sys.stderr)
+    print("Pairs checked:", records, file=sys.stderr)
+    print("ID mismatches:", mismatches, file=sys.stderr)
+    print("[FIRST MISMATCHES]", file=sys.stderr)
+    for position, id1, id2 in examples:
+        print(
+            f"{position}\tR1={id1.decode('utf-8', 'replace')}"
+            f"\tR2={id2.decode('utf-8', 'replace')}",
+            file=sys.stderr,
+        )
+    raise SystemExit(1)
+
+if paired:
+    print("[OK] Paired FASTQ validation:", label)
+    print("  Records per mate:", records)
+    if check_ids:
+        print("  ID mismatches: 0")
+else:
+    print("[OK] FASTQ validation:", label)
+    print("  Records:", records)
+PY_FASTQ_STREAMS
+}
+
+
 validate_fastq_pair() {
     local read1="$1"
     local read2="$2"
     local label="${3:-paired FASTQ}"
 
-    local read1_count=0
-    local read2_count=0
-
     if [[ "$VALIDATE_PAIRED_FASTQ" != "1" ]]; then
         return 0
     fi
 
-    count_fastq_records "$read1" || \
-        die "Could not validate R1 for $label: $read1"
-
-    read1_count="$FASTQ_RECORD_COUNT"
-
-    count_fastq_records "$read2" || \
-        die "Could not validate R2 for $label: $read2"
-
-    read2_count="$FASTQ_RECORD_COUNT"
-
-    if [[ "$read1_count" -ne "$read2_count" ]]; then
-        echo "${r}[ERROR] Paired FASTQ record counts do not match.${w}" >&2
-        echo "Label: $label" >&2
-        echo "R1: $read1" >&2
-        echo "R1 records: $read1_count" >&2
-        echo "R2: $read2" >&2
-        echo "R2 records: $read2_count" >&2
-        exit 1
-    fi
-
-    echo "${g}[OK] Paired FASTQ validation:${w} $label"
-    echo "  Records per mate: $read1_count"
+    validate_fastq_streams_once "$read1" "$read2" "$label" 0 || \
+        die "Could not validate paired FASTQ files for $label."
 }
 
 check_fastq_pair_ids() {
@@ -250,104 +338,7 @@ check_fastq_pair_ids() {
     local read2="$2"
     local label="${3:-paired FASTQ}"
 
-    python3 - "$read1" "$read2" "$label" <<'PY_FASTQ_ID_CHECK'
-import sys
-import gzip
-
-read1, read2, label = sys.argv[1], sys.argv[2], sys.argv[3]
-
-def open_maybe_gz(path):
-    if path.endswith(".gz"):
-        return gzip.open(path, "rt", errors="replace")
-    return open(path, "rt", errors="replace")
-
-def norm_id(header):
-    h = header.strip()
-
-    if h.startswith("@"):
-        h = h[1:]
-
-    # Use the first token. Illumina mate information is often
-    # after a space, e.g. "1:N:0:..." and "2:N:0:...".
-    h = h.split()[0]
-
-    # Remove classic /1 and /2 mate suffixes only.
-    if h.endswith("/1") or h.endswith("/2"):
-        h = h[:-2]
-
-    return h
-
-def read_record(fh):
-    h = fh.readline()
-
-    if not h:
-        return None
-
-    s = fh.readline()
-    p = fh.readline()
-    q = fh.readline()
-
-    if not q:
-        raise RuntimeError("Incomplete FASTQ record near header: " + h.strip())
-
-    return h, s, p, q
-
-pairs_checked = 0
-mismatches = 0
-examples = []
-
-try:
-    with open_maybe_gz(read1) as f1, open_maybe_gz(read2) as f2:
-        while True:
-            rec1 = read_record(f1)
-            rec2 = read_record(f2)
-
-            if rec1 is None and rec2 is None:
-                break
-
-            if rec1 is None or rec2 is None:
-                print("[ERROR] Paired FASTQ files have different record counts.", file=sys.stderr)
-                print("Label:", label, file=sys.stderr)
-                print("R1:", read1, file=sys.stderr)
-                print("R2:", read2, file=sys.stderr)
-                sys.exit(2)
-
-            pairs_checked += 1
-
-            id1 = norm_id(rec1[0])
-            id2 = norm_id(rec2[0])
-
-            if id1 != id2:
-                mismatches += 1
-                if len(examples) < 20:
-                    examples.append((pairs_checked, id1, id2))
-
-except Exception as e:
-    print("[ERROR] Could not validate paired FASTQ IDs.", file=sys.stderr)
-    print("Label:", label, file=sys.stderr)
-    print("R1:", read1, file=sys.stderr)
-    print("R2:", read2, file=sys.stderr)
-    print("Reason:", str(e), file=sys.stderr)
-    sys.exit(2)
-
-if mismatches > 0:
-    print("[ERROR] Paired FASTQ IDs are desynchronized.", file=sys.stderr)
-    print("Label:", label, file=sys.stderr)
-    print("R1:", read1, file=sys.stderr)
-    print("R2:", read2, file=sys.stderr)
-    print("Pairs checked:", pairs_checked, file=sys.stderr)
-    print("ID mismatches:", mismatches, file=sys.stderr)
-    print("[FIRST MISMATCHES]", file=sys.stderr)
-
-    for pos, id1, id2 in examples:
-        print(f"{pos}\tR1={id1}\tR2={id2}", file=sys.stderr)
-
-    sys.exit(1)
-
-print("[OK] Paired FASTQ ID validation:", label)
-print("  Pairs checked:", pairs_checked)
-print("  ID mismatches: 0")
-PY_FASTQ_ID_CHECK
+    validate_fastq_streams_once "$read1" "$read2" "$label" 1
 }
 
 run_cmd() {
@@ -535,15 +526,25 @@ validate_fastp_outputs() {
     local json="$6"
 
     [[ -s "$read1" && -s "$html" && -s "$json" ]] || return 1
-    count_fastq_records "$read1" >/dev/null || return 1
     validate_fastp_json "$json" || return 1
 
     if [[ "$layout" == "pe" ]]; then
         [[ -s "$read2" ]] || return 1
-        ( validate_fastq_pair "$read1" "$read2" "resumed fastp output for sample $sample" ) || return 1
-        if [[ "$FASTP_VALIDATE_PAIRED_IDS" == "1" ]]; then
-            check_fastq_pair_ids "$read1" "$read2" "resumed fastp output for sample $sample" || return 1
+        if [[ "$VALIDATE_PAIRED_FASTQ" == "1" ||
+              "$FASTP_VALIDATE_PAIRED_IDS" == "1" ]]; then
+            validate_fastq_streams_once \
+                "$read1" "$read2" \
+                "resumed fastp output for sample $sample" \
+                "$FASTP_VALIDATE_PAIRED_IDS" || return 1
+        else
+            validate_fastq_streams_once \
+                "$read1" "-" \
+                "resumed fastp R1 output for sample $sample" 0 || return 1
         fi
+    else
+        validate_fastq_streams_once \
+            "$read1" "-" \
+            "resumed fastp output for sample $sample" 0 || return 1
     fi
 }
 
@@ -567,13 +568,30 @@ validate_kraken_outputs() {
         END {exit (NR == 0 || bad)}
     ' "$kraken_output" || return 1
     [[ -e "$classified1" && -e "$unclassified1" ]] || return 1
-    count_fastq_records "$classified1" >/dev/null || return 1
-    count_fastq_records "$unclassified1" >/dev/null || return 1
-
     if [[ "$layout" == "pe" ]]; then
         [[ -e "$classified2" && -e "$unclassified2" ]] || return 1
-        ( validate_fastq_pair "$classified1" "$classified2" "resumed Kraken classified pair for sample $sample" ) || return 1
-        ( validate_fastq_pair "$unclassified1" "$unclassified2" "resumed Kraken unclassified pair for sample $sample" ) || return 1
+        if [[ "$VALIDATE_PAIRED_FASTQ" == "1" ]]; then
+            validate_fastq_streams_once \
+                "$classified1" "$classified2" \
+                "resumed Kraken classified pair for sample $sample" 0 || return 1
+            validate_fastq_streams_once \
+                "$unclassified1" "$unclassified2" \
+                "resumed Kraken unclassified pair for sample $sample" 0 || return 1
+        else
+            validate_fastq_streams_once \
+                "$classified1" "-" \
+                "resumed Kraken classified R1 for sample $sample" 0 || return 1
+            validate_fastq_streams_once \
+                "$unclassified1" "-" \
+                "resumed Kraken unclassified R1 for sample $sample" 0 || return 1
+        fi
+    else
+        validate_fastq_streams_once \
+            "$classified1" "-" \
+            "resumed Kraken classified output for sample $sample" 0 || return 1
+        validate_fastq_streams_once \
+            "$unclassified1" "-" \
+            "resumed Kraken unclassified output for sample $sample" 0 || return 1
     fi
 }
 
@@ -626,6 +644,67 @@ validate_sam_output() {
     samtools view -c "$sam_file" >/dev/null 2>&1
 }
 
+hash_fastq_manifest_inputs() {
+    local result_dir="$1"
+    local sample=""
+    local layout=""
+    local read1=""
+    local read2=""
+    local read1_abs=""
+    local read2_abs=""
+    local row_index=0
+    local hash_failed=0
+    local -a hash_pids=()
+
+    mkdir -p -- "$result_dir"
+    echo "${g}[STATE] Hashing FASTQ inputs with 2 parallel workers.${w}"
+
+    while IFS=$'\t' read -r sample layout read1 read2; do
+        [[ "$sample" == "sample" ]] && continue
+        row_index=$((row_index + 1))
+
+        read1_abs="$(readlink -f -- "$read1")"
+        (
+            sha256_file "$read1_abs" > "$result_dir/${row_index}.r1.sha256"
+        ) &
+        hash_pids+=( "$!" )
+
+        if (( ${#hash_pids[@]} >= 2 )); then
+            if ! wait "${hash_pids[0]}"; then
+                hash_failed=1
+            fi
+            hash_pids=( "${hash_pids[@]:1}" )
+        fi
+
+        if [[ "$layout" == "pe" ]]; then
+            read2_abs="$(readlink -f -- "$read2")"
+            (
+                sha256_file "$read2_abs" > "$result_dir/${row_index}.r2.sha256"
+            ) &
+            hash_pids+=( "$!" )
+
+            if (( ${#hash_pids[@]} >= 2 )); then
+                if ! wait "${hash_pids[0]}"; then
+                    hash_failed=1
+                fi
+                hash_pids=( "${hash_pids[@]:1}" )
+            fi
+        else
+            printf '%s\n' '-' > "$result_dir/${row_index}.r2.sha256"
+        fi
+    done < "$FASTQ_INPUT_MANIFEST"
+
+    for hash_pid in "${hash_pids[@]}"; do
+        if ! wait "$hash_pid"; then
+            hash_failed=1
+        fi
+    done
+
+    if [[ "$hash_failed" == "1" ]]; then
+        return 1
+    fi
+}
+
 build_run_input_manifest() {
     local destination="$1"
     local metadata_path="-"
@@ -637,6 +716,10 @@ build_run_input_manifest() {
     local read2=""
     local read1_abs=""
     local read2_abs="-"
+    local read1_hash=""
+    local read2_hash="-"
+    local row_index=0
+    local hash_result_dir=""
 
     if [[ -n "${metadata:-}" ]]; then
         require_file "$metadata" "Metadata input"
@@ -646,6 +729,13 @@ build_run_input_manifest() {
 
     if [[ -s "$MTDIR/conta_ls.txt" ]]; then
         contaminant_hash="$(sha256_file "$MTDIR/conta_ls.txt")"
+    fi
+
+    hash_result_dir="$(mktemp -d "${destination}.fastq_hashes.XXXXXX")" || \
+        die "Could not create temporary directory for FASTQ input hashes."
+    if ! hash_fastq_manifest_inputs "$hash_result_dir"; then
+        rm -rf -- "$hash_result_dir"
+        die "Could not calculate one or more FASTQ input hashes."
     fi
 
     {
@@ -682,18 +772,23 @@ build_run_input_manifest() {
 
         while IFS=$'\t' read -r sample layout read1 read2; do
             [[ "$sample" == "sample" ]] && continue
+            row_index=$((row_index + 1))
             read1_abs="$(readlink -f -- "$read1")"
+            read1_hash="$(tr -d '[:space:]' < "$hash_result_dir/${row_index}.r1.sha256")"
             if [[ "$layout" == "pe" ]]; then
                 read2_abs="$(readlink -f -- "$read2")"
+                read2_hash="$(tr -d '[:space:]' < "$hash_result_dir/${row_index}.r2.sha256")"
                 printf 'sample\t%s\t%s\t%s\t%s\t%s;%s\n' \
-                    "$sample" "$layout" "$read1_abs" "$(sha256_file "$read1_abs")" \
-                    "$read2_abs" "$(sha256_file "$read2_abs")"
+                    "$sample" "$layout" "$read1_abs" "$read1_hash" \
+                    "$read2_abs" "$read2_hash"
             else
                 printf 'sample\t%s\t%s\t%s\t%s\t-;-\n' \
-                    "$sample" "$layout" "$read1_abs" "$(sha256_file "$read1_abs")"
+                    "$sample" "$layout" "$read1_abs" "$read1_hash"
             fi
         done < "$FASTQ_INPUT_MANIFEST"
     } > "$destination"
+
+    rm -rf -- "$hash_result_dir"
 }
 
 restart_without_resume_heavy() {
@@ -4667,6 +4762,7 @@ else
         fastp_fingerprint="$(fingerprint_values \
             "$MTD_CHECKPOINT_SCHEMA" fastp "$i" "$RUN_INPUT_FINGERPRINT" \
             "$INPUT_LAYOUT" "$length" "$FASTP_TOOL_ID")"
+        fastp_checkpoint_reused=0
 
         if [[ "$INPUT_LAYOUT" == "pe" ]]; then
             fastp_output_read1="$PIPELINE_TEMP_DIR/Trimmed_${i}_R1.fq.gz"
@@ -4716,6 +4812,7 @@ else
                validate_fastp_outputs \
                     "$i" pe "$out_fq1" "$out_fq2" "$fastp_html" "$fastp_json"
             then
+                fastp_checkpoint_reused=1
                 echo "${g}[RESUME] [fastp] Sample $i validated — skipping.${w}"
             else
                 if [[ "$RESUME_HEAVY" == "1" ]]; then
@@ -4810,6 +4907,7 @@ else
                validate_fastp_outputs \
                     "$i" se "$out_fq" "-" "$fastp_html" "$fastp_json"
             then
+                fastp_checkpoint_reused=1
                 echo "${g}[RESUME] [fastp] Sample $i validated — skipping.${w}"
             else
                 if [[ "$RESUME_HEAVY" == "1" ]]; then
@@ -4839,13 +4937,15 @@ else
 
         require_file "$fastp_html" "fastp HTML report for sample $i"
         require_file "$fastp_json" "fastp JSON report for sample $i"
-        validate_fastp_outputs \
-            "$i" "$INPUT_LAYOUT" \
-            "$fastp_output_read1" "$fastp_output_read2" \
-            "$fastp_html" "$fastp_json" || \
-            die "fastp output validation failed for sample: $i"
-        checkpoint_complete fastp "$i" "$fastp_fingerprint" \
-            "$fastp_output_read1" "$fastp_output_read2" "$fastp_html" "$fastp_json"
+        if [[ "$fastp_checkpoint_reused" != "1" ]]; then
+            validate_fastp_outputs \
+                "$i" "$INPUT_LAYOUT" \
+                "$fastp_output_read1" "$fastp_output_read2" \
+                "$fastp_html" "$fastp_json" || \
+                die "fastp output validation failed for sample: $i"
+            checkpoint_complete fastp "$i" "$fastp_fingerprint" \
+                "$fastp_output_read1" "$fastp_output_read2" "$fastp_html" "$fastp_json"
+        fi
     done
     fi
 fi
@@ -4983,6 +5083,7 @@ for i in $lsn; do
     kraken_host_fingerprint="$(fingerprint_values \
         "$MTD_CHECKPOINT_SCHEMA" kraken_host "$i" \
         "$KRAKEN_HOST_STAGE_ID" "$PREPARED_LAYOUT")"
+    kraken_host_checkpoint_reused=0
 
     echo "============================================================"
     echo "[HOST] Sample: $i"
@@ -5013,6 +5114,7 @@ for i in $lsn; do
                 "$i" "$PREPARED_LAYOUT" "$report" "$kraken_output" \
                 "$host_read1" "$host_read2" "$nonhost_read1" "$nonhost_read2"
         then
+            kraken_host_checkpoint_reused=1
             echo "${g}[RESUME] [Kraken host] Sample $i validated — skipping.${w}"
         else
             if [[ "$RESUME_HEAVY" == "1" ]]; then
@@ -5092,7 +5194,9 @@ for i in $lsn; do
             fi
         done
     fi
-    if [[ "$PREPARED_LAYOUT" == "pe" ]]; then
+    # Preserve the original HPC validation path. Local runs use the unified
+    # single-pass validator below.
+    if [[ -n "$HPC_CONF" && "$PREPARED_LAYOUT" == "pe" ]]; then
         validate_fastq_pair \
             "$nonhost_read1" \
             "$nonhost_read2" \
@@ -5106,7 +5210,7 @@ for i in $lsn; do
                 "Kraken2 host-classified pair for sample $i"
         fi
     fi
-    if [[ -z "$HPC_CONF" ]]; then
+    if [[ -z "$HPC_CONF" && "$kraken_host_checkpoint_reused" != "1" ]]; then
         validate_kraken_outputs \
             "$i" "$PREPARED_LAYOUT" "$report" "$kraken_output" \
             "$host_read1" "$host_read2" "$nonhost_read1" "$nonhost_read2" || \
@@ -5339,6 +5443,7 @@ for i in $lsn; do
     kraken_micro_raw_fingerprint="$(fingerprint_values \
         "$MTD_CHECKPOINT_SCHEMA" kraken_micro_raw "$i" \
         "$KRAKEN_MICRO_RAW_STAGE_ID" "$READ_LAYOUT")"
+    kraken_micro_raw_checkpoint_reused=0
 
     echo "============================================================"
     echo "[MICRO RAW] Sample: $i"
@@ -5387,6 +5492,7 @@ for i in $lsn; do
                 "$raw_classified_read1" "$raw_classified_read2" \
                 "$raw_unclassified_read1" "$raw_unclassified_read2"
         then
+            kraken_micro_raw_checkpoint_reused=1
             echo "${g}[RESUME] [Kraken microbiome raw] Sample $i validated — skipping.${w}"
         else
             if [[ "$RESUME_HEAVY" == "1" ]]; then
@@ -5465,7 +5571,7 @@ for i in $lsn; do
         done
     fi
 
-    if [[ -z "$HPC_CONF" ]]; then
+    if [[ -z "$HPC_CONF" && "$kraken_micro_raw_checkpoint_reused" != "1" ]]; then
         validate_kraken_outputs \
             "$i" "$READ_LAYOUT" "$report" "$kraken_output" \
             "$raw_classified_read1" "$raw_classified_read2" \
@@ -6064,6 +6170,7 @@ if [[ "$valid_contaminant_list" == "1" ]]; then
         kraken_micro_final_fingerprint="$(fingerprint_values \
             "$MTD_CHECKPOINT_SCHEMA" kraken_micro_final "$i" \
             "$KRAKEN_MICRO_FINAL_STAGE_ID" "$READ_LAYOUT")"
+        kraken_micro_final_checkpoint_reused=0
 
         echo "============================================================"
         echo "[MICRO FINAL] Sample: $i"
@@ -6088,6 +6195,7 @@ if [[ "$valid_contaminant_list" == "1" ]]; then
                     "$FINAL_CLASSIFIED_R1" "$FINAL_CLASSIFIED_R2" \
                     "$FINAL_UNCLASSIFIED_R1" "$FINAL_UNCLASSIFIED_R2"
             then
+                kraken_micro_final_checkpoint_reused=1
                 echo "${g}[RESUME] [Kraken microbiome final] Sample $i validated — skipping.${w}"
             else
                 if [[ "$RESUME_HEAVY" == "1" ]]; then
@@ -6163,7 +6271,7 @@ if [[ "$valid_contaminant_list" == "1" ]]; then
                 fi
             done
         fi
-        if [[ -z "$HPC_CONF" ]]; then
+        if [[ -z "$HPC_CONF" && "$kraken_micro_final_checkpoint_reused" != "1" ]]; then
             validate_kraken_outputs \
                 "$i" "$READ_LAYOUT" "$FINAL_KRAKEN_REPORT" "$FINAL_KRAKEN_OUTPUT" \
                 "$FINAL_CLASSIFIED_R1" "$FINAL_CLASSIFIED_R2" \
@@ -7537,6 +7645,7 @@ else
             "$MTD_CHECKPOINT_SCHEMA" humann_metaphlan "$i" "$KRAKEN_MICRO_FINAL_STAGE_ID" \
             "$READ_LAYOUT" "$HUMANN_METAPHLAN_OPTIONS" \
             "$(run_humann_tool "$HUMANN_BIN" --version 2>&1 | head -n 1)")"
+        humann_checkpoint_reused=0
 
         require_file \
             "$humann_input" \
@@ -7553,6 +7662,7 @@ else
         if checkpoint_matches humann_metaphlan "$i" "$humann_fingerprint" && \
            validate_humann_outputs "$humann_genefamilies" "$humann_pathabundance"
         then
+            humann_checkpoint_reused=1
             echo "${g}[RESUME] [HUMAnN/MetaPhlAn] Sample $i validated — skipping.${w}"
         else
             if [[ "$RESUME_HEAVY" == "1" ]]; then
@@ -7586,10 +7696,12 @@ else
             "$humann_pathabundance" \
             "HUMAnN pathway abundance output for sample $i"
 
-        validate_humann_outputs "$humann_genefamilies" "$humann_pathabundance" || \
-            die "HUMAnN output validation failed for sample: $i"
-        checkpoint_complete humann_metaphlan "$i" "$humann_fingerprint" \
-            "$humann_genefamilies" "$humann_pathabundance"
+        if [[ "$humann_checkpoint_reused" != "1" ]]; then
+            validate_humann_outputs "$humann_genefamilies" "$humann_pathabundance" || \
+                die "HUMAnN output validation failed for sample: $i"
+            checkpoint_complete humann_metaphlan "$i" "$humann_fingerprint" \
+                "$humann_genefamilies" "$humann_pathabundance"
+        fi
 
         echo "${g}[OK] HUMAnN completed for sample:${w} $i"
     done
@@ -7880,6 +7992,7 @@ if [[ "$blast" == "blast" ]]; then
             host_alignment_fingerprint="$(fingerprint_values \
                 "$MTD_CHECKPOINT_SCHEMA" host_alignment "$i" "$KRAKEN_HOST_STAGE_ID" \
                 magicblast "$(magicblast -version 2>&1 | head -n 1)")"
+            host_alignment_checkpoint_reused=0
 
             echo "============================================================"
             echo "[MAGIC-BLAST] Sample: $i"
@@ -7924,6 +8037,7 @@ if [[ "$blast" == "blast" ]]; then
             if checkpoint_matches host_alignment "$i" "$host_alignment_fingerprint" && \
                validate_sam_output "$sam_file"
             then
+                host_alignment_checkpoint_reused=1
                 echo "${g}[RESUME] [Magic-BLAST] Sample $i validated — skipping.${w}"
             else
                 if [[ "$RESUME_HEAVY" == "1" ]]; then
@@ -7942,10 +8056,12 @@ if [[ "$blast" == "blast" ]]; then
                 "$sam_file" \
                 "Magic-BLAST SAM output for sample $i"
 
-            validate_sam_output "$sam_file" || \
-                die "Magic-BLAST SAM validation failed for sample: $i"
-            checkpoint_complete host_alignment "$i" "$host_alignment_fingerprint" \
-                "$sam_file"
+            if [[ "$host_alignment_checkpoint_reused" != "1" ]]; then
+                validate_sam_output "$sam_file" || \
+                    die "Magic-BLAST SAM validation failed for sample: $i"
+                checkpoint_complete host_alignment "$i" "$host_alignment_fingerprint" \
+                    "$sam_file"
+            fi
 
             echo "${g}[OK] Magic-BLAST completed for sample:${w} $i"
         done
@@ -7962,6 +8078,7 @@ else
         host_alignment_fingerprint="$(fingerprint_values \
             "$MTD_CHECKPOINT_SCHEMA" host_alignment "$i" "$READ_PREPARATION_STAGE_ID" \
             hisat2 "$(hisat2 --version 2>&1 | head -n 1)")"
+        host_alignment_checkpoint_reused=0
 
         host_sam_files+=("$sam_file")
 
@@ -8002,6 +8119,7 @@ else
         if checkpoint_matches host_alignment "$i" "$host_alignment_fingerprint" && \
            validate_sam_output "$sam_file" && [[ -s "$hisat2_summary" ]]
         then
+            host_alignment_checkpoint_reused=1
             echo "${g}[RESUME] [HISAT2] Sample $i validated — skipping.${w}"
         else
             if [[ "$RESUME_HEAVY" == "1" ]]; then
@@ -8024,10 +8142,12 @@ else
             "$hisat2_summary" \
             "HISAT2 summary for sample $i"
 
-        validate_sam_output "$sam_file" || \
-            die "HISAT2 SAM validation failed for sample: $i"
-        checkpoint_complete host_alignment "$i" "$host_alignment_fingerprint" \
-            "$sam_file" "$hisat2_summary"
+        if [[ "$host_alignment_checkpoint_reused" != "1" ]]; then
+            validate_sam_output "$sam_file" || \
+                die "HISAT2 SAM validation failed for sample: $i"
+            checkpoint_complete host_alignment "$i" "$host_alignment_fingerprint" \
+                "$sam_file" "$hisat2_summary"
+        fi
 
         echo "${g}[OK] HISAT2 completed for sample:${w} $i"
     done
