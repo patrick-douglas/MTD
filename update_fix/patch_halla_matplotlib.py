@@ -7,13 +7,14 @@ HAllA uses a seaborn whitegrid style before generating a heatmap.
 With Matplotlib 3.5.x, the remaining grid may trigger a
 MatplotlibDeprecationWarning during pcolormesh creation.
 
-The patch adds:
+The patch disables the grid on both the main heatmap axes and the
+dedicated colorbar axes before seaborn creates the pcolormesh objects:
 
     ax.grid(False)
+    cbar_ax.grid(False)
 
-before the HAllA heatmap is generated.
-
-The operation is idempotent and validates the patched Python module.
+The operation is idempotent, upgrades the original MTD patch when
+necessary, and validates the patched Python module.
 """
 
 from __future__ import annotations
@@ -31,7 +32,13 @@ MARKER = (
     "disable grid before HAllA heatmap"
 )
 
+CBAR_MARKER = (
+    "# MTD Explorer compatibility patch: "
+    "disable grid before HAllA colorbar"
+)
+
 PATCH_LINE = "ax.grid(False)"
+CBAR_PATCH_LINE = "cbar_ax.grid(False)"
 
 
 def fail(message: str) -> None:
@@ -106,6 +113,34 @@ def validate_patch(report_file: Path) -> None:
             "was not found immediately after it."
         )
 
+    cbar_marker_indexes = [
+        index
+        for index, line in enumerate(lines)
+        if CBAR_MARKER in line
+    ]
+
+    if len(cbar_marker_indexes) != 1:
+        fail(
+            "Expected exactly one MTD Explorer colorbar patch marker in "
+            f"{report_file}, but found {len(cbar_marker_indexes)}."
+        )
+
+    cbar_marker_index = cbar_marker_indexes[0]
+
+    nearby_cbar_lines = lines[
+        cbar_marker_index + 1:
+        cbar_marker_index + 8
+    ]
+
+    if not any(
+        line.strip() == CBAR_PATCH_LINE
+        for line in nearby_cbar_lines
+    ):
+        fail(
+            "The colorbar patch marker was found, but "
+            "cbar_ax.grid(False) was not found immediately after it."
+        )
+
     compile_module(report_file)
 
     print("[OK] HAllA Matplotlib patch validation passed.")
@@ -115,7 +150,10 @@ def validate_patch(report_file: Path) -> None:
 def apply_patch(report_file: Path) -> None:
     original_text = report_file.read_text(encoding="utf-8")
 
-    if MARKER in original_text:
+    if (
+        MARKER in original_text
+        and CBAR_MARKER in original_text
+    ):
         print("[OK] HAllA Matplotlib patch is already installed.")
         validate_patch(report_file)
         return
@@ -153,7 +191,7 @@ def apply_patch(report_file: Path) -> None:
     ]
 
     nearby_start = subplot_index + 1
-    nearby_end = min(subplot_index + 10, len(lines))
+    nearby_end = min(subplot_index + 12, len(lines))
 
     existing_grid_index = None
 
@@ -170,25 +208,85 @@ def apply_patch(report_file: Path) -> None:
         shutil.copy2(report_file, backup_file)
         print(f"[INFO] Original HAllA module backed up to: {backup_file}")
 
-    marker_line = f"{indent}{MARKER}\n"
+    if MARKER not in original_text:
+        marker_line = f"{indent}{MARKER}\n"
 
-    if existing_grid_index is not None:
-        lines.insert(existing_grid_index, marker_line)
-        print(
-            "[INFO] ax.grid(False) was already present; "
-            "the MTD Explorer marker was added."
+        if existing_grid_index is not None:
+            lines.insert(existing_grid_index, marker_line)
+            print(
+                "[INFO] ax.grid(False) was already present; "
+                "the MTD Explorer marker was added."
+            )
+        else:
+            insertion = [
+                "\n",
+                marker_line,
+                f"{indent}{PATCH_LINE}\n",
+            ]
+
+            lines[
+                subplot_index + 1:
+                subplot_index + 1
+            ] = insertion
+
+    cbar_index = None
+    heatmap_index = None
+
+    for index, line in enumerate(lines):
+        if (
+            cbar_index is None
+            and "cbar_ax = divider.append_axes(" in line
+        ):
+            cbar_index = index
+            continue
+
+        if (
+            cbar_index is not None
+            and "sns.heatmap(" in line
+        ):
+            heatmap_index = index
+            break
+
+    if cbar_index is None or heatmap_index is None:
+        fail(
+            "Could not locate the HAllA colorbar/heatmap block. "
+            "No colorbar patch was applied."
         )
-    else:
-        insertion = [
-            "\n",
-            marker_line,
-            f"{indent}{PATCH_LINE}\n",
-        ]
 
-        lines[
-            subplot_index + 1:
-            subplot_index + 1
-        ] = insertion
+    existing_cbar_grid_index = None
+
+    for index in range(cbar_index + 1, heatmap_index):
+        if lines[index].strip() == CBAR_PATCH_LINE:
+            existing_cbar_grid_index = index
+            break
+
+    if CBAR_MARKER not in original_text:
+        cbar_marker_line = f"{indent}{CBAR_MARKER}\n"
+
+        if existing_cbar_grid_index is not None:
+            lines.insert(
+                existing_cbar_grid_index,
+                cbar_marker_line,
+            )
+            print(
+                "[INFO] cbar_ax.grid(False) was already present; "
+                "the MTD Explorer colorbar marker was added."
+            )
+        else:
+            insertion = [
+                cbar_marker_line,
+                f"{indent}{CBAR_PATCH_LINE}\n",
+            ]
+
+            lines[
+                cbar_index + 1:
+                cbar_index + 1
+            ] = insertion
+
+            print(
+                "[INFO] Added cbar_ax.grid(False) before "
+                "the HAllA heatmap."
+            )
 
     report_file.write_text(
         "".join(lines),
