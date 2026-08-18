@@ -564,10 +564,10 @@ case "$MODE" in
         mtd_hpc_require_file "$kraken_output" "Kraken2 classification output"
 
         if [[ "$LAYOUT" == "pe" ]]; then
-            local_classified1="${kraken_classified_pattern//#/1}"
-            local_classified2="${kraken_classified_pattern//#/2}"
-            local_unclassified1="${kraken_unclassified_pattern//#/1}"
-            local_unclassified2="${kraken_unclassified_pattern//#/2}"
+            local_classified1="${kraken_classified_pattern//#/_1}"
+            local_classified2="${kraken_classified_pattern//#/_2}"
+            local_unclassified1="${kraken_unclassified_pattern//#/_1}"
+            local_unclassified2="${kraken_unclassified_pattern//#/_2}"
             for path in "$local_classified1" "$local_classified2" "$local_unclassified1" "$local_unclassified2"; do
                 mtd_hpc_require_path_exists "$path" "Kraken2 category FASTQ"
             done
