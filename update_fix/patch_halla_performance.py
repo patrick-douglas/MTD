@@ -1,35 +1,39 @@
 #!/usr/bin/env python3
 
 """
-Apply the MTD Explorer performance patch to HAllA 0.8.20.
+Apply the MTD Explorer correlation-performance patch to HAllA 0.8.20.
 
-The upstream HAllA 0.8.20 implementation evaluates Spearman correlations
-through Python callbacks for both the X-by-Y association matrix and the
-within-dataset hierarchical-clustering distances.  Large host-expression
-matrices therefore spend most of their time repeatedly calling
-scipy.stats.spearmanr one pair at a time.
+HAllA 0.8.20 evaluates Pearson and Spearman correlations through Python
+callbacks for the X-by-Y association matrix and for within-dataset
+hierarchical-clustering distances.  On large host-expression matrices this
+can require millions to hundreds of millions of Python-level scipy.stats
+calls.
 
-For finite, non-constant continuous matrices using the Spearman metric, this
-patch uses the mathematical identity
+For finite, non-constant matrices this patch provides fast paths for:
 
-    Spearman(x, y) == Pearson(rank(x), rank(y))
+* Spearman: rank each feature once, then use vectorized Pearson correlation
+  on the ranks (Spearman == Pearson(rank(x), rank(y))).
+* Pearson: center/normalize each feature once, then use vectorized matrix
+  multiplication directly.
+* P-values: reuse the already computed correlation coefficients instead of
+  recomputing every pair with scipy.stats.spearmanr/pearsonr.
+* Hierarchical clustering: use SciPy's compiled ``pdist(...,
+  metric="correlation")`` implementation (on ranks for Spearman; raw values
+  for Pearson) instead of a Python callback for every pair.
 
-and computes ranks once per feature.  The X-by-Y correlation matrix is then
-computed with vectorized matrix multiplication, the corresponding asymptotic
-Spearman p-values are computed from the same coefficients, and hierarchical
-clustering uses SciPy's compiled correlation-distance implementation on the
-ranked rows.
-
-The original HAllA code is retained as an automatic fallback for other
-metrics, forced permutation tests, missing values, constant features, or any
-input that is not suitable for the fast path.
+The original HAllA code remains the automatic fallback for other metrics,
+forced permutation tests, missing/non-finite values, constant features, and
+inputs that are not suitable for the fast paths.
 
 The patch also avoids materializing HAllA's unused square-form hierarchical
-distance matrix.  The condensed distance vector used by scipy.cluster.linkage
-is preserved.
+distance matrix.  The condensed distance vector required by
+scipy.cluster.linkage is preserved.
 
-The operation is idempotent, creates backups before changing upstream HAllA
-modules, validates Python syntax, and runs numerical equivalence microtests.
+This script can safely upgrade the previous MTD Explorer Spearman-only patch
+(v1) by restoring the original HAllA 0.8.20 main.py/hierarchy.py backups and
+then applying this v2 patch.  The operation is idempotent, validates Python
+syntax, and runs numerical equivalence microtests for both Spearman and
+Pearson.
 """
 
 from __future__ import annotations
@@ -44,22 +48,35 @@ from importlib import metadata
 from pathlib import Path
 
 EXPECTED_HALLA_VERSION = "0.8.20"
-PATCH_VERSION = "1"
+PATCH_VERSION = "2"
 
-MAIN_IMPORT_MARKER = "# MTD Explorer performance patch: fast Spearman helpers"
-MAIN_FAST_MARKER = "# MTD Explorer performance patch: vectorized Spearman X-by-Y path"
-HIERARCHY_IMPORT_MARKER = "# MTD Explorer performance patch: fast Spearman hierarchy helper"
-HIERARCHY_FAST_MARKER = "# MTD Explorer performance patch: compiled Spearman hierarchy path"
-HIERARCHY_MEMORY_MARKER = "# MTD Explorer performance patch: avoid unused square distance matrix"
-HELPER_MARKER = f"# MTD Explorer HAllA fast Spearman helper v{PATCH_VERSION}"
+# v2 markers
+MAIN_IMPORT_MARKER = "# MTD Explorer performance patch v2: fast correlation helpers"
+MAIN_FAST_MARKER = "# MTD Explorer performance patch v2: vectorized Pearson/Spearman X-by-Y path"
+HIERARCHY_IMPORT_MARKER = "# MTD Explorer performance patch v2: fast correlation hierarchy helpers"
+HIERARCHY_FAST_MARKER = "# MTD Explorer performance patch v2: compiled Pearson/Spearman hierarchy path"
+HIERARCHY_MEMORY_MARKER = "# MTD Explorer performance patch v2: avoid unused square distance matrix"
+HELPER_MARKER = f"# MTD Explorer HAllA fast correlation helper v{PATCH_VERSION}"
+HELPER_FILENAME = "mtd_fast_correlation.py"
 
-HELPER_SOURCE = r'''# MTD Explorer HAllA fast Spearman helper v1
-"""Fast, numerically equivalent Spearman helpers for HAllA 0.8.20.
+# Previous Spearman-only patch markers.  These are used only for a controlled
+# v1 -> v2 upgrade of an already patched halla0820 environment.
+V1_MAIN_IMPORT_MARKER = "# MTD Explorer performance patch: fast Spearman helpers"
+V1_MAIN_FAST_MARKER = "# MTD Explorer performance patch: vectorized Spearman X-by-Y path"
+V1_HIERARCHY_IMPORT_MARKER = "# MTD Explorer performance patch: fast Spearman hierarchy helper"
+V1_HIERARCHY_FAST_MARKER = "# MTD Explorer performance patch: compiled Spearman hierarchy path"
+V1_HIERARCHY_MEMORY_MARKER = "# MTD Explorer performance patch: avoid unused square distance matrix"
+V1_HELPER_FILENAME = "mtd_fast_spearman.py"
+V1_HELPER_SHA256 = "99b1d67be4014af91353732f76b87ed213cba7c9acb8e3c3a760ab3043781c2b"
 
-This module is installed by update_fix/patch_halla_performance.py.
-It intentionally activates only for finite, non-constant 2-D numeric matrices.
-All unsupported cases fall back to upstream HAllA behavior in the patched
-callers.
+HELPER_SOURCE = r'''# MTD Explorer HAllA fast correlation helper v2
+"""Fast Pearson/Spearman helpers for HAllA 0.8.20.
+
+Installed by update_fix/patch_halla_performance.py.
+
+The fast paths deliberately activate only for finite, non-constant 2-D
+numeric matrices.  Unsupported cases remain on upstream HAllA behavior in the
+patched callers.
 """
 
 import numpy as np
@@ -75,8 +92,8 @@ def _as_float_matrix(matrix):
     return data
 
 
-def can_use_fast_spearman(*matrices):
-    """Return True only when the vectorized path is equivalent to HAllA."""
+def _basic_fast_path_eligibility(*matrices):
+    """Check conditions shared by the Pearson and Spearman fast paths."""
     if not matrices:
         return False
 
@@ -96,14 +113,43 @@ def can_use_fast_spearman(*matrices):
             return False
 
         # Upstream HAllA removes missing values independently for each pair.
-        # A single matrix-wide rank transform is not equivalent in that case,
-        # so missing/non-finite data deliberately use the original code.
+        # Matrix-wide vectorization is not equivalent in that situation.
         if not np.isfinite(data).all():
             return False
 
-        # Upstream HAllA returns (rho=0, p=1) for constant features.  Keeping
-        # them on the original path avoids changing that special-case behavior.
+        # Upstream HAllA returns (correlation=0, p=1) for constant features.
         if np.any(np.ptp(data, axis=1) == 0):
+            return False
+
+    return True
+
+
+def can_use_fast_spearman(*matrices):
+    """Return True when the vectorized Spearman path is safe."""
+    return _basic_fast_path_eligibility(*matrices)
+
+
+def can_use_fast_pearson(*matrices):
+    """Return True when the vectorized Pearson path is safe.
+
+    A conservative near-constant check keeps numerically delicate rows on
+    scipy.stats.pearsonr, matching the upstream HAllA path rather than risking
+    a change from cancellation during matrix-wide centering.
+    """
+    if not _basic_fast_path_eligibility(*matrices):
+        return False
+
+    for matrix in matrices:
+        data = _as_float_matrix(matrix)
+        means = data.mean(axis=1)
+        centered_norms = np.linalg.norm(data - means[:, None], axis=1)
+
+        # SciPy has historically warned/fallen into a numerically delicate
+        # regime for nearly constant inputs.  The exact threshold has varied
+        # across releases, so use a conservative guard and let upstream HAllA
+        # handle such rows pair-by-pair.
+        scale = np.maximum(np.abs(means), 1.0)
+        if np.any(centered_norms <= 1e-12 * scale):
             return False
 
     return True
@@ -112,10 +158,6 @@ def can_use_fast_spearman(*matrices):
 def _rank_rows(matrix):
     """Rank each feature row with SciPy's average-tie convention."""
     data = _as_float_matrix(matrix)
-
-    # SciPy 1.8 (the HAllA 0.8.20 environment used by MTD Explorer) supports
-    # axis=1.  The fallback keeps the helper usable with older compatible
-    # SciPy builds without changing the rank convention.
     try:
         return np.asarray(
             rankdata(data, method="average", axis=1),
@@ -128,44 +170,57 @@ def _rank_rows(matrix):
         return ranked
 
 
-def _center_and_normalize_rows(ranks):
-    centered = ranks - ranks.mean(axis=1, keepdims=True)
+def _center_and_normalize_rows(data):
+    centered = data - data.mean(axis=1, keepdims=True)
     norms = np.sqrt(np.sum(centered * centered, axis=1))
     return centered, norms
+
+
+def _cross_correlation(X, Y):
+    x_data = _as_float_matrix(X)
+    y_data = _as_float_matrix(Y)
+
+    x_centered, x_norms = _center_and_normalize_rows(x_data)
+    y_centered, y_norms = _center_and_normalize_rows(y_data)
+
+    similarities = x_centered.dot(y_centered.T)
+    similarities /= x_norms[:, None]
+    similarities /= y_norms[None, :]
+
+    # Remove only last-bit excursions outside the mathematical bounds.
+    np.clip(similarities, -1.0, 1.0, out=similarities)
+    return similarities
+
+
+def fast_pearson_similarity(X, Y):
+    """Return the HAllA X-by-Y Pearson similarity matrix."""
+    if not can_use_fast_pearson(X, Y):
+        raise ValueError("Input is not eligible for the fast Pearson path.")
+    return _cross_correlation(X, Y)
 
 
 def fast_spearman_similarity(X, Y):
     """Return the HAllA X-by-Y Spearman similarity matrix."""
     if not can_use_fast_spearman(X, Y):
         raise ValueError("Input is not eligible for the fast Spearman path.")
-
-    x_ranks = _rank_rows(X)
-    y_ranks = _rank_rows(Y)
-
-    x_centered, x_norms = _center_and_normalize_rows(x_ranks)
-    y_centered, y_norms = _center_and_normalize_rows(y_ranks)
-
-    similarities = x_centered.dot(y_centered.T)
-    similarities /= x_norms[:, None]
-    similarities /= y_norms[None, :]
-
-    # Mathematical correlations are bounded by [-1, 1].  Clipping only removes
-    # possible last-bit floating-point excursions from vectorized arithmetic.
-    np.clip(similarities, -1.0, 1.0, out=similarities)
-    return similarities
+    return _cross_correlation(_rank_rows(X), _rank_rows(Y))
 
 
-def fast_spearman_pvalues(similarities, sample_count):
-    """Return SciPy-compatible two-sided asymptotic Spearman p-values."""
-    rho = np.asarray(similarities, dtype=np.float64)
+def _fast_correlation_pvalues(similarities, sample_count):
+    """Two-sided correlation p-values from already computed coefficients.
+
+    For n >= 3, the usual Student-t transformation is mathematically
+    equivalent to the null distribution used by scipy.stats.pearsonr and is
+    also the transformation used for scipy.stats.spearmanr's asymptotic
+    two-sided p-value in the HAllA 0.8.20 SciPy generation.
+    """
+    corr = np.asarray(similarities, dtype=np.float64)
     if sample_count < 3:
-        raise ValueError("Spearman p-values require at least three samples.")
+        raise ValueError("Correlation p-values require at least three samples.")
 
     dof = sample_count - 2
-    clipped = np.clip(rho, -1.0, 1.0)
+    clipped = np.clip(corr, -1.0, 1.0)
 
-    # This is the same Student-t transformation used by scipy.stats.spearmanr
-    # for the two-sided asymptotic p-value in the pinned SciPy generation.
     with np.errstate(divide="ignore", invalid="ignore"):
         ratio = dof / ((clipped + 1.0) * (1.0 - clipped))
         np.clip(ratio, 0.0, None, out=ratio)
@@ -173,33 +228,30 @@ def fast_spearman_pvalues(similarities, sample_count):
 
     pvalues = 2.0 * distributions.t.sf(np.abs(t_stat), dof)
 
-    # Eligible fast-path inputs are non-constant and finite.  This guard is only
-    # defensive against an unexpected numerical NaN.
     if np.isnan(pvalues).any():
         pvalues = np.where(np.isnan(pvalues), 1.0, pvalues)
 
     return pvalues
 
 
-def fast_spearman_condensed_distance(
+def fast_pearson_pvalues(similarities, sample_count):
+    return _fast_correlation_pvalues(similarities, sample_count)
+
+
+def fast_spearman_pvalues(similarities, sample_count):
+    return _fast_correlation_pvalues(similarities, sample_count)
+
+
+def _condensed_correlation_distance(
     matrix,
     sim2dist_set_abs=True,
     sim2dist_func=None,
 ):
-    """Return HAllA's condensed 1-|Spearman| hierarchy distance vector.
+    """Convert compiled correlation distance to HAllA's condensed distance."""
+    condensed = spd.pdist(matrix, metric="correlation")
 
-    Memory is kept close to the unavoidable condensed O(n^2) vector.  The
-    vector returned by scipy.spatial.distance.pdist is transformed in place
-    whenever HAllA is using its default similarity-to-distance conversion.
-    """
-    if not can_use_fast_spearman(matrix):
-        raise ValueError("Input is not eligible for the fast Spearman path.")
-
-    ranks = _rank_rows(matrix)
-
-    # SciPy's compiled correlation metric returns 1 - Pearson.  Applied to
-    # ranks, Pearson is Spearman, so convert the condensed vector back to rho.
-    condensed = spd.pdist(ranks, metric="correlation")
+    # scipy correlation distance is 1-r.  Recover r so HAllA's
+    # similarity2distance semantics can be applied exactly.
     np.subtract(1.0, condensed, out=condensed)
     np.clip(condensed, -1.0, 1.0, out=condensed)
 
@@ -216,12 +268,50 @@ def fast_spearman_condensed_distance(
 
     np.subtract(1.0, condensed, out=condensed)
     return condensed
+
+
+def fast_pearson_condensed_distance(
+    matrix,
+    sim2dist_set_abs=True,
+    sim2dist_func=None,
+):
+    """Return HAllA's condensed Pearson hierarchy distance vector."""
+    if not can_use_fast_pearson(matrix):
+        raise ValueError("Input is not eligible for the fast Pearson path.")
+    return _condensed_correlation_distance(
+        _as_float_matrix(matrix),
+        sim2dist_set_abs=sim2dist_set_abs,
+        sim2dist_func=sim2dist_func,
+    )
+
+
+def fast_spearman_condensed_distance(
+    matrix,
+    sim2dist_set_abs=True,
+    sim2dist_func=None,
+):
+    """Return HAllA's condensed Spearman hierarchy distance vector."""
+    if not can_use_fast_spearman(matrix):
+        raise ValueError("Input is not eligible for the fast Spearman path.")
+    return _condensed_correlation_distance(
+        _rank_rows(matrix),
+        sim2dist_set_abs=sim2dist_set_abs,
+        sim2dist_func=sim2dist_func,
+    )
 '''
 
 
 def fail(message: str) -> None:
     print(f"[ERROR] {message}", file=sys.stderr)
     raise SystemExit(1)
+
+
+def sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def locate_halla_package() -> tuple[Path, str]:
@@ -271,23 +361,105 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def _verify_upstream_backup(path: Path, kind: str) -> None:
+    if not path.is_file():
+        fail(f"Required original HAllA backup is missing: {path}")
+
+    text = path.read_text(encoding="utf-8")
+    if "MTD Explorer performance patch" in text:
+        fail(f"Original HAllA backup unexpectedly contains an MTD patch: {path}")
+
+    if kind == "main":
+        required = (
+            "self.similarity_table = spd.cdist(X, Y, metric=get_similarity_function(dist_metric))",
+            "self.pvalue_table = get_pvalue_table(X, Y, pdist_metric=dist_metric",
+        )
+    else:
+        required = (
+            "self.distance_matrix = similarity2distance(spd.pdist(matrix, metric=treemetric)",
+            "self.distance_matrix_sqr = spd.squareform(self.distance_matrix)",
+        )
+
+    for fragment in required:
+        if fragment not in text:
+            fail(
+                f"Original HAllA backup does not match expected 0.8.20 {kind}.py: "
+                f"missing {fragment!r}"
+            )
+
+
+def upgrade_v1_if_needed(package_dir: Path) -> None:
+    """Restore pristine HAllA modules before upgrading the MTD v1 patch."""
+    main_file = package_dir / "main.py"
+    hierarchy_file = package_dir / "hierarchy.py"
+    old_helper = package_dir / "utils" / V1_HELPER_FILENAME
+
+    main_text = main_file.read_text(encoding="utf-8")
+    hierarchy_text = hierarchy_file.read_text(encoding="utf-8")
+
+    v1_main_markers = (V1_MAIN_IMPORT_MARKER, V1_MAIN_FAST_MARKER)
+    v1_hierarchy_markers = (
+        V1_HIERARCHY_IMPORT_MARKER,
+        V1_HIERARCHY_FAST_MARKER,
+        V1_HIERARCHY_MEMORY_MARKER,
+    )
+
+    present_main = [marker in main_text for marker in v1_main_markers]
+    present_hierarchy = [marker in hierarchy_text for marker in v1_hierarchy_markers]
+    any_v1 = any(present_main) or any(present_hierarchy) or old_helper.exists()
+
+    if not any_v1:
+        return
+
+    if not all(present_main) or not all(present_hierarchy):
+        fail("A partial previous MTD HAllA performance patch was detected.")
+
+    if not old_helper.is_file():
+        fail(f"Previous MTD HAllA helper is missing: {old_helper}")
+
+    if sha256_file(old_helper) != V1_HELPER_SHA256:
+        fail(
+            "The existing Spearman-only helper does not match the known v1 "
+            "MTD patch. Refusing an automatic upgrade."
+        )
+
+    main_backup = main_file.with_name(main_file.name + ".mtd_performance_original")
+    hierarchy_backup = hierarchy_file.with_name(
+        hierarchy_file.name + ".mtd_performance_original"
+    )
+
+    _verify_upstream_backup(main_backup, "main")
+    _verify_upstream_backup(hierarchy_backup, "hierarchy")
+
+    shutil.copy2(main_backup, main_file)
+    shutil.copy2(hierarchy_backup, hierarchy_file)
+    old_helper.unlink()
+
+    print("[INFO] Previous Spearman-only HAllA performance patch v1 detected.")
+    print("[INFO] Restored pristine HAllA 0.8.20 modules from validated backups.")
+    print("[INFO] Removed the v1 helper before applying performance patch v2.")
+
+
 def patch_main(main_file: Path) -> None:
     text = main_file.read_text(encoding="utf-8")
 
     if MAIN_IMPORT_MARKER in text and MAIN_FAST_MARKER in text:
-        print("[OK] HAllA main.py performance patch is already installed.")
+        print("[OK] HAllA main.py performance patch v2 is already installed.")
         return
 
     if MAIN_IMPORT_MARKER in text or MAIN_FAST_MARKER in text:
-        fail("A partial HAllA main.py performance patch was detected.")
+        fail("A partial HAllA main.py performance patch v2 was detected.")
 
     old_import = (
         "from .utils.stats import get_pvalue_table, pvalues2qvalues, test_pvalue_run_time\n"
     )
     new_import = old_import + (
         f"{MAIN_IMPORT_MARKER}\n"
-        "from .utils.mtd_fast_spearman import (\n"
+        "from .utils.mtd_fast_correlation import (\n"
+        "    can_use_fast_pearson,\n"
         "    can_use_fast_spearman,\n"
+        "    fast_pearson_similarity,\n"
+        "    fast_pearson_pvalues,\n"
         "    fast_spearman_similarity,\n"
         "    fast_spearman_pvalues,\n"
         ")\n"
@@ -314,13 +486,13 @@ def patch_main(main_file: Path) -> None:
                 f"implementation; missing: {fragment}"
             )
 
-    new_block = f'''        {MAIN_FAST_MARKER}\n        fast_spearman = (\n            dist_metric == 'spearman'\n            and not self.force_permutations\n            and can_use_fast_spearman(X, Y)\n        )\n\n        # obtain similarity matrix\n        self.logger.log_message('Generating the similarity table...')\n        if fast_spearman:\n            self.logger.log_message(\n                '[MTD Explorer] Using optimized vectorized Spearman similarity.'\n            )\n            self.similarity_table = fast_spearman_similarity(X, Y)\n        else:\n            self.similarity_table = spd.cdist(\n                X, Y, metric=get_similarity_function(dist_metric)\n            )\n\n        # obtain p-values\n        self.logger.log_message('Generating the p-value table...')\n        confp = config.permute\n        if fast_spearman:\n            self.logger.log_message(\n                '[MTD Explorer] Reusing Spearman coefficients for vectorized p-values.'\n            )\n            self.pvalue_table = fast_spearman_pvalues(\n                self.similarity_table, X.shape[1]\n            )\n        else:\n            extrapolated_time, timing_message = test_pvalue_run_time(\n                X, Y, pdist_metric=dist_metric,\n                permute_func=confp['func'], permute_iters=confp['iters'],\n                permute_speedup=confp['speedup'],\n                alpha=config.stats['fdr_alpha'],\n                force_perms=self.force_permutations,\n                num_threads=self.num_threads,\n                seed=self.seed\n            )\n            if extrapolated_time > 10 and self.verbose:\n                self.logger.log_message(timing_message)\n\n            self.pvalue_table = get_pvalue_table(\n                X, Y, pdist_metric=dist_metric,\n                permute_func=confp['func'], permute_iters=confp['iters'],\n                permute_speedup=confp['speedup'],\n                alpha=config.stats['fdr_alpha'],\n                no_progress=self.no_progress,\n                force_permutations=self.force_permutations,\n                num_threads=self.num_threads,\n                seed=self.seed\n            )\n\n'''
+    new_block = f'''        {MAIN_FAST_MARKER}\n        fast_spearman = (\n            dist_metric == 'spearman'\n            and not self.force_permutations\n            and can_use_fast_spearman(X, Y)\n        )\n        fast_pearson = (\n            dist_metric == 'pearson'\n            and not self.force_permutations\n            and can_use_fast_pearson(X, Y)\n        )\n\n        # obtain similarity matrix\n        self.logger.log_message('Generating the similarity table...')\n        if fast_spearman:\n            self.logger.log_message(\n                '[MTD Explorer] Using optimized vectorized Spearman similarity.'\n            )\n            self.similarity_table = fast_spearman_similarity(X, Y)\n        elif fast_pearson:\n            self.logger.log_message(\n                '[MTD Explorer] Using optimized vectorized Pearson similarity.'\n            )\n            self.similarity_table = fast_pearson_similarity(X, Y)\n        else:\n            self.similarity_table = spd.cdist(\n                X, Y, metric=get_similarity_function(dist_metric)\n            )\n\n        # obtain p-values\n        self.logger.log_message('Generating the p-value table...')\n        confp = config.permute\n        if fast_spearman:\n            self.logger.log_message(\n                '[MTD Explorer] Reusing Spearman coefficients for vectorized p-values.'\n            )\n            self.pvalue_table = fast_spearman_pvalues(\n                self.similarity_table, X.shape[1]\n            )\n        elif fast_pearson:\n            self.logger.log_message(\n                '[MTD Explorer] Reusing Pearson coefficients for vectorized p-values.'\n            )\n            self.pvalue_table = fast_pearson_pvalues(\n                self.similarity_table, X.shape[1]\n            )\n        else:\n            extrapolated_time, timing_message = test_pvalue_run_time(\n                X, Y, pdist_metric=dist_metric,\n                permute_func=confp['func'], permute_iters=confp['iters'],\n                permute_speedup=confp['speedup'],\n                alpha=config.stats['fdr_alpha'],\n                force_perms=self.force_permutations,\n                num_threads=self.num_threads,\n                seed=self.seed\n            )\n            if extrapolated_time > 10 and self.verbose:\n                self.logger.log_message(timing_message)\n\n            self.pvalue_table = get_pvalue_table(\n                X, Y, pdist_metric=dist_metric,\n                permute_func=confp['func'], permute_iters=confp['iters'],\n                permute_speedup=confp['speedup'],\n                alpha=config.stats['fdr_alpha'],\n                no_progress=self.no_progress,\n                force_permutations=self.force_permutations,\n                num_threads=self.num_threads,\n                seed=self.seed\n            )\n\n'''
 
     text = text[:start] + new_block + text[end:]
 
     backup_once(main_file)
     main_file.write_text(text, encoding="utf-8")
-    print(f"[INFO] Patched HAllA main module: {main_file}")
+    print(f"[INFO] Patched HAllA main module with Pearson/Spearman fast paths: {main_file}")
 
 
 def patch_hierarchy(hierarchy_file: Path) -> None:
@@ -331,7 +503,7 @@ def patch_hierarchy(hierarchy_file: Path) -> None:
         and HIERARCHY_FAST_MARKER in text
         and HIERARCHY_MEMORY_MARKER in text
     ):
-        print("[OK] HAllA hierarchy.py performance patch is already installed.")
+        print("[OK] HAllA hierarchy.py performance patch v2 is already installed.")
         return
 
     if any(
@@ -342,13 +514,15 @@ def patch_hierarchy(hierarchy_file: Path) -> None:
             HIERARCHY_MEMORY_MARKER,
         )
     ):
-        fail("A partial HAllA hierarchy.py performance patch was detected.")
+        fail("A partial HAllA hierarchy.py performance patch v2 was detected.")
 
     old_import = "from .utils.similarity import get_similarity_function, similarity2distance\n"
     new_import = old_import + (
         f"{HIERARCHY_IMPORT_MARKER}\n"
-        "from .utils.mtd_fast_spearman import (\n"
+        "from .utils.mtd_fast_correlation import (\n"
+        "    can_use_fast_pearson,\n"
         "    can_use_fast_spearman,\n"
+        "    fast_pearson_condensed_distance,\n"
         "    fast_spearman_condensed_distance,\n"
         ")\n"
     )
@@ -356,33 +530,36 @@ def patch_hierarchy(hierarchy_file: Path) -> None:
 
     old_block = '''        self.distance_matrix = similarity2distance(spd.pdist(matrix, metric=treemetric),\n                                                   sim2dist_set_abs,\n                                                   sim2dist_func)\n        self.distance_matrix = np.clip(self.distance_matrix, a_min=0, a_max=None)\n        self.distance_matrix_sqr = spd.squareform(self.distance_matrix)\n        self._generate_hierarchical_clusters(linkage_method)\n'''
 
-    new_block = f'''        {HIERARCHY_FAST_MARKER}\n        if pdist_metric == 'spearman' and can_use_fast_spearman(matrix):\n            self.distance_matrix = fast_spearman_condensed_distance(\n                matrix,\n                sim2dist_set_abs=sim2dist_set_abs,\n                sim2dist_func=sim2dist_func,\n            )\n        else:\n            self.distance_matrix = similarity2distance(\n                spd.pdist(matrix, metric=treemetric),\n                sim2dist_set_abs,\n                sim2dist_func\n            )\n\n        # Match the upstream non-negative clipping without allocating another\n        # O(n^2) condensed array.\n        np.maximum(self.distance_matrix, 0, out=self.distance_matrix)\n\n        {HIERARCHY_MEMORY_MARKER}\n        # distance_matrix_sqr is never consumed by HAllA 0.8.20.  Preserve the\n        # attribute for compatibility without allocating the square O(n^2) copy.\n        self.distance_matrix_sqr = None\n        self._generate_hierarchical_clusters(linkage_method)\n'''
+    new_block = f'''        {HIERARCHY_FAST_MARKER}\n        if pdist_metric == 'spearman' and can_use_fast_spearman(matrix):\n            self.distance_matrix = fast_spearman_condensed_distance(\n                matrix,\n                sim2dist_set_abs=sim2dist_set_abs,\n                sim2dist_func=sim2dist_func,\n            )\n        elif pdist_metric == 'pearson' and can_use_fast_pearson(matrix):\n            self.distance_matrix = fast_pearson_condensed_distance(\n                matrix,\n                sim2dist_set_abs=sim2dist_set_abs,\n                sim2dist_func=sim2dist_func,\n            )\n        else:\n            self.distance_matrix = similarity2distance(\n                spd.pdist(matrix, metric=treemetric),\n                sim2dist_set_abs,\n                sim2dist_func\n            )\n\n        # Match the upstream non-negative clipping without allocating another\n        # O(n^2) condensed array.\n        np.maximum(self.distance_matrix, 0, out=self.distance_matrix)\n\n        {HIERARCHY_MEMORY_MARKER}\n        # distance_matrix_sqr is never consumed by HAllA 0.8.20.  Preserve the\n        # attribute for compatibility without allocating the square O(n^2) copy.\n        self.distance_matrix_sqr = None\n        self._generate_hierarchical_clusters(linkage_method)\n'''
 
     text = replace_once(text, old_block, new_block, "hierarchical distance")
 
     backup_once(hierarchy_file)
     hierarchy_file.write_text(text, encoding="utf-8")
-    print(f"[INFO] Patched HAllA hierarchy module: {hierarchy_file}")
+    print(
+        f"[INFO] Patched HAllA hierarchy module with Pearson/Spearman fast paths: "
+        f"{hierarchy_file}"
+    )
 
 
 def write_helper(helper_file: Path) -> None:
     if helper_file.exists():
         current = helper_file.read_text(encoding="utf-8")
         if current == HELPER_SOURCE:
-            print("[OK] HAllA fast Spearman helper is already installed.")
+            print("[OK] HAllA fast correlation helper v2 is already installed.")
             return
         fail(
-            "An unexpected existing mtd_fast_spearman.py was found. "
+            f"An unexpected existing {HELPER_FILENAME} was found. "
             "Refusing to overwrite it."
         )
 
     helper_file.write_text(HELPER_SOURCE, encoding="utf-8")
-    print(f"[INFO] Installed HAllA fast Spearman helper: {helper_file}")
+    print(f"[INFO] Installed HAllA fast Pearson/Spearman helper: {helper_file}")
 
 
 def load_helper_for_test(helper_file: Path):
     spec = importlib.util.spec_from_file_location(
-        "mtd_halla_fast_spearman_validation",
+        "mtd_halla_fast_correlation_validation",
         str(helper_file),
     )
     if spec is None or spec.loader is None:
@@ -392,18 +569,24 @@ def load_helper_for_test(helper_file: Path):
     return module
 
 
+def _max_abs_difference(left, right) -> float:
+    import numpy as np
+
+    return float(np.max(np.abs(np.asarray(left) - np.asarray(right))))
+
+
 def run_numerical_microtests(helper_file: Path) -> None:
     try:
         import numpy as np
         import scipy.spatial.distance as spd
-        from scipy.stats import spearmanr
+        from scipy.stats import pearsonr, spearmanr
     except Exception as error:
         fail(f"Could not import NumPy/SciPy for patch validation: {error}")
 
     helper = load_helper_for_test(helper_file)
 
-    # Deterministic data deliberately contain ties, which are common in the
-    # microbiome input and exercise SciPy's average-rank behavior.
+    # Deterministic data contain ties to exercise Spearman average-rank
+    # behavior and nontrivial Pearson values.
     X = np.array(
         [
             [1, 1, 2, 3, 5, 8, 13, 13],
@@ -424,64 +607,90 @@ def run_numerical_microtests(helper_file: Path) -> None:
 
     if not helper.can_use_fast_spearman(X, Y):
         fail("Fast Spearman helper unexpectedly rejected valid microtest data.")
+    if not helper.can_use_fast_pearson(X, Y):
+        fail("Fast Pearson helper unexpectedly rejected valid microtest data.")
 
-    fast_rho = helper.fast_spearman_similarity(X, Y)
-    fast_p = helper.fast_spearman_pvalues(fast_rho, X.shape[1])
+    # Spearman X-by-Y similarity and p-values.
+    fast_s_rho = helper.fast_spearman_similarity(X, Y)
+    fast_s_p = helper.fast_spearman_pvalues(fast_s_rho, X.shape[1])
+    ref_s_rho = np.empty(fast_s_rho.shape, dtype=float)
+    ref_s_p = np.empty(fast_s_p.shape, dtype=float)
 
-    ref_rho = np.empty(fast_rho.shape, dtype=float)
-    ref_p = np.empty(fast_p.shape, dtype=float)
+    # Pearson X-by-Y similarity and p-values.
+    fast_p_rho = helper.fast_pearson_similarity(X, Y)
+    fast_p_p = helper.fast_pearson_pvalues(fast_p_rho, X.shape[1])
+    ref_p_rho = np.empty(fast_p_rho.shape, dtype=float)
+    ref_p_p = np.empty(fast_p_p.shape, dtype=float)
+
     for i in range(X.shape[0]):
         for j in range(Y.shape[0]):
-            ref_rho[i, j], ref_p[i, j] = spearmanr(X[i, :], Y[j, :])
+            ref_s_rho[i, j], ref_s_p[i, j] = spearmanr(X[i, :], Y[j, :])
+            ref_p_rho[i, j], ref_p_p[i, j] = pearsonr(X[i, :], Y[j, :])
 
-    rho_diff = float(np.max(np.abs(fast_rho - ref_rho)))
-    p_diff = float(np.max(np.abs(fast_p - ref_p)))
+    spearman_rho_diff = _max_abs_difference(fast_s_rho, ref_s_rho)
+    spearman_p_diff = _max_abs_difference(fast_s_p, ref_s_p)
+    pearson_rho_diff = _max_abs_difference(fast_p_rho, ref_p_rho)
+    pearson_p_diff = _max_abs_difference(fast_p_p, ref_p_p)
 
-    reference_condensed = 1.0 - np.abs(
+    reference_s_condensed = 1.0 - np.abs(
         spd.pdist(X, metric=lambda a, b: spearmanr(a, b)[0])
     )
-    fast_condensed = helper.fast_spearman_condensed_distance(X)
-    distance_diff = float(
-        np.max(np.abs(fast_condensed - reference_condensed))
+    fast_s_condensed = helper.fast_spearman_condensed_distance(X)
+    spearman_distance_diff = _max_abs_difference(
+        fast_s_condensed, reference_s_condensed
+    )
+
+    reference_p_condensed = 1.0 - np.abs(
+        spd.pdist(X, metric=lambda a, b: pearsonr(a, b)[0])
+    )
+    fast_p_condensed = helper.fast_pearson_condensed_distance(X)
+    pearson_distance_diff = _max_abs_difference(
+        fast_p_condensed, reference_p_condensed
     )
 
     tolerance = 1e-12
-    if rho_diff > tolerance:
-        fail(
-            "Fast Spearman similarity failed equivalence microtest: "
-            f"max abs diff={rho_diff:.3e}"
-        )
-    if p_diff > tolerance:
-        fail(
-            "Fast Spearman p-value failed equivalence microtest: "
-            f"max abs diff={p_diff:.3e}"
-        )
-    if distance_diff > tolerance:
-        fail(
-            "Fast Spearman hierarchy distance failed equivalence microtest: "
-            f"max abs diff={distance_diff:.3e}"
-        )
+    checks = (
+        ("Spearman similarity", spearman_rho_diff),
+        ("Spearman p-value", spearman_p_diff),
+        ("Spearman hierarchy distance", spearman_distance_diff),
+        ("Pearson similarity", pearson_rho_diff),
+        ("Pearson p-value", pearson_p_diff),
+        ("Pearson hierarchy distance", pearson_distance_diff),
+    )
+    for label, difference in checks:
+        if difference > tolerance:
+            fail(
+                f"Fast {label} failed equivalence microtest: "
+                f"max abs diff={difference:.3e}"
+            )
 
     invalid_nan = X.copy()
     invalid_nan[0, 0] = np.nan
     invalid_constant = X.copy()
     invalid_constant[0, :] = 1.0
 
-    if helper.can_use_fast_spearman(invalid_nan):
-        fail("Fast Spearman helper did not reject missing values.")
-    if helper.can_use_fast_spearman(invalid_constant):
-        fail("Fast Spearman helper did not reject a constant feature.")
+    for eligibility_name, eligibility in (
+        ("Spearman", helper.can_use_fast_spearman),
+        ("Pearson", helper.can_use_fast_pearson),
+    ):
+        if eligibility(invalid_nan):
+            fail(f"Fast {eligibility_name} helper did not reject missing values.")
+        if eligibility(invalid_constant):
+            fail(f"Fast {eligibility_name} helper did not reject a constant feature.")
 
-    print("[OK] Fast Spearman numerical equivalence microtests passed.")
-    print(f"[INFO] Max similarity difference: {rho_diff:.3e}")
-    print(f"[INFO] Max p-value difference:    {p_diff:.3e}")
-    print(f"[INFO] Max distance difference:   {distance_diff:.3e}")
+    print("[OK] Fast Pearson/Spearman numerical equivalence microtests passed.")
+    print(f"[INFO] Spearman max similarity difference: {spearman_rho_diff:.3e}")
+    print(f"[INFO] Spearman max p-value difference:    {spearman_p_diff:.3e}")
+    print(f"[INFO] Spearman max distance difference:   {spearman_distance_diff:.3e}")
+    print(f"[INFO] Pearson max similarity difference:  {pearson_rho_diff:.3e}")
+    print(f"[INFO] Pearson max p-value difference:     {pearson_p_diff:.3e}")
+    print(f"[INFO] Pearson max distance difference:    {pearson_distance_diff:.3e}")
 
 
 def validate_patch(package_dir: Path) -> None:
     main_file = package_dir / "main.py"
     hierarchy_file = package_dir / "hierarchy.py"
-    helper_file = package_dir / "utils" / "mtd_fast_spearman.py"
+    helper_file = package_dir / "utils" / HELPER_FILENAME
 
     for path in (main_file, hierarchy_file, helper_file):
         if not path.is_file():
@@ -504,53 +713,60 @@ def validate_patch(package_dir: Path) -> None:
             fail(f"Expected exactly one marker in hierarchy.py: {marker}")
 
     if HELPER_MARKER not in helper_text:
-        fail("HAllA fast Spearman helper marker is missing.")
+        fail("HAllA fast correlation helper marker is missing.")
 
-    expected_sha = hashlib.sha256(HELPER_SOURCE.encode("utf-8")).hexdigest()
-    observed_sha = hashlib.sha256(helper_text.encode("utf-8")).hexdigest()
+    expected_sha = sha256_text(HELPER_SOURCE)
+    observed_sha = sha256_text(helper_text)
     if observed_sha != expected_sha:
-        fail("HAllA fast Spearman helper contents do not match this patch version.")
+        fail("HAllA fast correlation helper contents do not match patch v2.")
+
+    # A completed v2 upgrade should no longer leave the v1 helper active.
+    old_helper = package_dir / "utils" / V1_HELPER_FILENAME
+    if old_helper.exists():
+        fail(f"Obsolete v1 HAllA performance helper is still present: {old_helper}")
 
     for path in (main_file, hierarchy_file, helper_file):
         compile_module(path)
 
     run_numerical_microtests(helper_file)
 
-    print("[OK] HAllA 0.8.20 performance patch validation passed.")
+    print("[OK] HAllA 0.8.20 Pearson/Spearman performance patch v2 validation passed.")
     print(f"[INFO] HAllA package: {package_dir}")
 
 
 def apply_patch(package_dir: Path) -> None:
     main_file = package_dir / "main.py"
     hierarchy_file = package_dir / "hierarchy.py"
-    helper_file = package_dir / "utils" / "mtd_fast_spearman.py"
+    helper_file = package_dir / "utils" / HELPER_FILENAME
 
     for path in (main_file, hierarchy_file):
         if not path.is_file():
             fail(f"Expected HAllA 0.8.20 module was not found: {path}")
 
+    upgrade_v1_if_needed(package_dir)
+
     # Write the helper first; main.py/hierarchy.py will not import it until a
-    # future HAllA process starts, and validation only occurs after both callers
-    # have been patched successfully.
+    # future HAllA process starts. Validation occurs after both callers are
+    # patched.
     write_helper(helper_file)
     patch_main(main_file)
     patch_hierarchy(hierarchy_file)
     validate_patch(package_dir)
 
-    print("[OK] HAllA 0.8.20 performance patch applied.")
+    print("[OK] HAllA 0.8.20 Pearson/Spearman performance patch v2 applied.")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Apply or validate the MTD Explorer HAllA 0.8.20 "
-            "Spearman performance patch."
+            "Pearson/Spearman performance patch v2."
         )
     )
     parser.add_argument(
         "--check",
         action="store_true",
-        help="Validate the patch without modifying HAllA.",
+        help="Validate patch v2 without modifying HAllA.",
     )
     args = parser.parse_args()
 

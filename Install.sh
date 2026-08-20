@@ -2612,12 +2612,12 @@ install_halla_dependencies() {
         python "$dir/update_fix/patch_halla_matplotlib.py" --check
 
     run_required_command \
-        "Applying HAllA Spearman performance patch" \
+        "Applying HAllA Pearson/Spearman performance patch" \
         conda run -n halla0820 \
         python "$dir/update_fix/patch_halla_performance.py"
 
     run_required_command \
-        "Validating HAllA Spearman performance patch" \
+        "Validating HAllA Pearson/Spearman performance patch" \
         conda run -n halla0820 \
         python "$dir/update_fix/patch_halla_performance.py" --check
 
@@ -3706,7 +3706,7 @@ validate_all_software_before_databases() {
         python "$dir/update_fix/patch_halla_matplotlib.py" --check
 
     run_required_command \
-        "Validating the HAllA Spearman performance patch" \
+        "Validating the HAllA Pearson/Spearman performance patch" \
         conda run -n halla0820 \
         python "$dir/update_fix/patch_halla_performance.py" --check
 
