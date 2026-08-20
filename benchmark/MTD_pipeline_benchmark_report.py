@@ -11,7 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
-from collections import defaultdict
+from collections import defaultdict, deque
 from typing import Iterable
 
 ANSI_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
@@ -79,7 +79,65 @@ def command_output(args: list[str], cwd: Path | None = None) -> str:
 
 
 def strip_ansi(text: str) -> str:
-    return ANSI_RE.sub("", text).replace("\r", "")
+    return ANSI_RE.sub("", text)
+
+
+def iter_compact_console_lines(path: Path, chunk_size: int = 8 * 1024 * 1024):
+    """Yield terminal-style logical lines without retaining CR progress history.
+
+    Many command-line tools redraw a progress line using carriage returns.
+    Treat each carriage return as a cursor reset and retain only the most
+    recent text before the next newline. CRLF is preserved as a normal newline.
+    The implementation is streaming and bounded by the current displayed line.
+    """
+    current = bytearray()
+    pending_cr = False
+
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(chunk_size)
+            if not chunk:
+                break
+
+            if pending_cr:
+                if chunk.startswith(b"\n"):
+                    yield bytes(current)
+                    current.clear()
+                    chunk = chunk[1:]
+                else:
+                    current.clear()
+                pending_cr = False
+
+            if not chunk:
+                continue
+
+            if chunk.endswith(b"\r"):
+                chunk = chunk[:-1]
+                pending_cr = True
+
+            parts = chunk.split(b"\n")
+            last_index = len(parts) - 1
+
+            for index, part in enumerate(parts):
+                complete = index < last_index
+
+                if complete and part.endswith(b"\r"):
+                    # CRLF: newline, not a progress-line redraw.
+                    part = part[:-1]
+
+                if b"\r" in part:
+                    # Only the text after the final carriage return remains
+                    # visible on a terminal before the newline.
+                    current = bytearray(part.rsplit(b"\r", 1)[-1])
+                else:
+                    current.extend(part)
+
+                if complete:
+                    yield bytes(current)
+                    current.clear()
+
+    if current:
+        yield bytes(current)
 
 
 def read_summary(path: Path) -> dict[str, str]:
@@ -267,33 +325,40 @@ def process_console(run_dir: Path) -> tuple[int, bool]:
     tail_file = run_dir / "final_console_tail.txt"
     hits_file = run_dir / "diagnostic_hits.tsv"
 
-    if console.is_file():
-        text = console.read_text(encoding="utf-8", errors="replace")
-    else:
-        text = ""
+    hits: list[tuple[int, str, str]] = []
+    tail: deque[str] = deque(maxlen=250)
+    completion = False
 
-    clean = strip_ansi(text)
-    clean_console.write_text(clean, encoding="utf-8")
+    with clean_console.open("w", encoding="utf-8") as clean_handle:
+        if console.is_file():
+            for line_number, raw_line in enumerate(
+                iter_compact_console_lines(console),
+                start=1,
+            ):
+                line = strip_ansi(
+                    raw_line.decode("utf-8", errors="replace")
+                )
+                clean_handle.write(line + "\n")
+                tail.append(line)
 
-    lines = clean.splitlines()
+                if any(marker in line for marker in COMPLETION_MARKERS):
+                    completion = True
+
+                for label, pattern in FATAL_PATTERNS:
+                    if pattern.search(line):
+                        hits.append((line_number, label, line))
+                        break
+
     tail_file.write_text(
-        "\n".join(lines[-250:]) + ("\n" if lines else ""),
+        "\n".join(tail) + ("\n" if tail else ""),
         encoding="utf-8",
     )
-
-    hits: list[tuple[int, str, str]] = []
-    for line_number, line in enumerate(lines, start=1):
-        for label, pattern in FATAL_PATTERNS:
-            if pattern.search(line):
-                hits.append((line_number, label, line))
-                break
 
     with hits_file.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle, delimiter="\t")
         writer.writerow(["line_number", "pattern", "text"])
         writer.writerows(hits)
 
-    completion = any(marker in clean for marker in COMPLETION_MARKERS)
     return len(hits), completion
 
 

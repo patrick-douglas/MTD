@@ -706,8 +706,17 @@ if [[ -n "$LATEST_BENCHMARK" && -d "$LATEST_BENCHMARK" ]]; then
         warn "Pipeline-specific report failed with exit status $REPORT_STATUS."
     fi
 
+    {
+        printf 'key\tvalue\n'
+        printf 'raw_console_log_in_bundle\t0\n'
+        printf 'raw_console_log_local_path\t%s\n' "$LATEST_BENCHMARK/console.log"
+        printf 'compact_console_log_in_bundle\t1\n'
+        printf 'compact_console_log_path\t%s\n' "$LATEST_BENCHMARK/console_clean.log"
+    } > "$LATEST_BENCHMARK/bundle_manifest.tsv"
+
     BUNDLE_PATH="$BENCHMARK_ROOT/mtd_pipeline_benchmark_bundle_${BENCHMARK_LABEL}_$(date -u '+%Y%m%dT%H%M%SZ').tar.gz"
     tar -czf "$BUNDLE_PATH" \
+        --exclude="$(basename "$LATEST_BENCHMARK")/console.log" \
         -C "$BENCHMARK_ROOT" \
         "$(basename "$LATEST_BENCHMARK")"
     sha256sum "$BUNDLE_PATH" > "${BUNDLE_PATH}.sha256"
@@ -742,6 +751,8 @@ if [[ -n "$LATEST_BENCHMARK" && -d "$LATEST_BENCHMARK" ]]; then
         printf 'HPC node summary: %s\n' "$LATEST_BENCHMARK/hpc_node_summary.tsv"
     [[ -s "$LATEST_BENCHMARK/failure_report.txt" ]] && \
         printf 'Failure report: %s\n' "$LATEST_BENCHMARK/failure_report.txt"
+    [[ -s "$LATEST_BENCHMARK/console.log" ]] && \
+        printf 'Raw console log (local only): %s\n' "$LATEST_BENCHMARK/console.log"
 fi
 [[ -n "$BUNDLE_PATH" ]] && printf 'Bundle: %s\n' "$BUNDLE_PATH"
 printf 'Pipeline output: %s\n' "$PIPELINE_OUTPUT"

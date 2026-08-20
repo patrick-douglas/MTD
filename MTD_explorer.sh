@@ -6027,6 +6027,12 @@ if [[ "$valid_contaminant_list" == "1" ]]; then
 
     read -r -a contaminant_taxids <<< "$conta_ls"
 
+    decontamination_log_dir="$outputdr/temp/krakentools_decontamination_logs"
+    mkdir -p -- "$decontamination_log_dir"
+
+    echo "[INFO] KrakenTools carriage-return progress is suppressed during contaminant removal."
+    echo "[INFO] stderr is retained per sample only when KrakenTools reports diagnostics."
+
     for i in $lsn; do
         set_microbiome_fastq_paths "$i"
 
@@ -6086,9 +6092,36 @@ if [[ "$valid_contaminant_list" == "1" ]]; then
             --include-children
         )
 
-        if ! python "${extract_args[@]}"; then
+        decontamination_stderr="$decontamination_log_dir/${i}.extract_kraken_reads.stderr.log"
+        : > "$decontamination_stderr"
+
+        # KrakenTools prints high-frequency progress updates with carriage
+        # returns. Sending that stream through benchmark tee/logging can turn a
+        # normal run into many GiB of console output. Its stdout is only
+        # progress/status text, so suppress it here while retaining stderr for
+        # actionable diagnostics.
+        if ! python "${extract_args[@]}" \
+            > /dev/null \
+            2> "$decontamination_stderr"
+        then
+            echo "${r}[ERROR] KrakenTools contaminant removal failed for sample: $i${w}" >&2
+            if [[ -s "$decontamination_stderr" ]]; then
+                echo "[ERROR] KrakenTools stderr (last 80 lines):" >&2
+                tail -n 80 "$decontamination_stderr" >&2 || true
+                echo "[ERROR] Full stderr log:" >&2
+                echo "  $decontamination_stderr" >&2
+            fi
             die "KrakenTools contaminant removal failed for sample: $i"
         fi
+
+        if [[ -s "$decontamination_stderr" ]]; then
+            echo "${y}[WARNING] KrakenTools wrote diagnostics to stderr for sample: $i${w}"
+            echo "  $decontamination_stderr"
+        else
+            rm -f -- "$decontamination_stderr"
+        fi
+
+        echo "${g}[OK] KrakenTools contaminant removal completed for sample: $i${w}"
 
         require_file \
             "$FINAL_NONHOST_R1" \
@@ -9186,6 +9219,94 @@ run_hallagram_safe() {
     return 0
 }
 
+get_halla_significant_cluster_count() {
+    local indir="$1"
+    local sig_clusters="$indir/sig_clusters.txt"
+    local cluster_count=""
+
+    if [[ ! -s "$sig_clusters" ]]; then
+        return 1
+    fi
+
+    cluster_count="$(
+        awk '
+            NR > 1 && NF > 0 {
+                count++
+            }
+            END {
+                print count + 0
+            }
+        ' "$sig_clusters"
+    )"
+
+    if ! [[ "$cluster_count" =~ ^[0-9]+$ ]]; then
+        return 1
+    fi
+
+    printf '%s\n' "$cluster_count"
+}
+
+# Generate each distinct effective TopN hallagram only once.
+# Example with 2 significant clusters:
+#   requested Top5  -> effective Top2 -> generate
+#   requested Top10 -> effective Top2 -> skip duplicate
+#   requested Top25 -> effective Top2 -> skip duplicate
+#   requested Top50 -> effective Top2 -> skip duplicate
+run_unique_top_hallagrams() {
+    local indir="$1"
+    local output_prefix="$2"
+    local xlabel="$3"
+    local ylabel="$4"
+    local cbar="$5"
+    local significant_clusters=""
+    local requested=""
+    local effective=""
+    local previous_effective=""
+
+    if ! significant_clusters="$(get_halla_significant_cluster_count "$indir")"; then
+        echo "[WARNING] Could not determine the number of significant HAllA clusters."
+        echo "[WARNING] Expected file: $indir/sig_clusters.txt"
+        echo "[WARNING] Skipping TopN hallagrams for: $indir"
+        return 0
+    fi
+
+    echo "============================================================"
+    echo "[HALLAGRAM] Significant clusters: $significant_clusters"
+    echo "[HALLAGRAM] Requested TopN series: 5, 10, 25, 50"
+    echo "============================================================"
+
+    if (( significant_clusters == 0 )); then
+        echo "[INFO] No significant HAllA clusters are available."
+        echo "[INFO] Skipping TopN hallagrams for: $indir"
+        return 0
+    fi
+
+    for requested in 5 10 25 50; do
+        effective="$requested"
+
+        if (( effective > significant_clusters )); then
+            effective="$significant_clusters"
+        fi
+
+        if [[ "$effective" == "$previous_effective" ]]; then
+            echo "[INFO] Requested Top${requested} hallagram -> effective Top${effective}; skipping duplicate."
+            continue
+        fi
+
+        echo "[INFO] Requested Top${requested} hallagram -> effective Top${effective}."
+
+        run_hallagram_safe \
+            "$indir" \
+            "${output_prefix}_Top${effective}.pdf" \
+            "$effective" \
+            "$xlabel" \
+            "$ylabel" \
+            "$cbar"
+
+        previous_effective="$effective"
+    done
+}
+
 run_python_plot_safe() {
     local label="$1"
     local cmd="$2"
@@ -9241,10 +9362,12 @@ else
     echo "[INFO] To enable it: RUN_EXTRA_PEARSON=1 bash $SCRIPT_NAME ..."
 fi
 
-run_hallagram_safe "$outputdr/halla/host_gene" "$outputdr/halla/host_gene/hallagram_Top5.pdf" 5 "Microbiomes" "Host_gene" "$pdm_name"
-run_hallagram_safe "$outputdr/halla/host_gene" "$outputdr/halla/host_gene/hallagram_Top10.pdf" 10 "Microbiomes" "Host_gene" "$pdm_name"
-run_hallagram_safe "$outputdr/halla/host_gene" "$outputdr/halla/host_gene/hallagram_Top25.pdf" 25 "Microbiomes" "Host_gene" "$pdm_name"
-run_hallagram_safe "$outputdr/halla/host_gene" "$outputdr/halla/host_gene/hallagram_Top50.pdf" 50 "Microbiomes" "Host_gene" "$pdm_name"
+run_unique_top_hallagrams \
+    "$outputdr/halla/host_gene" \
+    "$outputdr/halla/host_gene/hallagram" \
+    "Microbiomes" \
+    "Host_gene" \
+    "$pdm_name"
 
 if [[ "$RUN_FULL_HALLAGRAM" == "1" ]]; then
     run_hallagram_safe "$outputdr/halla/host_gene" "$outputdr/halla/host_gene/hallagram_all.pdf" -1 "Microbiomes" "Host_gene" "$pdm_name"
@@ -9257,10 +9380,12 @@ show_progress 90 "Analyzing microbiome-host pathway associations"
 
 run_halla_safe "$outputdr/halla/Microbiomes.txt" "$outputdr/halla/Host_score.txt" "$outputdr/halla/pathway" "$pdm" "Microbiomes" "Host_pathway"
 
-run_hallagram_safe "$outputdr/halla/pathway" "$outputdr/halla/pathway_hallagram_Top5.pdf" 5 "Microbiomes" "Host_pathway" "$pdm_name"
-run_hallagram_safe "$outputdr/halla/pathway" "$outputdr/halla/pathway_hallagram_Top10.pdf" 10 "Microbiomes" "Host_pathway" "$pdm_name"
-run_hallagram_safe "$outputdr/halla/pathway" "$outputdr/halla/pathway_hallagram_Top25.pdf" 25 "Microbiomes" "Host_pathway" "$pdm_name"
-run_hallagram_safe "$outputdr/halla/pathway" "$outputdr/halla/pathway_hallagram_Top50.pdf" 50 "Microbiomes" "Host_pathway" "$pdm_name"
+run_unique_top_hallagrams \
+    "$outputdr/halla/pathway" \
+    "$outputdr/halla/pathway_hallagram" \
+    "Microbiomes" \
+    "Host_pathway" \
+    "$pdm_name"
 
 if [[ "$RUN_FULL_HALLAGRAM" == "1" ]]; then
     run_hallagram_safe "$outputdr/halla/pathway" "$outputdr/halla/pathway_hallagram_all.pdf" -1 "Microbiomes" "Host_pathway" "$pdm_name"
