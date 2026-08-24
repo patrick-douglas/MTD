@@ -1,8 +1,8 @@
 # MTD Explorer pipeline benchmark
 
 This benchmark measures a complete `MTD_explorer.sh` analysis in either local
-or Slurm HPC mode. The large scientific output remains separate from the compact
-benchmark bundle.
+or [Slurm](https://slurm.schedmd.com/) HPC mode. The large scientific output
+remains separate from the compact benchmark bundle.
 
 `MTD_benchmark_install.sh` remains the low-level monitor for the controller
 machine. The pipeline-specific reporters add MTD stage timings, output
@@ -86,6 +86,50 @@ bash benchmark/run_mtd_pipeline_benchmark.sh \
   --run-number 1
 ```
 
+## Reference official-clean local run
+
+The current documented local reference is the 15-sample paired-end
+[PRJNA1306560](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA1306560)
+*Biomphalaria glabrata* analysis using host TaxID 6526, 20 local threads,
+[Magic-BLAST](https://ncbi.github.io/magicblast/), automatic analysis/read-layout
+selection, and top-5 microbiome-read extraction.
+
+Benchmark identity:
+
+```text
+benchmark_run_kind       official_clean
+resume_heavy             0
+official_clean_benchmark 1
+Git commit               04d61d412955ac7b9142ca8ebcc4d2edeb6bac5d
+```
+
+Observed results:
+
+| Metric | Value |
+|---|---:|
+| Status | PASS |
+| Benchmark interval | 21–24 August 2026 (UTC) |
+| Wall time | 197,894.59 s (54 h 58 min 15 s) |
+| Peak process-tree RSS | 117.27 GiB |
+| Peak system memory used | 117.52 GiB |
+| Mean system CPU busy | 65.67% |
+| Pipeline output | 10,821 files, ~1.39 TB |
+| Diagnostic hits | 0 |
+
+The reference controller used [Linux Mint](https://linuxmint.com/) 21.1, an
+Intel Core i9-10900K with 20 logical CPUs, 128 GB-class RAM, and an NVMe
+main/output filesystem. Input data
+were stored on a SATA HDD.
+
+The largest stages were [HUMAnN](https://github.com/biobakery/humann)
+functional profiling (30 h 39 min; 55.8%), host read/expression processing
+(11 h 53 min; 21.6%), and ssGSEA (4 h 55 min; 9.0%).
+These values describe one workload and are not minimum hardware or storage
+requirements.
+
+The public documentation contains the full benchmark configuration and
+interpretation in `docs/user-guide/benchmarking.md`.
+
 ## HPC benchmark
 
 ```bash
@@ -151,11 +195,15 @@ Every run contains the common files:
 
 ```text
 benchmark_comparison_row.tsv
+benchmark_run_mode.tsv
+bundle_manifest.tsv
 console_clean.log
 diagnostic_hits.tsv
 final_console_tail.txt
+hardware.txt
 input_files.tsv
 input_samplesheet.csv
+metadata.txt
 output_extensions.tsv
 output_inventory.tsv
 pipeline_command.sh
@@ -163,8 +211,15 @@ pipeline_steps.tsv
 pipeline_steps_raw.tsv
 pipeline_summary.tsv
 pipeline_summary.txt
+resource_samples.csv
+software.txt
+summary.tsv
 failure_report.txt        # only when incomplete or failed
 ```
+
+The raw `console.log` is retained in the local benchmark directory but excluded
+from the compressed bundle. The compact `console_clean.log` is included instead,
+and `bundle_manifest.tsv` records this policy.
 
 An HPC run additionally contains:
 

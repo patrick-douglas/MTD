@@ -228,6 +228,7 @@ The principal public identifiers are:
 
 ## Related documentation
 
+- [Pipeline benchmarking](benchmarking.md)
 - [Output files](output-files.md)
 - [Host expression outputs](host-expression-outputs.md)
 - [Microbiome comparison outputs](microbiome-comparison-outputs.md)

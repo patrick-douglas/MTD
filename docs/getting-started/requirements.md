@@ -77,6 +77,16 @@ construction of the default Kraken2 and Bracken databases.
     Resource requirements for individual analyses depend on the number of
     samples, FASTQ file sizes, selected databases, and enabled analysis modules.
 
+    A separate official clean pipeline benchmark using the 15-sample
+    [PRJNA1306560](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA1306560)
+    example dataset completed in
+    **54 h 58 min** with 20 threads and reached **117.27 GiB** peak process-tree
+    RSS. That analysis also produced approximately **1.39 TB** of pipeline output
+    with optional top-5 microbiome-read extraction enabled. These are observed
+    values for that specific workload, not minimum requirements. See
+    [Pipeline benchmarking](../user-guide/benchmarking.md#reference-local-benchmark-prjna1306560)
+    for the complete configuration and stage timings.
+
 ## Optional Slurm / HPC requirements
 
 The hardware table above describes a complete ordinary MTD Explorer installation. The optional [Slurm][slurm] backend has additional cluster requirements.

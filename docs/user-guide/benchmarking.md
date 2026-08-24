@@ -54,7 +54,7 @@ Frequently used additional options include:
 | `--hpc-conf FILE` | none | Slurm configuration used for an HPC benchmark |
 | `--extract` | disabled | Enable optional detected-microbiome read extraction |
 | `--top-n INT` | `10` when extraction is enabled | Number of ranked taxa extracted; `0` means all detected taxa |
-| `--hisat2` | Magic-BLAST enabled | Use HISAT2 instead of Magic-BLAST |
+| `--hisat2` | [Magic-BLAST][magic-blast] enabled | Use [HISAT2][hisat2] instead of Magic-BLAST |
 | `--yes` | disabled | Remove an existing benchmark pipeline output without prompting |
 
 Additional MTD Explorer arguments can be passed after `--`:
@@ -124,6 +124,128 @@ bash benchmark/run_mtd_pipeline_benchmark.sh \
 
 Because `auto` resolves to local mode when no HPC configuration is supplied,
 `--execution-mode local` may be omitted when an explicit mode is not needed.
+
+## Reference local benchmark: PRJNA1306560
+
+A complete local reference benchmark was performed with the public
+[PRJNA1306560][bioproject] *Biomphalaria glabrata* dataset described in the
+[example dataset guide](example-dataset.md). The run used
+all **15 paired-end RNA-seq samples** and completed successfully as an
+**official clean** benchmark.
+
+The benchmark measures the analysis workflow with the host reference,
+databases, and software environment already installed. It does **not** include
+installation, database construction, or custom-host reference construction.
+
+### Benchmark configuration
+
+| Setting | Reference run |
+|---|---|
+| Dataset | [PRJNA1306560][bioproject] |
+| Host | [*Biomphalaria glabrata*][ncbi-taxonomy] |
+| Host TaxID | `6526` |
+| Samples | 15 paired-end RNA-seq samples |
+| Controller / local threads | 20 |
+| Read-layout request | `auto` (resolved to paired-end) |
+| Analysis mode | `auto` |
+| Host alignment | [Magic-BLAST][magic-blast] |
+| Microbiome-read extraction | enabled, top 5 ranked taxa |
+| Benchmark run kind | `official_clean` |
+| Benchmark interval | 21–24 August 2026 (UTC) |
+| `resume_heavy` | `0` |
+| Git commit | `04d61d412955ac7b9142ca8ebcc4d2edeb6bac5d` |
+
+The corresponding benchmark-wrapper configuration was equivalent to:
+
+```bash
+bash benchmark/run_mtd_pipeline_benchmark.sh \
+  --machine local_linux \
+  --dataset PRJNA1306560_Bglabrata_extract_top5 \
+  --input /path/to/B.glabrata_fastq/samplesheet.csv \
+  --output /path/to/clean/MTD_output \
+  --hostid 6526 \
+  --threads 20 \
+  --read-layout auto \
+  --analysis-mode auto \
+  --extract \
+  --top-n 5 \
+  --run-number 1
+```
+
+### Benchmark hardware
+
+| Resource | Reference system |
+|---|---|
+| Operating system | [Linux Mint][linux-mint] 21.1 |
+| Kernel | Linux 6.8.0-134-generic |
+| CPU | Intel Core i9-10900K @ 3.70 GHz |
+| Logical CPUs | 20 |
+| Physical memory | 128 GB class; Linux `MemTotal` 131,747,584 kB (~125.6 GiB) |
+| Main/output filesystem | 4 TB-class XPG GAMMIX S70 BLADE NVMe SSD |
+| Input-data filesystem | SATA HDD |
+
+Storage location can materially affect runtime. The hardware table is therefore
+part of the benchmark context rather than a general hardware recommendation.
+
+### Reference results
+
+| Metric | Observed value |
+|---|---:|
+| Pipeline status | **PASS** |
+| Exit status | `0` |
+| Completion marker | yes |
+| Diagnostic hits | `0` |
+| End-to-end wall time | **197,894.59 s (54 h 58 min 15 s)** |
+| Peak process-tree RSS | **117.27 GiB** |
+| Peak system memory used | **117.52 GiB** |
+| Mean system CPU busy | **65.67%** |
+| Peak process-tree CPU | **2022.18% of one core** |
+| Controller physical disk read during run | **4,883.45 GiB** |
+| Controller physical disk write during run | **2,871.87 GiB** |
+| Pipeline output files | **10,821** |
+| Pipeline output directories | **281** |
+| Pipeline output size | **1.39 TB** (1,392,742,248,591 bytes) |
+| Recorded pipeline stages | **16** |
+
+The approximately 1.39 TB output footprint is specific to this run and its
+enabled analyses, including top-5 microbiome-read extraction. It should not be
+interpreted as a fixed storage requirement for every MTD Explorer analysis.
+
+### Stage timing
+
+The largest measured stages were:
+
+| Stage | Duration | Share of wall time |
+|---|---:|---:|
+| [HUMAnN][humann] functional profiling | 30 h 39 min | 55.8% |
+| Host-read processing and host expression | 11 h 53 min | 21.6% |
+| ssGSEA pathway enrichment | 4 h 55 min | 9.0% |
+| Preparing raw reads | 2 h 22 min | 4.3% |
+| Optional contaminant removal | 1 h 56 min | 3.5% |
+| [Kraken2][kraken2] / [Bracken][bracken] visualization preparation | 58 min | 1.8% |
+| Host-read classification with Kraken2 | 38 min | 1.2% |
+| Reclassification after contaminant removal | 28 min | 0.9% |
+| Non-host classification with Kraken2 | 26 min | 0.8% |
+| Host-gene association analysis with [HAllA][halla] | 18 min | 0.6% |
+| Host-pathway association analysis with HAllA | 3 min | 0.1% |
+
+Short bookkeeping and Bracken-combination stages account for the remaining
+fraction. For this workload, HUMAnN plus host-read/host-expression processing
+accounted for approximately **77.4%** of the complete wall time.
+
+!!! important "How to interpret this benchmark"
+
+    These values are a reproducible reference measurement, not a performance
+    guarantee or a minimum system specification. Runtime, memory, I/O, and
+    output size can change substantially with sequencing depth, sample count,
+    host-genome complexity, databases, analysis options, storage performance,
+    and available CPU resources.
+
+    The benchmark bundle records `official_clean_benchmark=1`, `resume_heavy=0`,
+    a clean Git state, and the exact MTD Explorer commit used for the run. The
+    bundle does not independently record operating-system page-cache flushing,
+    so the documented result is described as an **official clean pipeline run**
+    rather than asserting a cold filesystem-cache state.
 
 ## HPC benchmark
 
@@ -226,17 +348,26 @@ The scientific pipeline output remains in the directory supplied with
 This separation allows the benchmark bundle to remain small enough for
 archiving and comparison while preserving the full analysis results elsewhere.
 
+The raw `console.log` remains in the local benchmark directory but is excluded
+from the compressed bundle. The bundle contains the compacted
+`console_clean.log`, which collapses carriage-return progress updates instead of
+archiving every terminal redraw. `bundle_manifest.tsv` records this policy.
+
 ## Common benchmark outputs
 
 Every completed benchmark bundle can contain the following common files:
 
 ```text
 benchmark_comparison_row.tsv
+benchmark_run_mode.tsv
+bundle_manifest.tsv
 console_clean.log
 diagnostic_hits.tsv
 final_console_tail.txt
+hardware.txt
 input_files.tsv
 input_samplesheet.csv
+metadata.txt
 output_extensions.tsv
 output_inventory.tsv
 pipeline_command.sh
@@ -244,6 +375,9 @@ pipeline_steps.tsv
 pipeline_steps_raw.tsv
 pipeline_summary.tsv
 pipeline_summary.txt
+resource_samples.csv
+software.txt
+summary.tsv
 failure_report.txt          # only when incomplete or failed
 ```
 
@@ -257,6 +391,11 @@ Key files include:
 | `pipeline_steps.tsv` | Processed pipeline-stage timing table |
 | `pipeline_summary.tsv` | Machine-readable benchmark summary |
 | `pipeline_summary.txt` | Human-readable benchmark summary |
+| `benchmark_run_mode.tsv` | Records `official_clean` versus development/resume execution state |
+| `bundle_manifest.tsv` | Records which console logs are retained locally or included in the archive |
+| `resource_samples.csv` | Time-series controller CPU, memory, I/O, network, and temperature samples |
+| `hardware.txt` | Controller operating-system, CPU, memory, storage, and network inventory |
+| `software.txt` | Benchmark wrapper and available controller software metadata |
 | `output_inventory.tsv` | Inventory of produced scientific outputs |
 | `benchmark_comparison_row.tsv` | One-row record intended for merging repetitions and comparing scenarios |
 | `failure_report.txt` | Focused failure diagnostics when a run is incomplete or fails |
@@ -403,3 +542,12 @@ benchmark-specific environment variable used by the wrapper is set.
 - [Troubleshooting](../troubleshooting/index.md)
 
 [slurm]: https://slurm.schedmd.com/
+[bioproject]: https://www.ncbi.nlm.nih.gov/bioproject/PRJNA1306560
+[ncbi-taxonomy]: https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=6526
+[linux-mint]: https://linuxmint.com/
+[magic-blast]: https://ncbi.github.io/magicblast/
+[kraken2]: https://ccb.jhu.edu/software/kraken2/index.shtml
+[humann]: https://github.com/biobakery/humann
+[halla]: https://github.com/biobakery/halla
+[hisat2]: https://daehwankimlab.github.io/hisat2/
+[bracken]: https://ccb.jhu.edu/software/bracken/

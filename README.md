@@ -63,6 +63,11 @@ Start with:
 - [Pipeline benchmarking](https://patrick-douglas.github.io/MTD-Explorer/user-guide/benchmarking/)
 - [Academic references](https://patrick-douglas.github.io/MTD-Explorer/reference/)
 
+A complete 15-sample [PRJNA1306560](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA1306560) reference analysis finished successfully in
+**54 h 58 min** using 20 threads, with a peak process-tree RSS of **117.27 GiB**.
+See [Pipeline benchmarking](https://patrick-douglas.github.io/MTD-Explorer/user-guide/benchmarking/#reference-local-benchmark-prjna1306560)
+for the benchmark configuration, hardware, stage timings, and interpretation.
+
 ## Main analysis layers
 
 MTD Explorer can generate outputs for:
