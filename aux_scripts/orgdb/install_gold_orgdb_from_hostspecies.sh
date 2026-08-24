@@ -31,6 +31,7 @@ FORCE=0
 SKIP_IF_COMPATIBLE=0
 SKIP_ORGDB_BUILD=0
 CONDA_R_ENV="${MTD_ORGDB_ENV:-MTD_orgdb}"
+EXISTING_ORGDB_ENV="${MTD_EXISTING_ORGDB_ENV:-R412}"
 CONDA_MTD_ENV="MTD"
 SYMBOL_MODE="gene_id"
 GENE_PATTERN='(?:gene[:=]|gene_id[:=]|gene=)([A-Za-z0-9_.:-]+)'
@@ -101,6 +102,8 @@ Defaults:
   --eggnog-db    $EGGNOG_DB_DEFAULT
   --lib          $LIB_DEFAULT
   --build-dir    $BUILD_DIR_DEFAULT/TAXID
+  --conda-r-env  $CONDA_R_ENV (custom OrgDb construction)
+  --existing-orgdb-env $EXISTING_ORGDB_ENV (existing/official OrgDb validation)
 
 Safety checks:
   --genome checks FASTA sequence names against GTF seqnames.
@@ -141,6 +144,8 @@ while [[ $# -gt 0 ]]; do
     --threads=*) THREADS="${1#*=}"; shift ;;
     --conda-r-env) CONDA_R_ENV="$2"; shift 2 ;;
     --conda-r-env=*) CONDA_R_ENV="${1#*=}"; shift ;;
+    --existing-orgdb-env) EXISTING_ORGDB_ENV="$2"; shift 2 ;;
+    --existing-orgdb-env=*) EXISTING_ORGDB_ENV="${1#*=}"; shift ;;
     --conda-mtd-env) CONDA_MTD_ENV="$2"; shift 2 ;;
     --conda-mtd-env=*) CONDA_MTD_ENV="${1#*=}"; shift ;;
     --symbol-mode) SYMBOL_MODE="$2"; shift 2 ;;
@@ -159,7 +164,7 @@ while [[ $# -gt 0 ]]; do
     --min-eggnog-genes=*) MIN_EGGNOG_GENES="${1#*=}"; shift ;;
     --min-eggnog-gtf-pct) MIN_EGGNOG_GTF_PCT="$2"; shift 2 ;;
     --min-eggnog-gtf-pct=*) MIN_EGGNOG_GTF_PCT="${1#*=}"; shift ;;
-    --skip-orgdb-build) SKIP_ORGDB_BUILD=1 shift ;;
+    --skip-orgdb-build) SKIP_ORGDB_BUILD=1; shift ;;
     --force) FORCE=1; shift ;;
     -h|--help) show_help; exit 0 ;;
     *) echo "[ERROR] Unknown argument: $1"; show_help; exit 1 ;;
@@ -360,15 +365,26 @@ printf "genome_gtf_seqname_overlap_pct\t%s\n" "$GENOME_OVERLAP_PCT" >> "$INPUT_R
 # ------------------------------------------------------------
 # Existing OrgDb compatibility limiter
 # ------------------------------------------------------------
+# Existing/official OrgDb packages are validated in the R environment that
+# actually consumes them downstream (R412 by default). Custom packages remain
+# visible because $LIB is prepended to .libPaths(). New custom OrgDb packages
+# are still constructed separately in $CONDA_R_ENV (MTD_orgdb by default).
+#
+# Compatibility metric:
+#   - packages loaded from $LIB keep the historical GTF-coverage criterion;
+#   - packages supplied by the downstream R environment use the overlap
+#     coefficient (intersection / smaller ID universe), which avoids penalizing
+#     official OrgDb packages when the GTF also contains many ncRNA/pseudogene
+#     loci that are intentionally absent from the annotation package.
 if [[ "$SKIP_IF_COMPATIBLE" == "1" && "$FORCE" != "1" ]]; then
   if [[ -n "$ORGDB_FROM_CSV" && "$ORGDB_FROM_CSV" != "NA" && "$ORGDB_FROM_CSV" != "None" ]]; then
     echo "[INFO] Existing OrgDb listed in HostSpecies.csv: $ORGDB_FROM_CSV"
+    echo "[INFO] Existing OrgDb validation environment: $EXISTING_ORGDB_ENV"
     ORGDB_COMPAT_REPORT="$WORK_DIR/existing_orgdb_compatibility.tsv"
     ORGDB_COMPAT_R="$WORK_DIR/check_existing_orgdb_compatibility.R"
 
     # IMPORTANT: do not use `conda run Rscript - <<RS` here.
-    # Some conda versions do not reliably forward stdin to Rscript, which can leave
-    # ORGDB_COMPAT_REPORT missing and crash the downstream awk parser.
+    # Some conda versions do not reliably forward stdin to Rscript.
     cat > "$ORGDB_COMPAT_R" <<'RS'
 suppressPackageStartupMessages(library(AnnotationDbi))
 
@@ -376,10 +392,12 @@ orgdb_pkg <- Sys.getenv('ORGDB_PKG')
 gtf_genes_file <- Sys.getenv('GTF_GENES')
 out_report <- Sys.getenv('OUT_REPORT')
 lib <- Sys.getenv('LIB')
+expected_taxid <- Sys.getenv('EXPECTED_TAXID')
 
 if (nzchar(lib)) .libPaths(unique(c(lib, .libPaths())))
 
-gtf_genes <- readLines(gtf_genes_file, warn = FALSE)
+gtf_genes <- unique(readLines(gtf_genes_file, warn = FALSE))
+gtf_genes <- gtf_genes[nzchar(gtf_genes)]
 
 ok <- requireNamespace(orgdb_pkg, quietly = TRUE)
 
@@ -387,67 +405,160 @@ if (!ok) {
   res <- data.frame(
     orgdb = orgdb_pkg,
     status = 'not_installed',
+    source = NA_character_,
     keytype = NA_character_,
     gtf_genes = length(gtf_genes),
     orgdb_keys = NA_integer_,
     overlap = 0L,
-    overlap_pct = 0,
+    gtf_overlap_pct = 0,
+    orgdb_overlap_pct = 0,
+    overlap_coefficient_pct = 0,
+    taxid_match = NA_character_,
+    taxid_metadata = NA_character_,
+    package_path = NA_character_,
     stringsAsFactors = FALSE
   )
 } else {
   suppressPackageStartupMessages(library(orgdb_pkg, character.only = TRUE))
   db <- get(orgdb_pkg)
+
+  package_path <- normalizePath(find.package(orgdb_pkg), winslash = '/', mustWork = TRUE)
+  custom_lib <- if (nzchar(lib) && dir.exists(lib)) {
+    normalizePath(lib, winslash = '/', mustWork = TRUE)
+  } else {
+    ''
+  }
+  package_source <- if (
+    nzchar(custom_lib) &&
+    (identical(dirname(package_path), custom_lib) || startsWith(package_path, paste0(custom_lib, '/')))
+  ) 'custom_lib' else 'environment'
+
+  md <- tryCatch(AnnotationDbi::metadata(db), error = function(e) data.frame())
+  tax_values <- character()
+  if (nrow(md) > 0 && all(c('name', 'value') %in% names(md))) {
+    wanted <- toupper(trimws(as.character(md$name))) %in% c(
+      'TAXID', 'TAX_ID', 'TAXONOMY ID', 'TAXONOMY_ID'
+    )
+    tax_values <- unique(trimws(as.character(md$value[wanted])))
+    tax_values <- tax_values[nzchar(tax_values)]
+  }
+  taxid_metadata <- if (length(tax_values)) paste(tax_values, collapse = ',') else NA_character_
+  taxid_match <- if (!length(tax_values)) {
+    NA_character_
+  } else if (expected_taxid %in% tax_values) {
+    'TRUE'
+  } else {
+    'FALSE'
+  }
+
   res <- do.call(rbind, lapply(keytypes(db), function(k) {
-    ks <- tryCatch(keys(db, keytype = k), error = function(e) character())
+    ks <- tryCatch(unique(keys(db, keytype = k)), error = function(e) character())
+    ks <- ks[!is.na(ks) & nzchar(ks)]
     ov <- length(intersect(gtf_genes, ks))
+    gtf_pct <- if (length(gtf_genes)) 100 * ov / length(gtf_genes) else 0
+    orgdb_pct <- if (length(ks)) 100 * ov / length(ks) else 0
+    smaller <- min(length(gtf_genes), length(ks))
+    coefficient <- if (smaller > 0) 100 * ov / smaller else 0
     data.frame(
       orgdb = orgdb_pkg,
       status = 'installed',
+      source = package_source,
       keytype = k,
       gtf_genes = length(gtf_genes),
       orgdb_keys = length(ks),
       overlap = ov,
-      overlap_pct = round(100 * ov / length(gtf_genes), 4),
+      gtf_overlap_pct = round(gtf_pct, 4),
+      orgdb_overlap_pct = round(orgdb_pct, 4),
+      overlap_coefficient_pct = round(coefficient, 4),
+      taxid_match = taxid_match,
+      taxid_metadata = taxid_metadata,
+      package_path = package_path,
       stringsAsFactors = FALSE
     )
   }))
   res <- res[order(res$overlap, decreasing = TRUE), ]
 }
 
-write.table(res, out_report, sep = '\t', quote = FALSE, row.names = FALSE)
+write.table(res, out_report, sep = '\t', quote = FALSE, row.names = FALSE, na = 'NA')
 RS
 
-    if ! ORGDB_PKG="$ORGDB_FROM_CSV" GTF_GENES="$GTF_GENES" OUT_REPORT="$ORGDB_COMPAT_REPORT" LIB="$LIB" \
-      conda run -n "$CONDA_R_ENV" Rscript "$ORGDB_COMPAT_R"; then
-      echo "[WARNING] Existing OrgDb compatibility check failed. Continuing with gold OrgDb creation."
+    if ! ORGDB_PKG="$ORGDB_FROM_CSV" \
+      GTF_GENES="$GTF_GENES" \
+      OUT_REPORT="$ORGDB_COMPAT_REPORT" \
+      LIB="$LIB" \
+      EXPECTED_TAXID="$TAXID" \
+      conda run -n "$EXISTING_ORGDB_ENV" Rscript "$ORGDB_COMPAT_R"; then
+      echo "[WARNING] Existing OrgDb compatibility check failed in $EXISTING_ORGDB_ENV."
+      echo "[WARNING] Continuing with gold OrgDb creation in $CONDA_R_ENV."
       rm -f "$ORGDB_COMPAT_REPORT"
     fi
 
     if [[ -s "$ORGDB_COMPAT_REPORT" ]]; then
-      BEST_PCT="$(awk 'NR==2 {print $7}' "$ORGDB_COMPAT_REPORT")"
-      BEST_KEYTYPE="$(awk 'NR==2 {print $3}' "$ORGDB_COMPAT_REPORT")"
-      BEST_OVERLAP="$(awk 'NR==2 {print $6}' "$ORGDB_COMPAT_REPORT")"
-      STATUS="$(awk 'NR==2 {print $2}' "$ORGDB_COMPAT_REPORT")"
-      BEST_PCT="${BEST_PCT:-0}"
+      STATUS="$(awk -F'\t' 'NR==2 {print $2}' "$ORGDB_COMPAT_REPORT")"
+      BEST_SOURCE="$(awk -F'\t' 'NR==2 {print $3}' "$ORGDB_COMPAT_REPORT")"
+      BEST_KEYTYPE="$(awk -F'\t' 'NR==2 {print $4}' "$ORGDB_COMPAT_REPORT")"
+      BEST_OVERLAP="$(awk -F'\t' 'NR==2 {print $7}' "$ORGDB_COMPAT_REPORT")"
+      BEST_GTF_PCT="$(awk -F'\t' 'NR==2 {print $8}' "$ORGDB_COMPAT_REPORT")"
+      BEST_ORGDB_PCT="$(awk -F'\t' 'NR==2 {print $9}' "$ORGDB_COMPAT_REPORT")"
+      BEST_COEFF_PCT="$(awk -F'\t' 'NR==2 {print $10}' "$ORGDB_COMPAT_REPORT")"
+      TAXID_MATCH="$(awk -F'\t' 'NR==2 {print $11}' "$ORGDB_COMPAT_REPORT")"
+      TAXID_METADATA="$(awk -F'\t' 'NR==2 {print $12}' "$ORGDB_COMPAT_REPORT")"
+      PACKAGE_PATH="$(awk -F'\t' 'NR==2 {print $13}' "$ORGDB_COMPAT_REPORT")"
+
+      STATUS="${STATUS:-unknown}"
+      BEST_SOURCE="${BEST_SOURCE:-NA}"
       BEST_KEYTYPE="${BEST_KEYTYPE:-NA}"
       BEST_OVERLAP="${BEST_OVERLAP:-0}"
-      STATUS="${STATUS:-unknown}"
-      echo "[INFO] Existing OrgDb status: $STATUS"
-      echo "[INFO] Best keytype: $BEST_KEYTYPE"
-      echo "[INFO] Best overlap: $BEST_OVERLAP genes (${BEST_PCT}%)"
-      echo "[INFO] Existing OrgDb compatibility report: $ORGDB_COMPAT_REPORT"
-      if [[ "$STATUS" == "installed" ]] && \
-       awk -v pct="$BEST_PCT" -v min="$MIN_EXISTING_ORGDB_PCT" \
-         'BEGIN { exit !(pct >= min) }'
-    then
-    echo "[OK] Existing OrgDb is compatible enough."
-    echo "[INFO] The R OrgDb package will not be rebuilt."
-    echo "[INFO] Continuing to ensure that representative proteins,"
-    echo "[INFO] eggNOG annotations and ssGSEA resources are available."
+      BEST_GTF_PCT="${BEST_GTF_PCT:-0}"
+      BEST_ORGDB_PCT="${BEST_ORGDB_PCT:-0}"
+      BEST_COEFF_PCT="${BEST_COEFF_PCT:-0}"
+      TAXID_MATCH="${TAXID_MATCH:-NA}"
+      TAXID_METADATA="${TAXID_METADATA:-NA}"
+      PACKAGE_PATH="${PACKAGE_PATH:-NA}"
 
-    SKIP_ORGDB_BUILD=1
-fi
-      echo "[WARNING] Existing OrgDb is missing or not compatible enough. Building gold OrgDb."
+      echo "[INFO] Existing OrgDb status: $STATUS"
+      echo "[INFO] Existing OrgDb source: $BEST_SOURCE"
+      echo "[INFO] Existing OrgDb path: $PACKAGE_PATH"
+      echo "[INFO] Existing OrgDb TaxID metadata: $TAXID_METADATA"
+      echo "[INFO] Existing OrgDb TaxID match: $TAXID_MATCH"
+      echo "[INFO] Best keytype: $BEST_KEYTYPE"
+      echo "[INFO] Best overlap: $BEST_OVERLAP genes"
+      echo "[INFO] GTF coverage: ${BEST_GTF_PCT}%"
+      echo "[INFO] OrgDb-key coverage: ${BEST_ORGDB_PCT}%"
+      echo "[INFO] Overlap coefficient: ${BEST_COEFF_PCT}%"
+      echo "[INFO] Existing OrgDb compatibility report: $ORGDB_COMPAT_REPORT"
+
+      # A package with explicit taxonomy metadata for another species is never
+      # accepted, regardless of apparent identifier overlap.
+      TAXONOMY_OK=1
+      if [[ "$TAXID_MATCH" == "FALSE" ]]; then
+        TAXONOMY_OK=0
+        echo "[WARNING] Existing OrgDb TaxID does not match requested TaxID $TAXID."
+      fi
+
+      # Reference-matched custom packages must continue to cover at least the
+      # configured fraction of the current GTF. Official/environment packages
+      # are judged by the overlap coefficient so noncoding loci absent from the
+      # OrgDb do not make a valid model-organism package look incompatible.
+      COMPAT_PCT="$BEST_GTF_PCT"
+      COMPAT_LABEL="GTF coverage"
+      if [[ "$BEST_SOURCE" == "environment" ]]; then
+        COMPAT_PCT="$BEST_COEFF_PCT"
+        COMPAT_LABEL="overlap coefficient"
+      fi
+
+      if [[ "$STATUS" == "installed" && "$TAXONOMY_OK" == "1" ]] && \
+         awk -v pct="$COMPAT_PCT" -v min="$MIN_EXISTING_ORGDB_PCT" \
+           'BEGIN { exit !(pct >= min) }'; then
+        echo "[OK] Existing OrgDb is compatible enough."
+        echo "[INFO] Acceptance metric: $COMPAT_LABEL = ${COMPAT_PCT}% (minimum ${MIN_EXISTING_ORGDB_PCT}%)."
+        echo "[INFO] The R OrgDb package will not be rebuilt."
+        echo "[INFO] Continuing to ensure that representative proteins,"
+        echo "[INFO] eggNOG annotations and ssGSEA resources are available."
+        SKIP_ORGDB_BUILD=1
+      else
+        echo "[WARNING] Existing OrgDb is missing or not compatible enough. Building gold OrgDb."
+      fi
     else
       echo "[WARNING] Existing OrgDb compatibility report was not created. Building gold OrgDb anyway."
     fi

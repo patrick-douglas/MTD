@@ -35,6 +35,7 @@ LOG_ROOT=""
 REPORT=""
 EGGNOG_DB=""
 CONDA_R_ENV="${MTD_ORGDB_ENV:-MTD_orgdb}"
+EXISTING_ORGDB_ENV="${MTD_EXISTING_ORGDB_ENV:-R412}"
 THREADS="$(nproc)"
 ORGDB_VERSION="0.3.0"
 
@@ -76,7 +77,10 @@ Build behavior:
   --no-download-missing    Fail instead of downloading a missing GTF/pep from
                            the curated GTF_URL/Pep_URL columns
   --orgdb-version VERSION  Generated package version [default: $ORGDB_VERSION]
-  --conda-r-env NAME       R/AnnotationForge environment [default: $CONDA_R_ENV]
+  --conda-r-env NAME       R/AnnotationForge build environment [default: $CONDA_R_ENV]
+  --existing-orgdb-env NAME
+                           Existing/official OrgDb validation environment
+                           [default: $EXISTING_ORGDB_ENV]
   --eggnog-db DIR          eggNOG-mapper database directory
                            [default: read from offlineCachePath]
   --lib DIR                Installed OrgDb library [default: $LIB]
@@ -178,6 +182,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --conda-r-env)
             CONDA_R_ENV="$2"
+            shift 2
+            ;;
+        --existing-orgdb-env)
+            EXISTING_ORGDB_ENV="$2"
             shift 2
             ;;
         --eggnog-db)
@@ -341,8 +349,14 @@ command_exists conda || die "conda was not found"
 if ! conda run -n "$CONDA_R_ENV" Rscript -e \
     'stopifnot(requireNamespace("AnnotationDbi", quietly=TRUE),
                requireNamespace("AnnotationForge", quietly=TRUE));
-     cat("[OK] OrgDb R environment\n")' >/dev/null; then
-    die "Conda environment '$CONDA_R_ENV' is unavailable or incomplete"
+     cat("[OK] OrgDb build environment\n")' >/dev/null; then
+    die "Conda build environment '$CONDA_R_ENV' is unavailable or incomplete"
+fi
+
+if ! conda run -n "$EXISTING_ORGDB_ENV" Rscript -e \
+    'stopifnot(requireNamespace("AnnotationDbi", quietly=TRUE));
+     cat("[OK] Existing OrgDb validation environment\n")' >/dev/null; then
+    die "Conda validation environment '$EXISTING_ORGDB_ENV' is unavailable or incomplete"
 fi
 
 # Create a single backup. Progress is then written atomically after each species,
@@ -738,6 +752,16 @@ detect_package_name() {
     local old_orgdb="$3"
     local detected=""
 
+    # If the helper explicitly preserved a compatible existing package, that
+    # package wins immediately. Do not inspect stale source directories from a
+    # previous custom build, because doing so can overwrite an official OrgDb
+    # name in HostSpecies.csv with an obsolete generated package name.
+    if [[ -n "$old_orgdb" ]] && \
+       grep -Fq "[OK] Existing OrgDb is compatible enough." "$log_file"; then
+        printf '%s\n' "$old_orgdb"
+        return 0
+    fi
+
     # Preferred source: exact message emitted by the R builder.
     detected="$(
         sed -n \
@@ -775,7 +799,7 @@ validate_installed_package() {
     ORGDB_PKG="$package" \
     ORGDB_LIB="$LIB" \
     EXPECTED_TAXID="$expected_taxid" \
-    conda run -n "$CONDA_R_ENV" Rscript - <<'RS' >"$validation_file" 2>&1
+    conda run -n "$EXISTING_ORGDB_ENV" Rscript - <<'RS' >"$validation_file" 2>&1
 pkg <- Sys.getenv("ORGDB_PKG")
 lib <- Sys.getenv("ORGDB_LIB")
 expected_taxid <- Sys.getenv("EXPECTED_TAXID")
@@ -915,7 +939,8 @@ echo "eggNOG DB:        $EGGNOG_DB"
 echo "OrgDb library:    $LIB"
 echo "Build root:       $BUILD_ROOT"
 echo "Threads/species:  $THREADS"
-echo "R environment:    $CONDA_R_ENV"
+echo "Build R env:       $CONDA_R_ENV"
+echo "Validation R env:  $EXISTING_ORGDB_ENV"
 echo "Update CSV:       $([[ "$UPDATE_CSV" == "1" ]] && echo yes || echo no)"
 echo "Force:            $([[ "$FORCE" == "1" ]] && echo yes || echo no)"
 echo "Dry run:          $([[ "$DRY_RUN" == "1" ]] && echo yes || echo no)"
@@ -1057,6 +1082,7 @@ while IFS=$'\x1f' read -r \
         --threads "$THREADS"
         --version "$ORGDB_VERSION"
         --conda-r-env "$CONDA_R_ENV"
+        --existing-orgdb-env "$EXISTING_ORGDB_ENV"
     )
 
     if [[ "$SKIP_IF_COMPATIBLE" == "1" ]]; then
