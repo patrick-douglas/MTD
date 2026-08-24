@@ -90,6 +90,7 @@ nav:
       - Command-line reference: user-guide/command-line.md
       - HPC / Slurm execution: user-guide/hpc-slurm.md
       - Pipeline benchmarking: user-guide/benchmarking.md
+      - Example dataset: user-guide/example-dataset.md
       - Output files: user-guide/output-files.md
       - Taxonomic exploratory outputs: user-guide/taxonomic-exploratory-outputs.md
       - Taxonomic visualizations: user-guide/taxonomic-visualizations.md

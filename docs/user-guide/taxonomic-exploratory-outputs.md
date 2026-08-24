@@ -18,7 +18,7 @@ tests of differential abundance.
     [PRJNA1306560](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA1306560).
     The example run contains `infected`, `infection_failed`, and `uninfected`
     groups. Pairwise comparison examples use `infected_vs_uninfected` where
-    applicable.
+    applicable. See [Example dataset: *Biomphalaria glabrata* (PRJNA1306560)](example-dataset.md) for the dataset origin, experimental groups, SRA accessions, and interpretation notes.
 
 ## Where these outputs are stored
 
