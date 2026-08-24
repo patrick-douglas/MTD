@@ -10,6 +10,16 @@ The host expression block includes count matrices, normalized matrices,
 principal component analysis plots, heatmaps, differential-expression tables,
 volcano plots, and downstream functional interpretation outputs.
 
+
+!!! info "Documentation example dataset"
+
+    Figures shown on this page were generated from public *Biomphalaria glabrata*
+    RNA-seq data from NCBI BioProject
+    [PRJNA1306560](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA1306560).
+    The example run contains `infected`, `infection_failed`, and `uninfected`
+    groups. Pairwise comparison examples use `infected_vs_uninfected` where
+    applicable.
+
 ## Where these outputs are stored
 
 The main host expression comparison outputs are stored in:
@@ -21,16 +31,16 @@ Host_DEG/
 Pairwise comparison-specific outputs are stored inside subdirectories such as:
 
 ```text
-Host_DEG/Liver_vs_Telencephalon/
+Host_DEG/infected_vs_uninfected/
 ```
 
 The exact comparison folder name depends on the group names in the samplesheet.
 
-For example, if the comparison is liver versus telencephalon, the output folder
+For example, if the comparison is infected versus uninfected, the output folder
 may be:
 
 ```text
-Host_DEG/Liver_vs_Telencephalon/
+Host_DEG/infected_vs_uninfected/
 ```
 
 ## Main host expression files
@@ -55,11 +65,11 @@ For each comparison, [MTD Explorer][mtd-explorer] may also generate files such
 as:
 
 ```text
-Host_DEG/Liver_vs_Telencephalon/host_counts_Liver_vs_Telencephalon.csv
-Host_DEG/Liver_vs_Telencephalon/host_counts_Liver_vs_Telencephalon_gene_symbols_table.csv
-Host_DEG/Liver_vs_Telencephalon/Barplot_Liver_vs_Telencephalon.pdf
-Host_DEG/Liver_vs_Telencephalon/host_counts_Liver_vs_Telencephalon_volcano.pdf
-Host_DEG/Liver_vs_Telencephalon/host_counts_Liver_vs_Telencephalon.EV.volcano.log
+Host_DEG/infected_vs_uninfected/host_counts_infected_vs_uninfected.csv
+Host_DEG/infected_vs_uninfected/host_counts_infected_vs_uninfected_gene_symbols_table.csv
+Host_DEG/infected_vs_uninfected/Barplot_infected_vs_uninfected.pdf
+Host_DEG/infected_vs_uninfected/host_counts_infected_vs_uninfected_volcano.pdf
+Host_DEG/infected_vs_uninfected/host_counts_infected_vs_uninfected.EV.volcano.log
 ```
 
 ## Host count matrices
@@ -117,7 +127,7 @@ For each pairwise comparison, [MTD Explorer][mtd-explorer] also writes a
 comparison-specific table, for example:
 
 ```text
-Host_DEG/Liver_vs_Telencephalon/host_counts_Liver_vs_Telencephalon.csv
+Host_DEG/infected_vs_uninfected/host_counts_infected_vs_uninfected.csv
 ```
 
 This table contains the differential expression results for the selected
@@ -126,7 +136,7 @@ contrast.
 A gene-symbol-enhanced table may also be generated:
 
 ```text
-Host_DEG/Liver_vs_Telencephalon/host_counts_Liver_vs_Telencephalon_gene_symbols_table.csv
+Host_DEG/infected_vs_uninfected/host_counts_infected_vs_uninfected_gene_symbols_table.csv
 ```
 
 Use the comparison-specific table when inspecting genes associated with a
@@ -225,25 +235,22 @@ detail, especially for larger gene sets or when row labels are important.
 The comparison-specific bar plot is usually stored as:
 
 ```text
-Host_DEG/Liver_vs_Telencephalon/Barplot_Liver_vs_Telencephalon.pdf
+Host_DEG/infected_vs_uninfected/Barplot_infected_vs_uninfected.pdf
 ```
 
 ### Bar plot preview
 
 ![Host DEG bar plot preview](../assets/images/user-guide/host-expression/host-deg-barplot-preview.png)
 
-For documentation purposes, a cropped preview of the upper part of the bar plot
-is shown on this page.
-
-This makes the figure easier to view inline while still providing a quick
-overview of the differential expression summary.
+For documentation purposes, the comparison bar plot is shown on this page as
+a representative overview of the strongest host expression changes.
 
 ### Full bar plot
 
 The complete figure is usually available in:
 
 ```text
-Host_DEG/Liver_vs_Telencephalon/Barplot_Liver_vs_Telencephalon.pdf
+Host_DEG/infected_vs_uninfected/Barplot_infected_vs_uninfected.pdf
 ```
 
 Use the full bar plot when you need to inspect all plotted categories in
@@ -257,11 +264,11 @@ transcriptional differences between groups.
 [MTD Explorer][mtd-explorer] generates an enhanced volcano plot for each host
 differential-expression comparison using [EnhancedVolcano][enhancedvolcano].
 
-For a comparison such as liver versus telencephalon, the enhanced volcano plot
+For a comparison such as infected versus uninfected, the enhanced volcano plot
 is usually stored as:
 
 ```text
-Host_DEG/Liver_vs_Telencephalon/host_counts_Liver_vs_Telencephalon_volcano.pdf
+Host_DEG/infected_vs_uninfected/host_counts_infected_vs_uninfected_volcano.pdf
 ```
 
 ![Host DEG EnhancedVolcano plot](../assets/images/user-guide/host-expression/host-deg-enhancedvolcano.png)
@@ -286,15 +293,15 @@ Highlighted or labeled genes are useful candidates for closer inspection.
 The corresponding log file is usually:
 
 ```text
-Host_DEG/Liver_vs_Telencephalon/host_counts_Liver_vs_Telencephalon.EV.volcano.log
+Host_DEG/infected_vs_uninfected/host_counts_infected_vs_uninfected.EV.volcano.log
 ```
 
 Use this log file if the enhanced volcano plot is missing, if gene labels do
 not appear as expected, or if the plotting step produced warnings.
 
 The EnhancedVolcano step derives the displayed comparison labels from the
-comparison directory name, so a folder such as `Liver_vs_Telencephalon` is
-plotted as **Liver vs Telencephalon** rather than with generic `group vs group`
+comparison directory name, so a folder such as `infected_vs_uninfected` is
+plotted as **infected vs uninfected** rather than with generic `group vs group`
 labels.
 
 Only the primary comparison table is used as the EnhancedVolcano input. The
@@ -304,6 +311,7 @@ volcano reprocessing scan so that the same comparison is not plotted twice.
 Some runs may also contain a standard volcano plot, such as:
 
 ```text
+Host_DEG/infected_vs_uninfected/Volcano_infected_vs_uninfected.pdf
 ```
 
 The standard volcano plot is retained as an output file, but the enhanced
@@ -321,7 +329,7 @@ Common files include:
 
 ```text
 Host_DEG/gene_ID_cache.csv
-Host_DEG/GID_to_ENTREZ_taxid_59463.tsv
+Host_DEG/GID_to_ENTREZ_taxid_6526.tsv
 ```
 
 These files help map host gene identifiers to gene symbols, Entrez IDs, gene
@@ -399,8 +407,8 @@ together with the DEG tables and GO results.
 Comparison-specific enrichment outputs are usually stored in folders such as:
 
 ```text
-Host_DEG/Liver_vs_Telencephalon/GO/
-Host_DEG/Liver_vs_Telencephalon/KEGG/
+Host_DEG/infected_vs_uninfected/GO/
+Host_DEG/infected_vs_uninfected/KEGG/
 ```
 
 These folders may contain enrichment tables, dot plots, network plots, tree
@@ -467,10 +475,10 @@ Host_DEG/PCA_color.pdf
 Host_DEG/PCA_label_color.pdf
 Host_DEG/heatmap.pdf
 Host_DEG/host_counts_DEG.csv
-Host_DEG/Liver_vs_Telencephalon/host_counts_Liver_vs_Telencephalon.csv
-Host_DEG/Liver_vs_Telencephalon/host_counts_Liver_vs_Telencephalon_volcano.pdf
-Host_DEG/Liver_vs_Telencephalon/GO/
-Host_DEG/Liver_vs_Telencephalon/KEGG/
+Host_DEG/infected_vs_uninfected/host_counts_infected_vs_uninfected.csv
+Host_DEG/infected_vs_uninfected/host_counts_infected_vs_uninfected_volcano.pdf
+Host_DEG/infected_vs_uninfected/GO/
+Host_DEG/infected_vs_uninfected/KEGG/
 methods/mtd_methods_run_parameters.csv
 ```
 

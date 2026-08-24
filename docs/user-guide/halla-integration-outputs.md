@@ -15,14 +15,24 @@ The main folder is:
 halla/
 ```
 
+
+!!! info "Documentation example dataset"
+
+    Figures shown on this page were generated from public *Biomphalaria glabrata*
+    RNA-seq data from NCBI BioProject
+    [PRJNA1306560](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA1306560).
+    The example run contains `infected`, `infection_failed`, and `uninfected`
+    groups. Pairwise comparison examples use `infected_vs_uninfected` where
+    applicable.
+
 ## Main figures
 
 The representative HAllA integration figures shown on this page are:
 
 ```text
-halla/host_gene_hallagram_Top5.png
-halla/kmeans_results.png
-halla/pls_da_results.png
+halla/host_gene/hallagram_Top5.pdf
+halla/kmeans_results.pdf
+halla/pls_da_results.pdf
 ```
 
 These figures summarize different views of the host-microbiome integration
@@ -33,12 +43,17 @@ analysis.
 The main Hallagram figure shown here is:
 
 ```text
-halla/host_gene_hallagram_Top5.png
+halla/host_gene/hallagram_Top5.pdf
 ```
 
 ![Top HAllA host-gene associations](../assets/images/user-guide/halla/halla-host-gene-hallagram-top5.png)
 
 This figure summarizes the top association patterns detected by [HAllA][halla].
+
+The `Top5` suffix records the requested display tier. If fewer than five
+significant HAllA clusters are available, MTD Explorer uses all available
+significant clusters. Higher requested tiers that would reproduce the same
+effective selection are skipped rather than generating duplicate figures.
 
 It is useful for quickly identifying candidate relationships between host
 features and non-host or functional features.
@@ -52,7 +67,7 @@ It does not prove causality.
 The k-means summary figure is usually:
 
 ```text
-halla/kmeans_results.png
+halla/kmeans_results.pdf
 ```
 
 ![HAllA k-means results](../assets/images/user-guide/halla/halla-kmeans-results.png)
@@ -71,7 +86,7 @@ test.
 The PLS-DA summary figure is usually:
 
 ```text
-halla/pls_da_results.png
+halla/pls_da_results.pdf
 ```
 
 ![HAllA PLS-DA results](../assets/images/user-guide/halla/halla-pls-da-results.png)
@@ -89,9 +104,9 @@ sizes.
 For HAllA integration outputs, inspect:
 
 ```text
-halla/host_gene_hallagram_Top5.png
-halla/kmeans_results.png
-halla/pls_da_results.png
+halla/host_gene/hallagram_Top5.pdf
+halla/kmeans_results.pdf
+halla/pls_da_results.pdf
 halla/
 methods/mtd_methods_run_parameters.csv
 ```

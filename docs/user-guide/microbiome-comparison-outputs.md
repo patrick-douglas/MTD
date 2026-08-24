@@ -16,6 +16,16 @@ Despite the historical folder name, this directory stores microbiome and
 non-host comparison outputs, including [Bracken][bracken] abundance matrices,
 diversity plots, differential-abundance results, and statistical summaries.
 
+
+!!! info "Documentation example dataset"
+
+    Figures shown on this page were generated from public *Biomphalaria glabrata*
+    RNA-seq data from NCBI BioProject
+    [PRJNA1306560](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA1306560).
+    The example run contains `infected`, `infection_failed`, and `uninfected`
+    groups. Pairwise comparison examples use `infected_vs_uninfected` where
+    applicable.
+
 ## Main output files
 
 A typical `Nonhost_DEG/` folder may contain:
@@ -35,7 +45,7 @@ Nonhost_DEG/ANOSIM-analysis-output.txt
 Pairwise comparison outputs are usually stored in folders such as:
 
 ```text
-Nonhost_DEG/Liver_vs_Telencephalon/
+Nonhost_DEG/infected_vs_uninfected/
 ```
 
 ## Microbiome abundance heatmap
@@ -171,18 +181,18 @@ the [Bracken][bracken] abundance table.
 Some runs may also contain a standard volcano plot, such as:
 
 ```text
-Nonhost_DEG/Liver_vs_Telencephalon/Volcano_Liver_vs_Telencephalon.pdf
+Nonhost_DEG/infected_vs_uninfected/Volcano_infected_vs_uninfected.pdf
 ```
 
 Use the comparison-specific CSV file for the underlying results:
 
 ```text
-Nonhost_DEG/Liver_vs_Telencephalon/bracken_species_all_Liver_vs_Telencephalon.csv
+Nonhost_DEG/infected_vs_uninfected/bracken_species_all_infected_vs_uninfected.csv
 ```
 
 The EnhancedVolcano reprocessing step derives the displayed comparison labels
 from the comparison directory name. For example,
-`Liver_vs_Telencephalon` is labeled **Liver vs Telencephalon** instead of using
+`infected_vs_uninfected` is labeled **infected vs uninfected** instead of using
 generic group names. Auxiliary gene-symbol-style tables are excluded from the
 reprocessing scan when present, preventing duplicate volcano generation.
 
@@ -219,9 +229,9 @@ Nonhost_DEG/MaAsLin2_results/
 Typical files may include:
 
 ```text
-Nonhost_DEG/MaAsLin2_results/ref_Telencephalon/all_results.tsv
-Nonhost_DEG/MaAsLin2_results/ref_Telencephalon/significant_results.tsv
-Nonhost_DEG/MaAsLin2_results/ref_Telencephalon/maaslin2.log
+Nonhost_DEG/MaAsLin2_results/ref_uninfected/all_results.tsv
+Nonhost_DEG/MaAsLin2_results/ref_uninfected/significant_results.tsv
+Nonhost_DEG/MaAsLin2_results/ref_uninfected/maaslin2.log
 ```
 
 Use these files when interpreting multivariable microbiome associations.
@@ -237,7 +247,7 @@ Nonhost_DEG/Alpha_diversity.pdf
 Nonhost_DEG/ANOSIM-analysis-output.txt
 Nonhost_DEG/ANCOMBC_results/with_species_names/diff_abundance_name.csv
 Nonhost_DEG/ANCOMBC_results/with_species_names/q_value_name.csv
-Nonhost_DEG/Liver_vs_Telencephalon/bracken_species_all_Liver_vs_Telencephalon.csv
+Nonhost_DEG/infected_vs_uninfected/bracken_species_all_infected_vs_uninfected.csv
 methods/mtd_methods_run_parameters.csv
 ```
 

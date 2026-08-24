@@ -10,6 +10,16 @@ classification behavior before formal interpretation.
 They are descriptive outputs. They should not be interpreted as statistical
 tests of differential abundance.
 
+
+!!! info "Documentation example dataset"
+
+    Figures shown on this page were generated from public *Biomphalaria glabrata*
+    RNA-seq data from NCBI BioProject
+    [PRJNA1306560](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA1306560).
+    The example run contains `infected`, `infection_failed`, and `uninfected`
+    groups. Pairwise comparison examples use `infected_vs_uninfected` where
+    applicable.
+
 ## Where these outputs are stored
 
 Taxonomic exploratory outputs are stored in:
@@ -758,7 +768,7 @@ Core microbiome results depend on detection thresholds, sample size, database
 choice, sequencing depth, and filtering behavior.
 
 
-## Detected species pie by phylum
+## Detected species pie by automatically selected taxonomic level
 
 The detected species pie chart summarizes detected species according to broader
 taxonomic categories.
@@ -775,11 +785,15 @@ Detected species pie outputs are stored under:
 exploratory/taxonomy/detected_microbiome_pie/
 ```
 
-For the default species-level workflow, the main folder is:
+For compatibility, species-level pie outputs are written under:
 
 ```text
 exploratory/taxonomy/detected_microbiome_pie/species_by_phylum/
 ```
+
+The `species_by_phylum/` directory name is historical and does not force the
+figure to use phylum-level categories. The plotting step automatically selects
+a broader taxonomic level supported by the detected assignments.
 
 The main PNG file is usually:
 
@@ -787,9 +801,12 @@ The main PNG file is usually:
 detected_species_by_auto_level.png
 ```
 
+In the PRJNA1306560 documentation example, the automatically selected level is
+**Kingdom**, as reported directly in the generated figure.
+
 ### Pie chart
 
-![Detected species pie by phylum](../assets/images/user-guide/taxonomic-exploratory/taxonomy-detected-species-pie-by-phylum.png)
+![Detected species pie by automatically selected taxonomic level](../assets/images/user-guide/taxonomic-exploratory/taxonomy-detected-species-pie-auto-level.png)
 
 ### How to read the plot
 

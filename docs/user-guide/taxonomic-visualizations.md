@@ -11,6 +11,16 @@ The two main visualization tools are:
 - [KronaTools][krona], for interactive taxonomic exploration;
 - [GraPhlAn][graphlan], for publication-style cladogram visualizations.
 
+
+!!! info "Documentation example dataset"
+
+    Figures shown on this page were generated from public *Biomphalaria glabrata*
+    RNA-seq data from NCBI BioProject
+    [PRJNA1306560](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA1306560).
+    The example run contains `infected`, `infection_failed`, and `uninfected`
+    groups. Pairwise comparison examples use `infected_vs_uninfected` where
+    applicable.
+
 ## Where these outputs are stored
 
 Taxonomic visualization outputs are usually stored in:

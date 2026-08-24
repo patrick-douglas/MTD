@@ -289,13 +289,13 @@ Current host and microbiome EnhancedVolcano reprocessing derives the group
 labels from the comparison directory, for example:
 
 ```text
-Liver_vs_Telencephalon
+infected_vs_uninfected
 ```
 
 becomes:
 
 ```text
-Liver vs Telencephalon
+infected vs uninfected
 ```
 
 If an older output still shows generic labels, regenerate the volcano outputs

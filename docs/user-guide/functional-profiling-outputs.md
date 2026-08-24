@@ -20,6 +20,16 @@ this page remain the same; the HPC backend changes where and how eligible
 per-sample work is executed, while omitting `--hpc-conf` keeps the normal local
 execution path.
 
+
+!!! info "Documentation example dataset"
+
+    Figures shown on this page were generated from public *Biomphalaria glabrata*
+    RNA-seq data from NCBI BioProject
+    [PRJNA1306560](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA1306560).
+    The example run contains `infected`, `infection_failed`, and `uninfected`
+    groups. Pairwise comparison examples use `infected_vs_uninfected` where
+    applicable.
+
 ## Main folders
 
 The functional outputs are usually split into two annotation layers:
@@ -124,15 +134,15 @@ hmn_genefamily_abundance_files/Nonhost_hmn_DEG/KEGG/PCA_label_color.pdf
 Comparison-specific functional outputs may be stored in folders such as:
 
 ```text
-hmn_genefamily_abundance_files/Nonhost_hmn_DEG/GO/Liver_vs_Telencephalon/
-hmn_genefamily_abundance_files/Nonhost_hmn_DEG/KEGG/Liver_vs_Telencephalon/
+hmn_genefamily_abundance_files/Nonhost_hmn_DEG/GO/infected_vs_uninfected/
+hmn_genefamily_abundance_files/Nonhost_hmn_DEG/KEGG/infected_vs_uninfected/
 ```
 
 These folders may contain:
 
 ```text
-Barplot_Liver_vs_Telencephalon.pdf
-Volcano_Liver_vs_Telencephalon.pdf
+Barplot_infected_vs_uninfected.pdf
+Volcano_infected_vs_uninfected.pdf
 ```
 
 The standard volcano plots are not shown on this page because they can be
