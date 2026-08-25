@@ -1929,38 +1929,24 @@ fi
 cd "$outputdr/temp" || die "Could not enter temp directory: $outputdr/temp"
 
 # ------------------------------------------------------------
-# Step 0: Host database auto selection from --hostid
+# Step 0: Unified host resource selection from --hostid
+# ------------------------------------------------------------
+# Create_custom_host.sh uses the same TaxID-based resource layout for every
+# host, including human, rhesus macaque and mouse. Keep resource resolution
+# centralized here so legacy species-specific directory names cannot point the
+# pipeline to stale or mismatched references.
+#
+# Expected layout:
+#   kraken2DB_<taxid>/
+#   hisat2_index_<taxid>/genome_tran
+#   blastdb_<taxid>/blastdb_<taxid>
+#   ref_<taxid>/ref_<taxid>.gtf.gz
 # ------------------------------------------------------------
 
-if [[ "$hostid" == 9606 ]]; then
-    DB_host="$MTDIR/kraken2DB_human"
-    DB_hisat2="$MTDIR/hisat2_index_human/genome_tran"
-    DB_blast="$MTDIR/human_blastdb/human_blastdb"
-    gtf="$MTDIR/ref_human/Homo_sapiens.GRCh38.104.gtf.gz"
-
-elif [[ "$hostid" == 9544 ]]; then
-    DB_host="$MTDIR/kraken2DB_rhesus"
-    DB_hisat2="$MTDIR/hisat2_index_rhesus/genome_tran"
-    DB_blast="$MTDIR/rhesus_blastdb/rhesus_blastdb"
-    gtf="$MTDIR/ref_rhesus/Macaca_mulatta.Mmul_10.104.gtf.gz"
-
-elif [[ "$hostid" == 10090 ]]; then
-    DB_host="$MTDIR/kraken2DB_mice"
-    DB_hisat2="$MTDIR/hisat2_index_mouse/genome_tran"
-    DB_blast="$MTDIR/mouse_blastdb/mouse_blastdb"
-    gtf="$MTDIR/ref_mouse/Mus_musculus.GRCm39.104.gtf.gz"
-
-elif [[ -d "$MTDIR/kraken2DB_${hostid}" ]]; then
-    DB_host="$MTDIR/kraken2DB_${hostid}"
-    DB_hisat2="$MTDIR/hisat2_index_${hostid}/genome_tran"
-    DB_blast="$MTDIR/blastdb_${hostid}/blastdb_${hostid}"
-    gtf="$MTDIR/ref_${hostid}/ref_${hostid}.gtf.gz"
-
-else
-    echo "${r}[ERROR] Host species is not supported for --hostid $hostid.${w}"
-    echo "You can use bash Create_annotation_package.R for building the required resources."
-    exit 1
-fi
+DB_host="$MTDIR/kraken2DB_${hostid}"
+DB_hisat2="$MTDIR/hisat2_index_${hostid}/genome_tran"
+DB_blast="$MTDIR/blastdb_${hostid}/blastdb_${hostid}"
+gtf="$MTDIR/ref_${hostid}/ref_${hostid}.gtf.gz"
 # ------------------------------------------------------------
 # Persistent functional resources from Create_custom_host.sh
 # ------------------------------------------------------------
@@ -2013,6 +1999,54 @@ if [[ -n "${KRAKEN_MICRO_DB:-}" ]]; then
 else
     DB_micro="$DB_micro_default"
     KRAKEN_MICRO_DB_MODE="default_MTD_kraken2DB_micro"
+fi
+
+# ------------------------------------------------------------
+# Fail-fast host resource validation
+# ------------------------------------------------------------
+# Validate host resources before FASTQ hashing/trimming starts. This prevents
+# an expensive run from reaching Kraken2 or host alignment only to discover
+# that a TaxID-specific reference is missing or incomplete.
+#
+# --kraken-host-db overrides only the Kraken2 host-filtering database. The GTF
+# and the selected HISAT2/Magic-BLAST reference still come from --hostid.
+# ------------------------------------------------------------
+
+if [[ ! -d "$DB_host" ]]; then
+    die "Host Kraken2 database was not found for TaxID $hostid:
+$DB_host
+
+Create the host resources with:
+bash Create_custom_host.sh --ncbi-taxon-id $hostid"
+fi
+
+for required_kraken_file in hash.k2d opts.k2d taxo.k2d; do
+    if [[ ! -s "$DB_host/$required_kraken_file" ]]; then
+        die "Host Kraken2 database is incomplete for TaxID $hostid:
+$DB_host/$required_kraken_file"
+    fi
+done
+
+if [[ ! -s "$gtf" ]]; then
+    die "Host GTF was not found for TaxID $hostid:
+$gtf
+
+Create the host resources with:
+bash Create_custom_host.sh --ncbi-taxon-id $hostid"
+fi
+
+if [[ "$blast" == "hisat" ]]; then
+    for index_part in 1 2 3 4 5 6 7 8; do
+        if ! compgen -G "${DB_hisat2}.${index_part}.ht2*" > /dev/null; then
+            die "HISAT2 index is incomplete for TaxID $hostid.
+Missing index component: ${DB_hisat2}.${index_part}.ht2*"
+        fi
+    done
+else
+    if ! compgen -G "${DB_blast}.n*" > /dev/null; then
+        die "Magic-BLAST database was not found for TaxID $hostid:
+$DB_blast"
+    fi
 fi
 
 # ------------------------------------------------------------
