@@ -15,13 +15,13 @@ __pycache__/
 HUMAnN/
 Installation/HPC/cache/
 
-blastdb_6526/
+blastdb_*
 build/
 custom_R_libs/
-hisat2_index_6526/
-kraken2DB_6526/
+hisat2_index*
+kraken2DB_*
 kraken2DB_micro/
-ref_6526/
+ref_*
 site/
 temp/
 
