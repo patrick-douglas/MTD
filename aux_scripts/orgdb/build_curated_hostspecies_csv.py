@@ -9,12 +9,13 @@ Inputs
 3. Optional reference overrides for TaxIDs whose Ensembl reference is stored
    under a different taxonomic level.
 
-The first six legacy columns are kept in their original order so current MTD
-scripts remain compatible until they are migrated to header-based lookups:
+Host metadata columns are read by name and preserved from the input CSV. The
+current core schema is:
 
-    Taxon_ID,MartDatasets,Scientific_name,OrgDb,Common_name,kegg
+    Taxon_ID,MartDatasets,Scientific_name,OrgDb,EggNOG_OrgDb,Common_name,kegg
 
-Reference metadata is appended after those columns.
+Reference metadata is appended after the host metadata columns. Additional
+future host columns are preserved automatically instead of being dropped.
 
 The script can also validate/update MartDatasets against the official BioMart
 dataset catalogs. Existing values are changed only when one unique, verified
@@ -42,13 +43,14 @@ from pathlib import Path
 from typing import Any, Iterable, Optional, Sequence
 
 
-SCRIPT_VERSION = "1.2.0"
+SCRIPT_VERSION = "1.3.0"
 
-LEGACY_COLUMNS = [
+HOST_COLUMNS = [
     "Taxon_ID",
     "MartDatasets",
     "Scientific_name",
     "OrgDb",
+    "EggNOG_OrgDb",
     "Common_name",
     "kegg",
 ]
@@ -67,7 +69,6 @@ REFERENCE_COLUMNS = [
     "MartDatasets_status",
 ]
 
-OUTPUT_COLUMNS = LEGACY_COLUMNS + REFERENCE_COLUMNS
 
 REPORT_COLUMNS = [
     "Taxon_ID",
@@ -763,6 +764,7 @@ def overlay(
 def write_csv(
     path: Path,
     rows: Sequence[dict[str, str]],
+    fieldnames: Sequence[str],
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -774,7 +776,7 @@ def write_csv(
     ) as handle:
         writer = csv.DictWriter(
             handle,
-            fieldnames=OUTPUT_COLUMNS,
+            fieldnames=fieldnames,
             lineterminator="\n",
             extrasaction="ignore",
         )
@@ -831,7 +833,16 @@ def main() -> int:
     cache_dir = Path(args.cache_dir).expanduser().resolve()
 
     host_fields, host_rows = read_delimited(host_path, ",")
-    require_columns(host_fields, LEGACY_COLUMNS, "HostSpecies.csv")
+    require_columns(host_fields, HOST_COLUMNS, "HostSpecies.csv")
+
+    # Preserve every non-reference HostSpecies column in its input order.
+    # This prevents future schema additions from being silently discarded.
+    host_output_columns = [
+        field for field in host_fields
+        if field not in REFERENCE_COLUMNS
+    ]
+    output_columns = host_output_columns + REFERENCE_COLUMNS
+
     report_fields, download_rows = read_delimited(report_path, "\t")
     require_columns(
         report_fields,
@@ -986,7 +997,7 @@ def main() -> int:
         row = {
             **{
                 column: clean(original.get(column))
-                for column in LEGACY_COLUMNS
+                for column in host_output_columns
             },
             "Reference_Taxon_ID": reference_taxid,
             "Reference_Scientific_name": reference_name,
@@ -1125,7 +1136,7 @@ def main() -> int:
     if args.in_place:
         backup = backup_file(host_path)
 
-    write_csv(destination, provisional)
+    write_csv(destination, provisional, output_columns)
     write_report(audit_path, audit_rows)
 
     reference_complete = sum(

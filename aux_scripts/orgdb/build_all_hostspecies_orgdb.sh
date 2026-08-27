@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # MTD Explorer — batch OrgDb builder
-# Version 1.0.0
+# Version 1.1.0
 #
-# Builds or validates one OrgDb package per HostSpecies.csv row by reusing:
+# Builds or validates the reference-matched EggNOG_OrgDb package for each
+# HostSpecies.csv row by reusing:
 #   aux_scripts/orgdb/install_gold_orgdb_from_hostspecies.sh
 #
-# Only the GTF and protein FASTA are required. The script runs eggNOG-mapper,
-# builds/installs the OrgDb, detects the exact installed package name, validates
-# it, and atomically updates the OrgDb column in HostSpecies.csv.
+# The curated primary OrgDb column is never replaced by this batch builder.
+# Model organisms may therefore keep an official OrgDb while also receiving a
+# separate custom EggNOG_OrgDb. Non-model species may use the same package in
+# both columns.
 #
 # It is intentionally serial: each eggNOG-mapper process uses --threads, and
 # running several species at once would compete heavily for RAM, disk and the
@@ -16,7 +18,7 @@
 set -Eeuo pipefail
 shopt -s nullglob
 
-SCRIPT_VERSION="1.0.2"
+SCRIPT_VERSION="1.1.0"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 MTDIR_DEFAULT="$(cd -- "$SCRIPT_DIR/../.." 2>/dev/null && pwd -P || true)"
@@ -91,7 +93,7 @@ Output:
                            [default: <species-root>/orgdb_logs]
   --report FILE            Batch report
                            [default: <species-root>/orgdb_report.tsv]
-  --no-update-csv          Build/validate packages but do not change HostSpecies.csv
+  --no-update-csv          Build/validate packages but do not update EggNOG_OrgDb
   --dry-run                Print the queue and commands without running them
   --version                Print version
   -h, --help               Show this help
@@ -290,6 +292,7 @@ required = {
     "Taxon_ID",
     "Scientific_name",
     "OrgDb",
+    "EggNOG_OrgDb",
     "GTF_URL",
     "Pep_URL",
     "Reference_status",
@@ -434,6 +437,7 @@ with open(queue_path, "w", encoding="utf-8", newline="") as handle:
         "package_scientific_name",
         "folder",
         "old_orgdb",
+        "old_eggnog_orgdb",
         "gtf_url",
         "pep_url",
         "reference_status",
@@ -451,6 +455,7 @@ with open(queue_path, "w", encoding="utf-8", newline="") as handle:
             package_scientific_name(scientific_name),
             folders.get(taxid) or fallback_folder(scientific_name),
             str(row.get("OrgDb", "") or "").strip(),
+            str(row.get("EggNOG_OrgDb", "") or "").strip(),
             str(row.get("GTF_URL", "") or "").strip(),
             str(row.get("Pep_URL", "") or "").strip(),
             str(row.get("Reference_status", "") or "").strip(),
@@ -679,7 +684,7 @@ os.replace(temporary, destination)
 PY
 }
 
-read_current_orgdb() {
+read_current_eggnog_orgdb() {
     local taxid="$1"
     python3 - "$HOSTSPECIES" "$taxid" <<'PY'
 import csv
@@ -689,13 +694,13 @@ path, taxid = sys.argv[1:]
 with open(path, encoding="utf-8-sig", newline="") as handle:
     for row in csv.DictReader(handle):
         if str(row.get("Taxon_ID", "")).strip() == taxid:
-            print(str(row.get("OrgDb", "") or "").strip())
+            print(str(row.get("EggNOG_OrgDb", "") or "").strip())
             raise SystemExit(0)
 raise SystemExit(f"[ERROR] TaxID {taxid} not found")
 PY
 }
 
-update_orgdb_csv() {
+update_eggnog_orgdb_csv() {
     local taxid="$1"
     local package="$2"
 
@@ -708,19 +713,28 @@ import sys
 path, taxid, package = sys.argv[1:]
 
 if not package.startswith("org.") or not package.endswith(".db"):
-    raise SystemExit(f"[ERROR] Refusing invalid OrgDb package name: {package}")
+    raise SystemExit(
+        f"[ERROR] Refusing invalid EggNOG_OrgDb package name: {package}"
+    )
 
 with open(path, encoding="utf-8-sig", newline="") as handle:
     reader = csv.DictReader(handle)
     fieldnames = reader.fieldnames
     rows = list(reader)
 
+if "EggNOG_OrgDb" not in (fieldnames or []):
+    raise SystemExit(
+        "[ERROR] HostSpecies.csv does not contain EggNOG_OrgDb"
+    )
+
 matches = 0
 old = ""
+primary = ""
 for row in rows:
     if str(row.get("Taxon_ID", "")).strip() == taxid:
-        old = str(row.get("OrgDb", "") or "").strip()
-        row["OrgDb"] = package
+        primary = str(row.get("OrgDb", "") or "").strip()
+        old = str(row.get("EggNOG_OrgDb", "") or "").strip()
+        row["EggNOG_OrgDb"] = package
         matches += 1
 
 if matches != 1:
@@ -742,25 +756,19 @@ mode = stat.S_IMODE(os.stat(path).st_mode)
 os.chmod(temporary, mode)
 os.replace(temporary, path)
 
-print(f"[CSV] TaxID {taxid}: {old or '<empty>'} -> {package}")
+print(
+    f"[CSV] TaxID {taxid}: primary OrgDb preserved as "
+    f"{primary or '<empty>'}; EggNOG_OrgDb "
+    f"{old or '<empty>'} -> {package}"
+)
 PY
 }
 
-detect_package_name() {
+detect_eggnog_package_name() {
     local log_file="$1"
     local build_dir="$2"
-    local old_orgdb="$3"
+    local old_eggnog_orgdb="$3"
     local detected=""
-
-    # If the helper explicitly preserved a compatible existing package, that
-    # package wins immediately. Do not inspect stale source directories from a
-    # previous custom build, because doing so can overwrite an official OrgDb
-    # name in HostSpecies.csv with an obsolete generated package name.
-    if [[ -n "$old_orgdb" ]] && \
-       grep -Fq "[OK] Existing OrgDb is compatible enough." "$log_file"; then
-        printf '%s\n' "$old_orgdb"
-        return 0
-    fi
 
     # Preferred source: exact message emitted by the R builder.
     detected="$(
@@ -768,6 +776,14 @@ detect_package_name() {
             's/.*\[OK\] Installed package: \([^[:space:]]*\) into .*/\1/p' \
             "$log_file" | tail -n 1
     )"
+
+    # If the helper explicitly reused the same primary/eggNOG package, trust
+    # the curated secondary value before looking at potentially stale build dirs.
+    if [[ -z "$detected" && -n "$old_eggnog_orgdb" ]] && \
+       grep -Fq "[INFO] The R OrgDb package will not be rebuilt." "$log_file"; then
+        printf '%s\n' "$old_eggnog_orgdb"
+        return 0
+    fi
 
     # Fallback: source package directory inside this TaxID-specific build dir.
     if [[ -z "$detected" ]]; then
@@ -783,9 +799,10 @@ detect_package_name() {
         )"
     fi
 
-    # Compatible official/existing package: helper exits without rebuilding.
+    # If the helper reused an already-compatible package, there is no fresh
+    # install message. The curated EggNOG_OrgDb value is then authoritative.
     if [[ -z "$detected" ]]; then
-        detected="$old_orgdb"
+        detected="$old_eggnog_orgdb"
     fi
 
     printf '%s\n' "$detected"
@@ -858,20 +875,22 @@ append_report() {
     local taxid="$1"
     local scientific_name="$2"
     local folder="$3"
-    local old_orgdb="$4"
-    local final_orgdb="$5"
-    local status="$6"
-    local elapsed="$7"
-    local log_file="$8"
-    local message="$9"
+    local primary_orgdb="$4"
+    local old_eggnog_orgdb="$5"
+    local final_eggnog_orgdb="$6"
+    local status="$7"
+    local elapsed="$8"
+    local log_file="$9"
+    local message="${10}"
 
     python3 - \
         "$REPORT" \
         "$taxid" \
         "$scientific_name" \
         "$folder" \
-        "$old_orgdb" \
-        "$final_orgdb" \
+        "$primary_orgdb" \
+        "$old_eggnog_orgdb" \
+        "$final_eggnog_orgdb" \
         "$status" \
         "$elapsed" \
         "$log_file" \
@@ -885,8 +904,9 @@ import sys
     taxid,
     scientific_name,
     folder,
-    old_orgdb,
-    final_orgdb,
+    primary_orgdb,
+    old_eggnog_orgdb,
+    final_eggnog_orgdb,
     status,
     elapsed,
     log_file,
@@ -897,8 +917,9 @@ fields = [
     "taxid",
     "scientific_name",
     "folder",
-    "old_orgdb",
-    "final_orgdb",
+    "primary_orgdb",
+    "old_eggnog_orgdb",
+    "final_eggnog_orgdb",
     "status",
     "elapsed_seconds",
     "log_file",
@@ -919,8 +940,9 @@ with open(path, "a", encoding="utf-8", newline="") as handle:
         "taxid": taxid,
         "scientific_name": scientific_name,
         "folder": folder,
-        "old_orgdb": old_orgdb,
-        "final_orgdb": final_orgdb,
+        "primary_orgdb": primary_orgdb,
+        "old_eggnog_orgdb": old_eggnog_orgdb,
+        "final_eggnog_orgdb": final_eggnog_orgdb,
         "status": status,
         "elapsed_seconds": elapsed,
         "log_file": log_file,
@@ -963,7 +985,7 @@ fi
 # not IFS whitespace, so an empty OrgDb field does not shift all later columns.
 while IFS=$'\x1f' read -r \
     taxid scientific_name package_scientific_name folder old_orgdb \
-    gtf_url pep_url reference_status; do
+    old_eggnog_orgdb gtf_url pep_url reference_status; do
 
     [[ "$taxid" == "taxid" ]] && continue
 
@@ -1010,7 +1032,8 @@ while IFS=$'\x1f' read -r \
     echo "[$processed] TaxID $taxid — $scientific_name"
     echo "Folder:          $folder"
     echo "Package species: $package_scientific_name"
-    echo "Current OrgDb:   ${old_orgdb:-<empty>}"
+    echo "Primary OrgDb:   ${old_orgdb:-<empty>}"
+    echo "EggNOG OrgDb:    ${old_eggnog_orgdb:-<empty>}"
     echo "============================================================"
 
     if [[ "$DRY_RUN" == "1" ]]; then
@@ -1026,7 +1049,7 @@ while IFS=$'\x1f' read -r \
     fi
 
     start_epoch="$(date +%s)"
-    final_orgdb=""
+    final_eggnog_orgdb=""
     species_status="FAILED"
     species_message=""
 
@@ -1042,7 +1065,8 @@ while IFS=$'\x1f' read -r \
         warn "$species_message"
         elapsed="$(( $(date +%s) - start_epoch ))"
         append_report \
-            "$taxid" "$scientific_name" "$folder" "$old_orgdb" "" \
+            "$taxid" "$scientific_name" "$folder" "$old_orgdb" \
+            "$old_eggnog_orgdb" "" \
             "FAILED_INPUT" "$elapsed" "$log_file" "$species_message"
         printf "status\tFAILED_INPUT\nmessage\t%s\n" "$species_message" > "$status_file"
         ((failed += 1))
@@ -1061,7 +1085,8 @@ while IFS=$'\x1f' read -r \
         warn "$species_message"
         elapsed="$(( $(date +%s) - start_epoch ))"
         append_report \
-            "$taxid" "$scientific_name" "$folder" "$old_orgdb" "" \
+            "$taxid" "$scientific_name" "$folder" "$old_orgdb" \
+            "$old_eggnog_orgdb" "" \
             "FAILED_INPUT" "$elapsed" "$log_file" "$species_message"
         printf "status\tFAILED_INPUT\nmessage\t%s\n" "$species_message" > "$status_file"
         ((failed += 1))
@@ -1110,7 +1135,8 @@ while IFS=$'\x1f' read -r \
         warn "$species_message"
         elapsed="$(( $(date +%s) - start_epoch ))"
         append_report \
-            "$taxid" "$scientific_name" "$folder" "$old_orgdb" "" \
+            "$taxid" "$scientific_name" "$folder" "$old_orgdb" \
+            "$old_eggnog_orgdb" "" \
             "FAILED_BUILD" "$elapsed" "$log_file" "$species_message"
         printf "status\tFAILED_BUILD\nmessage\t%s\n" "$species_message" > "$status_file"
         ((failed += 1))
@@ -1118,18 +1144,21 @@ while IFS=$'\x1f' read -r \
         continue
     fi
 
-    # The actual CSV may already have been updated by a previous completed row.
-    current_orgdb="$(read_current_orgdb "$taxid")"
-    final_orgdb="$(
-        detect_package_name "$log_file" "$build_dir" "$current_orgdb"
+    # The primary OrgDb is curated and must never be rewritten by this batch.
+    # Detect only the reference-matched secondary package.
+    current_eggnog_orgdb="$(read_current_eggnog_orgdb "$taxid")"
+    final_eggnog_orgdb="$(
+        detect_eggnog_package_name \
+            "$log_file" "$build_dir" "$current_eggnog_orgdb"
     )"
 
-    if [[ -z "$final_orgdb" ]]; then
-        species_message="Could not determine the final OrgDb package name"
+    if [[ -z "$final_eggnog_orgdb" ]]; then
+        species_message="Could not determine the final EggNOG_OrgDb package name"
         warn "$species_message"
         elapsed="$(( $(date +%s) - start_epoch ))"
         append_report \
-            "$taxid" "$scientific_name" "$folder" "$old_orgdb" "" \
+            "$taxid" "$scientific_name" "$folder" "$old_orgdb" \
+            "$old_eggnog_orgdb" "" \
             "FAILED_DETECTION" "$elapsed" "$log_file" "$species_message"
         printf "status\tFAILED_DETECTION\nmessage\t%s\n" "$species_message" > "$status_file"
         ((failed += 1))
@@ -1138,14 +1167,15 @@ while IFS=$'\x1f' read -r \
     fi
 
     if ! validate_installed_package \
-        "$final_orgdb" \
+        "$final_eggnog_orgdb" \
         "$taxid" \
         "$validation_file"; then
-        species_message="Detected package failed R validation: $final_orgdb"
+        species_message="Detected EggNOG_OrgDb failed R validation: $final_eggnog_orgdb"
         warn "$species_message"
         elapsed="$(( $(date +%s) - start_epoch ))"
         append_report \
-            "$taxid" "$scientific_name" "$folder" "$old_orgdb" "$final_orgdb" \
+            "$taxid" "$scientific_name" "$folder" "$old_orgdb" \
+            "$old_eggnog_orgdb" "$final_eggnog_orgdb" \
             "FAILED_VALIDATION" "$elapsed" "$log_file" "$species_message"
         printf "status\tFAILED_VALIDATION\nmessage\t%s\n" "$species_message" > "$status_file"
         ((failed += 1))
@@ -1153,32 +1183,35 @@ while IFS=$'\x1f' read -r \
         continue
     fi
 
-    printf '%s\n' "$final_orgdb" > "$package_file"
+    printf '%s\n' "$final_eggnog_orgdb" > "$package_file"
 
     if [[ "$UPDATE_CSV" == "1" ]]; then
-        update_orgdb_csv "$taxid" "$final_orgdb"
+        update_eggnog_orgdb_csv "$taxid" "$final_eggnog_orgdb"
     fi
 
     elapsed="$(( $(date +%s) - start_epoch ))"
     species_status="COMPLETE"
-    species_message="OrgDb built or validated successfully"
+    species_message="EggNOG_OrgDb built or validated successfully; primary OrgDb preserved"
 
     {
         printf "status\t%s\n" "$species_status"
         printf "taxid\t%s\n" "$taxid"
         printf "scientific_name\t%s\n" "$scientific_name"
         printf "package_scientific_name\t%s\n" "$package_scientific_name"
-        printf "orgdb\t%s\n" "$final_orgdb"
+        printf "primary_orgdb\t%s\n" "$old_orgdb"
+        printf "eggnog_orgdb\t%s\n" "$final_eggnog_orgdb"
         printf "elapsed_seconds\t%s\n" "$elapsed"
         printf "log\t%s\n" "$log_file"
         printf "validation\t%s\n" "$validation_file"
     } > "$status_file"
 
     append_report \
-        "$taxid" "$scientific_name" "$folder" "$old_orgdb" "$final_orgdb" \
+        "$taxid" "$scientific_name" "$folder" "$old_orgdb" \
+        "$old_eggnog_orgdb" "$final_eggnog_orgdb" \
         "$species_status" "$elapsed" "$log_file" "$species_message"
 
-    echo "[OK] TaxID $taxid -> $final_orgdb"
+    echo "[OK] TaxID $taxid primary OrgDb preserved -> ${old_orgdb:-<empty>}"
+    echo "[OK] TaxID $taxid EggNOG_OrgDb -> $final_eggnog_orgdb"
     echo "[OK] Elapsed: ${elapsed}s"
     ((completed += 1))
 

@@ -2052,13 +2052,45 @@ fi
 # ------------------------------------------------------------
 # Scientific name from HostSpecies.csv
 # ------------------------------------------------------------
+# Resolve by column name rather than by a fixed CSV position. This keeps the
+# lookup valid when HostSpecies.csv gains or reorders metadata columns.
 
-species_name=$(awk -F, -v taxid="$hostid" '
-    NR > 1 && $1 == taxid {
-        print $3
-        exit
-    }
-' "$MTDIR/HostSpecies.csv")
+species_name=$(
+    tr -d '\r' < "$MTDIR/HostSpecies.csv" |
+    awk -F',' -v taxid="$hostid" '
+        NR == 1 {
+            for (i = 1; i <= NF; i++) {
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", $i)
+                if ($i == "Taxon_ID") tax_col = i
+                if ($i == "Scientific_name") sci_col = i
+            }
+
+            if (!tax_col || !sci_col) {
+                exit 2
+            }
+
+            next
+        }
+
+        {
+            tax_id = $tax_col
+            sci_name = $sci_col
+
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", tax_id)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", sci_name)
+
+            if (tax_id == taxid) {
+                print sci_name
+                exit
+            }
+        }
+    '
+)
+hostspecies_lookup_status=$?
+
+if [[ "$hostspecies_lookup_status" -eq 2 ]]; then
+    die "HostSpecies.csv must contain Taxon_ID and Scientific_name columns."
+fi
 
 if [[ -z "$species_name" ]]; then
     species_name="scientific name not found"

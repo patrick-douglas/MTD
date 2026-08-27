@@ -481,7 +481,15 @@ if (filename == "host_counts.txt") {
 
     library("biomaRt")
 
-    dataset_use <- as.character(host_sp[host_sp$Taxon_ID == args[3], 2])
+    if (!"MartDatasets" %in% names(host_sp)) {
+      stop("HostSpecies.csv does not contain a MartDatasets column.")
+    }
+
+    dataset_use <- as.character(
+      host_sp$MartDatasets[
+        as.character(host_sp$Taxon_ID) == as.character(args[3])
+      ][1]
+    )
     message("Using Ensembl dataset: ", dataset_use)
 
     ensembl <- NULL
@@ -3236,6 +3244,36 @@ if (filename == "host_counts.txt"){
       do.db != "-"
   ]
 
+  # Optional secondary reference-matched OrgDb used only for eggNOG-derived
+  # KEGG. If the column is absent/empty, fall back to the primary OrgDb so
+  # existing non-model HostSpecies registries remain compatible.
+  eggnog.db <- character()
+
+  if ("EggNOG_OrgDb" %in% names(host_sp)) {
+    eggnog.db <- unique(
+      trimws(
+        as.character(
+          host_sp$EggNOG_OrgDb[host_rows]
+        )
+      )
+    )
+
+    eggnog.db <- eggnog.db[
+      !is.na(eggnog.db) &
+        eggnog.db != "" &
+        eggnog.db != "-"
+    ]
+  }
+
+  if (length(eggnog.db) > 1) {
+    stop(
+      "Multiple EggNOG_OrgDb packages are configured for TaxID ",
+      host_taxid,
+      ": ",
+      paste(eggnog.db, collapse = ", ")
+    )
+  }
+
   if (length(do.db) == 0) {
     message(
       "[INFO] No OrgDb package is configured for host TaxID ",
@@ -3254,6 +3292,7 @@ if (filename == "host_counts.txt"){
     }
 
     do.db <- do.db[[1]]
+    PRIMARY_ORGDB_PACKAGE <- do.db
 
     message(
       "[INFO] Host OrgDb package: ",
@@ -3326,19 +3365,76 @@ HOST_ORGDB_COLUMNS <- AnnotationDbi::columns(do.db.obj)
 
 HOST_HAS_ENTREZ <- "ENTREZID" %in% HOST_ORGDB_COLUMNS
 
-HOST_HAS_KEGG_DERIVED <- any(
-  c(
-    "KEGG_KO",
-    "KEGG_PATHWAY",
-    "KEGG_MODULE",
-    "KEGG_REACTION",
-    "KEGG_BRITE"
-  ) %in% HOST_ORGDB_COLUMNS
+# Resolve the secondary eggNOG-derived OrgDb independently of the primary
+# package. Model organisms can therefore use an official OrgDb for GO/official
+# KEGG while keeping a reference-matched custom package for eggNOG KEGG.
+if (length(eggnog.db) == 0) {
+  eggnog.db <- do.db
+  message(
+    "[INFO] EggNOG_OrgDb is not separately configured; using primary OrgDb: ",
+    eggnog.db
+  )
+} else {
+  eggnog.db <- eggnog.db[[1]]
+  message("[INFO] Host EggNOG_OrgDb package: ", eggnog.db)
+}
+
+EGGNOG_ORGDB_PACKAGE <- eggnog.db
+eggnog.db.obj <- NULL
+
+if (identical(eggnog.db, do.db)) {
+  eggnog.db.obj <- do.db.obj
+} else if (requireNamespace(eggnog.db, quietly = TRUE)) {
+  eggnog.db.obj <- get(
+    eggnog.db,
+    envir = asNamespace(eggnog.db)
+  )
+} else {
+  warning(
+    "The configured EggNOG_OrgDb package is not visible: ",
+    eggnog.db,
+    ". Official OrgDb analyses will continue, but eggNOG-derived KEGG will be skipped.",
+    "\nActive R library paths: ",
+    paste(.libPaths(), collapse = "; "),
+    call. = FALSE
+  )
+}
+
+EGGNOG_ORGDB_COLUMNS <- if (is.null(eggnog.db.obj)) {
+  character()
+} else {
+  AnnotationDbi::columns(eggnog.db.obj)
+}
+
+EGGNOG_ORGDB_KEYTYPES <- if (is.null(eggnog.db.obj)) {
+  character()
+} else {
+  AnnotationDbi::keytypes(eggnog.db.obj)
+}
+
+EGGNOG_HAS_GID <- (
+  "GID" %in% EGGNOG_ORGDB_COLUMNS &&
+  "GID" %in% EGGNOG_ORGDB_KEYTYPES
 )
 
-message("[INFO] Host OrgDb gene keytype selected: ", HOST_GENE_KEYTYPE)
-message("[INFO] Host OrgDb has ENTREZID column: ", HOST_HAS_ENTREZ)
-message("[INFO] Host OrgDb has eggNOG-derived KEGG columns: ", HOST_HAS_KEGG_DERIVED)
+HOST_HAS_KEGG_DERIVED <- (
+  !is.null(eggnog.db.obj) &&
+  EGGNOG_HAS_GID &&
+  any(
+    c(
+      "KEGG_KO",
+      "KEGG_PATHWAY",
+      "KEGG_MODULE",
+      "KEGG_REACTION",
+      "KEGG_BRITE"
+    ) %in% EGGNOG_ORGDB_COLUMNS
+  )
+)
+
+message("[INFO] Host primary OrgDb gene keytype selected: ", HOST_GENE_KEYTYPE)
+message("[INFO] Host primary OrgDb has ENTREZID column: ", HOST_HAS_ENTREZ)
+message("[INFO] Host eggNOG OrgDb has GID keytype: ", EGGNOG_HAS_GID)
+message("[INFO] Host eggNOG OrgDb has KEGG-derived columns: ", HOST_HAS_KEGG_DERIVED)
 #### END BLOCK: OrgDb keytype auto-detection ####
 
     # function to make plots for GSEA results
@@ -5748,8 +5844,18 @@ dedup_ranked_gene_list <- function(x) {
 }
 
 get_host_kegg_code <- function(host_sp, taxid) {
+  if (!"Taxon_ID" %in% names(host_sp)) {
+    stop("HostSpecies.csv does not contain a Taxon_ID column.")
+  }
+
+  if (!"kegg" %in% names(host_sp)) {
+    stop("HostSpecies.csv does not contain a kegg column.")
+  }
+
   ko.db <- trimws(as.character(
-    host_sp[as.character(host_sp$Taxon_ID) == as.character(taxid), 6][1]
+    host_sp$kegg[
+      as.character(host_sp$Taxon_ID) == as.character(taxid)
+    ][1]
   ))
 
 #  if ((is.na(ko.db) || ko.db == "") && as.character(taxid) == "59463") {
@@ -5920,8 +6026,17 @@ build_gid_to_entrez_map <- function(gids, host_sp, taxid, out_file) {
 
   # 3) BioMart remains a backward-compatible online fallback for old
   # references that were created before the persistent map feature.
+  if (!"MartDatasets" %in% names(host_sp)) {
+    warning(
+      "[WARNING] HostSpecies.csv does not contain a MartDatasets column."
+    )
+    return(empty_gid_to_entrez_map())
+  }
+
   dataset_use <- as.character(
-    host_sp[as.character(host_sp$Taxon_ID) == as.character(taxid), 2][1]
+    host_sp$MartDatasets[
+      as.character(host_sp$Taxon_ID) == as.character(taxid)
+    ][1]
   )
 
   if (is.na(dataset_use) || dataset_use == "") {
@@ -6467,7 +6582,7 @@ run_kegg_derived_gsea_and_enricher <- function(
 #### END FUNCTION: dual KEGG helpers ####
 
     # function for pathway enrichment by using comparison results between groups
-    enrichment <- function(coldata_vs,args1,do.db){
+    enrichment <- function(coldata_vs,args1,do.db,eggnog.db){
       for (i in 1:nrow(coldata_vs)){
         group1<-coldata_vs$group1[i]
         group2<-coldata_vs$group2[i]
@@ -6739,8 +6854,8 @@ if (HOST_GENE_KEYTYPE == "GID") {
   genelist_gid <- genelist_gid[names(genelist_gid) != ""]
   genelist_gid <- genelist_gid[names(genelist_gid) != "-"]
 
-  if ("GID" %in% AnnotationDbi::keytypes(do.db)) {
-    valid_gid <- AnnotationDbi::keys(do.db, keytype = "GID")
+  if (!is.null(eggnog.db) && "GID" %in% AnnotationDbi::keytypes(eggnog.db)) {
+    valid_gid <- AnnotationDbi::keys(eggnog.db, keytype = "GID")
     genelist_gid <- genelist_gid[names(genelist_gid) %in% valid_gid]
   }
 
@@ -6756,8 +6871,8 @@ sig_genes_gid <- sig_genes_gid[
     sig_genes_gid != "-"
 ]
 
-if ("GID" %in% AnnotationDbi::keytypes(do.db)) {
-  valid_gid_for_enricher <- AnnotationDbi::keys(do.db, keytype = "GID")
+if (!is.null(eggnog.db) && "GID" %in% AnnotationDbi::keytypes(eggnog.db)) {
+  valid_gid_for_enricher <- AnnotationDbi::keys(eggnog.db, keytype = "GID")
   valid_gid_for_enricher <- normalize_host_gene_id(valid_gid_for_enricher)
   sig_genes_gid <- intersect(sig_genes_gid, valid_gid_for_enricher)
 }
@@ -6766,6 +6881,8 @@ write(
   paste0(
     "GID ranked genes for eggNOG-derived KEGG: ", length(genelist_gid), "\n",
     "Significant GID genes for enricher: ", length(sig_genes_gid), "\n",
+    "PRIMARY_ORGDB: ", PRIMARY_ORGDB_PACKAGE, "\n",
+    "EGGNOG_ORGDB: ", EGGNOG_ORGDB_PACKAGE, "\n",
     "HOST_GENE_KEYTYPE: ", HOST_GENE_KEYTYPE, "\n",
     "HOST_HAS_ENTREZ: ", HOST_HAS_ENTREZ, "\n",
     "HOST_HAS_KEGG_DERIVED: ", HOST_HAS_KEGG_DERIVED, "\n"
@@ -6949,9 +7066,10 @@ if (!HOST_HAS_KEGG_DERIVED) {
 
   write(
     paste0(
-      "eggNOG-derived KEGG was skipped because this OrgDb does not provide KEGG-derived columns.\n",
+      "eggNOG-derived KEGG was skipped because the configured EggNOG_OrgDb is unavailable, lacks GID, or does not provide KEGG-derived columns.\n",
+      "Configured EggNOG_OrgDb: ", EGGNOG_ORGDB_PACKAGE, "\n",
       "Available columns: ",
-      paste(AnnotationDbi::columns(do.db), collapse = ", "),
+      paste(EGGNOG_ORGDB_COLUMNS, collapse = ", "),
       "\n"
     ),
     "KEGG/eggNOG_KEGG_derived/No_KEGG_derived_columns_in_OrgDb.txt"
@@ -6968,11 +7086,11 @@ if (!HOST_HAS_KEGG_DERIVED) {
     "KEGG/eggNOG_KEGG_derived/KEGG_derived_method.txt"
   )
 
-  if ("KEGG_PATHWAY" %in% AnnotationDbi::columns(do.db)) {
+  if ("KEGG_PATHWAY" %in% EGGNOG_ORGDB_COLUMNS) {
     run_kegg_derived_gsea_and_enricher(
       genelist_gid = genelist_gid,
       sig_genes_gid = sig_genes_gid,
-      orgdb = do.db,
+      orgdb = eggnog.db,
       column = "KEGG_PATHWAY",
       prefix_regex = "^map[0-9]{5}$",
       label = "KEGG_PATHWAY_map",
@@ -6982,11 +7100,11 @@ if (!HOST_HAS_KEGG_DERIVED) {
     )
   }
 
-  if ("KEGG_MODULE" %in% AnnotationDbi::columns(do.db)) {
+  if ("KEGG_MODULE" %in% EGGNOG_ORGDB_COLUMNS) {
     run_kegg_derived_gsea_and_enricher(
       genelist_gid = genelist_gid,
       sig_genes_gid = sig_genes_gid,
-      orgdb = do.db,
+      orgdb = eggnog.db,
       column = "KEGG_MODULE",
       prefix_regex = "^M[0-9]{5}$",
       label = "KEGG_MODULE",
@@ -6996,11 +7114,11 @@ if (!HOST_HAS_KEGG_DERIVED) {
     )
   }
 
-  if ("KEGG_KO" %in% AnnotationDbi::columns(do.db)) {
+  if ("KEGG_KO" %in% EGGNOG_ORGDB_COLUMNS) {
     run_kegg_derived_gsea_and_enricher(
       genelist_gid = genelist_gid,
       sig_genes_gid = sig_genes_gid,
-      orgdb = do.db,
+      orgdb = eggnog.db,
       column = "KEGG_KO",
       prefix_regex = "^ko:K[0-9]+$",
       label = "KEGG_KO",
@@ -7010,11 +7128,11 @@ if (!HOST_HAS_KEGG_DERIVED) {
     )
   }
 
-  if ("KEGG_REACTION" %in% AnnotationDbi::columns(do.db)) {
+  if ("KEGG_REACTION" %in% EGGNOG_ORGDB_COLUMNS) {
     run_kegg_derived_gsea_and_enricher(
       genelist_gid = genelist_gid,
       sig_genes_gid = sig_genes_gid,
-      orgdb = do.db,
+      orgdb = eggnog.db,
       column = "KEGG_REACTION",
       prefix_regex = "^R[0-9]+$",
       label = "KEGG_REACTION",
@@ -7030,7 +7148,7 @@ if (!HOST_HAS_KEGG_DERIVED) {
     }
     
     ## run GSEA enrichment analysis ##
-    enrichment(coldata_vs,args[1],do.db.obj)
+    enrichment(coldata_vs,args[1],do.db.obj,eggnog.db.obj)
     
     # function for preparing genelist for biological theme comparison - compareCluster
 BTC <- function(coldata_vs, do.db) {
@@ -7077,8 +7195,94 @@ BTC <- function(coldata_vs, do.db) {
   return(genelist.ct)
 }
 
+    # Build a second compareCluster input in the raw GTF/GID namespace for
+    # eggNOG-derived KEGG. This is independent of the primary OrgDb keytype.
+    BTC_GID <- function(coldata_vs, eggnog.db) {
+      genelist.ct.gid <- list()
+
+      if (is.null(eggnog.db) ||
+          !"GID" %in% AnnotationDbi::keytypes(eggnog.db)) {
+        return(genelist.ct.gid)
+      }
+
+      valid_gid <- normalize_host_gene_id(
+        AnnotationDbi::keys(eggnog.db, keytype = "GID")
+      )
+
+      for (i in seq_len(nrow(coldata_vs))) {
+        group1 <- coldata_vs$group1[i]
+        group2 <- coldata_vs$group2[i]
+
+        df.btc <- read.csv(
+          paste0(
+            getwd(), "/", group1, "_vs_", group2,
+            "/host_counts_", group1, "_vs_", group2, ".csv"
+          ),
+          header = TRUE
+        )
+
+        flt_up <- df.btc[
+          df.btc$log2FoldChange > 0.5 &
+            df.btc$pvalue < 0.05,
+          ,
+          drop = FALSE
+        ]
+
+        flt_down <- df.btc[
+          df.btc$log2FoldChange < -0.5 &
+            df.btc$pvalue < 0.05,
+          ,
+          drop = FALSE
+        ]
+
+        get_gid <- function(x) {
+          if (nrow(x) == 0) {
+            return(character())
+          }
+
+          ids <- unique(normalize_host_gene_id(x$X))
+          ids <- ids[
+            !is.na(ids) &
+              ids != "" &
+              ids != "-" &
+              ids %in% valid_gid
+          ]
+          ids
+        }
+
+        genelist.c <- list(
+          get_gid(flt_up),
+          get_gid(flt_down)
+        )
+
+        names(genelist.c) <- c(
+          paste0(group1, "_vs_", group2, "_UP"),
+          paste0(group1, "_vs_", group2, "_DOWN")
+        )
+
+        genelist.ct.gid <- c(genelist.ct.gid, genelist.c)
+      }
+
+      genelist.ct.gid
+    }
+
     ## run biological theme comparison ##
-    genelist.ct <- BTC(coldata_vs,do.db.obj)
+    genelist.ct.gid <- BTC_GID(coldata_vs, eggnog.db.obj)
+
+    # The primary OrgDb may use ENTREZID while the count matrix uses Ensembl/GID
+    # identifiers. Convert the GID clusters once for primary GO/official KEGG.
+    if (HOST_GENE_KEYTYPE == "ENTREZID") {
+      genelist.ct <- convert_gene_clusters_to_entrez(
+        gene_clusters = genelist.ct.gid,
+        host_sp = host_sp,
+        taxid = args[3],
+        host_gene_keytype = "GID",
+        outdir = getwd()
+      )
+    } else {
+      genelist.ct <- BTC(coldata_vs, do.db.obj)
+    }
+
 # GO enrichment comparison
 # User-adjustable settings
 go_pvalue_cutoff <- 0.05
@@ -8000,20 +8204,24 @@ if (!is.null(cgo) && nrow(cgo@compareClusterResult) > 0) {
 
 ## A) eggNOG-derived KEGG compareCluster using GID clusters
 
-if (HOST_HAS_KEGG_DERIVED && "KEGG_PATHWAY" %in% AnnotationDbi::columns(do.db.obj)) {
+if (
+  HOST_HAS_KEGG_DERIVED &&
+  !is.null(eggnog.db.obj) &&
+  "KEGG_PATHWAY" %in% EGGNOG_ORGDB_COLUMNS
+) {
 
   term2gene_pathway <- make_kegg_derived_term2gene(
-    orgdb = do.db.obj,
+    orgdb = eggnog.db.obj,
     column = "KEGG_PATHWAY",
     prefix_regex = "^map[0-9]{5}$",
     out_file = "TERM2GENE_KEGG_PATHWAY_map_compareCluster.tsv"
   )
 
-  if (nrow(term2gene_pathway) > 0) {
+  if (nrow(term2gene_pathway) > 0 && length(genelist.ct.gid) > 0) {
 
     ck_derived <- tryCatch({
       compareCluster(
-        genelist.ct,
+        genelist.ct.gid,
         fun = "enricher",
         TERM2GENE = term2gene_pathway,
         pAdjustMethod = "BH",

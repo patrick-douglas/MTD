@@ -5,8 +5,10 @@ set -euo pipefail
 # install_gold_orgdb_from_hostspecies.sh
 # v6: robust protein FASTA parsing + clean previous OrgDb artifacts before rebuild.
 #
-# Build a reference-matched OrgDb from the same GTF/GFF and
-# protein FASTA used by MTD. This avoids NCBI/Entrez ID drift.
+# Build a reference-matched eggNOG OrgDb from the same GTF/GFF and
+# protein FASTA used by MTD. For model organisms this can coexist with a
+# curated official primary OrgDb; for non-model species both roles may use
+# the same custom package.
 #
 # Main modes:
 #   1) --eggnog FILE
@@ -109,7 +111,7 @@ Safety checks:
   --genome checks FASTA sequence names against GTF seqnames.
   --protein-fasta is checked against GTF gene IDs before running eggNOG.
   eggNOG annotations are checked against GTF gene IDs before OrgDb creation.
-  --skip-if-compatible tests an existing OrgDb from HostSpecies.csv and skips creation if compatible.
+  --skip-if-compatible preserves a compatible primary OrgDb. Custom package\n  creation is skipped only when OrgDb and EggNOG_OrgDb are the same package.
 
 Notes:
   - This script avoids AnnotationForge::makeOrgPackageFromNCBI.
@@ -227,18 +229,47 @@ WORK_DIR="$BUILD_DIR/work_taxid_${TAXID}"
 if [[ "$FORCE" == "1" ]]; then rm -rf "$WORK_DIR"; fi
 mkdir -p "$WORK_DIR"
 
-# OrgDb package name expected by AnnotationForge and/or listed in HostSpecies.csv.
-ORGDB_FROM_CSV="$(python3 - "$HOSTSPECIES" "$TAXID" <<'PYORGDB'
+# Primary OrgDb is used for curated/official host annotation. EggNOG_OrgDb is
+# the reference-matched secondary package used for eggNOG-derived KEGG. For
+# non-model species both columns may intentionally point to the same package.
+read -r ORGDB_FROM_CSV EGGNOG_ORGDB_FROM_CSV < <(
+  python3 - "$HOSTSPECIES" "$TAXID" <<'PYORGDB'
 import csv, sys
 path, taxid = sys.argv[1], sys.argv[2]
 with open(path, newline='') as f:
     for row in csv.DictReader(f):
         if str(row.get('Taxon_ID','')).strip() == str(taxid):
-            print((row.get('OrgDb') or '').strip())
+            primary = (row.get('OrgDb') or '').strip()
+            eggnog = (row.get('EggNOG_OrgDb') or '').strip()
+            print(primary, eggnog)
             raise SystemExit(0)
+raise SystemExit(f'[ERROR] TaxID {taxid} not found in HostSpecies.csv')
 PYORGDB
-)"
+)
+
 ORGDB_GUESS="org.${GENUS:0:1}${SPECIES}.eg.db"
+EGGNOG_ORGDB_TARGET="${EGGNOG_ORGDB_FROM_CSV:-$ORGDB_GUESS}"
+
+# AnnotationForge derives the package name from genus/species. When the curated
+# secondary package name encodes additional epithets (for example
+# org.ClupusFamiliaris.eg.db), derive the package-species token from that
+# explicit registry target so direct and batch builders produce the same name.
+BUILD_SPECIES="$SPECIES"
+ORGDB_PREFIX="org.${GENUS:0:1}"
+if [[ "$EGGNOG_ORGDB_TARGET" == "$ORGDB_PREFIX"*.eg.db ]]; then
+  BUILD_SPECIES="${EGGNOG_ORGDB_TARGET#"$ORGDB_PREFIX"}"
+  BUILD_SPECIES="${BUILD_SPECIES%.eg.db}"
+fi
+
+EXPECTED_BUILD_PACKAGE="org.${GENUS:0:1}${BUILD_SPECIES}.eg.db"
+if [[ "$EXPECTED_BUILD_PACKAGE" != "$EGGNOG_ORGDB_TARGET" ]]; then
+  echo "[ERROR] EggNOG_OrgDb cannot be generated from the current scientific name."
+  echo "  TaxID:             $TAXID"
+  echo "  Scientific name:   $SCI_NAME"
+  echo "  EggNOG_OrgDb:      $EGGNOG_ORGDB_TARGET"
+  echo "  Generated package: $EXPECTED_BUILD_PACKAGE"
+  exit 1
+fi
 
 remove_path_if_exists() {
   local p="$1"
@@ -251,7 +282,11 @@ remove_path_if_exists() {
 clean_previous_orgdb_artifacts() {
   local pkg
   local seen=""
-  for pkg in "$ORGDB_FROM_CSV" "$ORGDB_GUESS"; do
+
+  # Never remove the curated primary package merely because a separate
+  # eggNOG-derived package is being rebuilt. Only custom secondary targets and
+  # their legacy guessed name are cleaned from the MTD custom library/build dir.
+  for pkg in "$EGGNOG_ORGDB_TARGET" "$ORGDB_GUESS"; do
     [[ -z "$pkg" || "$pkg" == "NA" || "$pkg" == "None" ]] && continue
     case ":$seen:" in *":$pkg:"*) continue ;; esac
     seen="$seen:$pkg"
@@ -276,6 +311,8 @@ printf "[INFO] Protein FASTA: %s\n" "${PROTEIN_FASTA:-not provided}"
 printf "[INFO] eggNOG DB: %s\n" "$EGGNOG_DB"
 printf "[INFO] Build dir: %s\n" "$BUILD_DIR"
 printf "[INFO] Install lib: %s\n" "$LIB"
+printf "[INFO] Primary OrgDb: %s\n" "${ORGDB_FROM_CSV:-not configured}"
+printf "[INFO] eggNOG OrgDb target: %s\n" "$EGGNOG_ORGDB_TARGET"
 
 # ------------------------------------------------------------
 # Input inspection: GTF genes and seqnames
@@ -550,14 +587,29 @@ RS
       if [[ "$STATUS" == "installed" && "$TAXONOMY_OK" == "1" ]] && \
          awk -v pct="$COMPAT_PCT" -v min="$MIN_EXISTING_ORGDB_PCT" \
            'BEGIN { exit !(pct >= min) }'; then
-        echo "[OK] Existing OrgDb is compatible enough."
+        echo "[OK] Existing primary OrgDb is compatible enough."
         echo "[INFO] Acceptance metric: $COMPAT_LABEL = ${COMPAT_PCT}% (minimum ${MIN_EXISTING_ORGDB_PCT}%)."
-        echo "[INFO] The R OrgDb package will not be rebuilt."
+
+        if [[ "$EGGNOG_ORGDB_TARGET" == "$ORGDB_FROM_CSV" ]]; then
+          echo "[INFO] Primary and eggNOG OrgDb are the same package."
+          echo "[INFO] The R OrgDb package will not be rebuilt."
+          SKIP_ORGDB_BUILD=1
+        else
+          echo "[INFO] Preserving primary OrgDb: $ORGDB_FROM_CSV"
+          echo "[INFO] A separate reference-matched eggNOG OrgDb will be built:"
+          echo "  $EGGNOG_ORGDB_TARGET"
+        fi
+
         echo "[INFO] Continuing to ensure that representative proteins,"
         echo "[INFO] eggNOG annotations and ssGSEA resources are available."
-        SKIP_ORGDB_BUILD=1
       else
-        echo "[WARNING] Existing OrgDb is missing or not compatible enough. Building gold OrgDb."
+        echo "[WARNING] Existing primary OrgDb is missing or not compatible enough."
+        if [[ "$EGGNOG_ORGDB_TARGET" == "$ORGDB_FROM_CSV" ]]; then
+          echo "[WARNING] Building the reference-matched primary/eggNOG OrgDb."
+        else
+          echo "[WARNING] The primary OrgDb will remain configured in HostSpecies.csv."
+          echo "[INFO] Building the separate reference-matched eggNOG OrgDb: $EGGNOG_ORGDB_TARGET"
+        fi
       fi
     else
       echo "[WARNING] Existing OrgDb compatibility report was not created. Building gold OrgDb anyway."
@@ -569,9 +621,9 @@ fi
 # Clean previous OrgDb package/source artifacts for this species
 # ------------------------------------------------------------
 # At this point, either --skip-if-compatible was not used, --force was used,
-# or the existing OrgDb was missing/incompatible. Since we are building a gold
-# reference-matched OrgDb, remove previous installs/source dirs for this package
-# from the custom library/build folder to avoid stale or duplicated artifacts.
+# or a separate eggNOG OrgDb is required. Remove only the reference-matched
+# secondary package artifacts from the custom library/build folder; the curated
+# primary OrgDb is never removed or replaced by this step.
 if [[ "$SKIP_ORGDB_BUILD" == "1" ]]; then
     echo "[INFO] Keeping the existing OrgDb package and build artifacts."
 else
@@ -883,7 +935,8 @@ else
         --version "$VERSION" \
         --taxid "$TAXID" \
         --genus "$GENUS" \
-        --species "$SPECIES" \
+        --species "$BUILD_SPECIES" \
+        --expected-package "$EGGNOG_ORGDB_TARGET" \
         --symbol-mode "$SYMBOL_MODE" \
         "${FORCE_ARG[@]}"
 fi
@@ -891,6 +944,8 @@ fi
 cat <<EOF
 
 [OK] Finished gold OrgDb build for $SCI_NAME
+[INFO] Primary OrgDb: ${ORGDB_FROM_CSV:-not configured}
+[INFO] eggNOG OrgDb: $EGGNOG_ORGDB_TARGET
 [INFO] Input compatibility report:
   $INPUT_REPORT
 [INFO] eggNOG compatibility report:

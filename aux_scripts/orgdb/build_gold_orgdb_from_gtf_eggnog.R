@@ -28,6 +28,7 @@ version <- get_arg('--version', '0.1.0')
 taxid <- get_arg('--taxid')
 genus <- get_arg('--genus')
 species <- get_arg('--species')
+expected_package <- get_arg('--expected-package', NA_character_)
 author <- get_arg('--author', 'MTD custom annotation builder')
 maintainer <- get_arg('--maintainer', 'MTD maintainer <maintainer@example.com>')
 symbol_mode <- get_arg('--symbol-mode', 'gene_id')
@@ -57,6 +58,16 @@ message('[INFO] Version: ', version)
 
 # AnnotationForge creates package name from genus/species, usually org.Gspecies.eg.db
 pkg_name_guess <- paste0('org.', substr(genus, 1, 1), species, '.eg.db')
+
+if (!is.na(expected_package) && nzchar(expected_package) &&
+    !identical(pkg_name_guess, expected_package)) {
+  stop(
+    '[ERROR] Generated OrgDb package name would not match registry target. ',
+    'Expected: ', expected_package,
+    '; generated from genus/species: ', pkg_name_guess
+  )
+}
+
 pkg_install_dir_guess <- file.path(lib_dir, pkg_name_guess)
 if (force && dir.exists(pkg_install_dir_guess)) {
   message('[INFO] Removing previous installed package guess: ', pkg_install_dir_guess)
@@ -419,6 +430,16 @@ if (status != 0) stop('[ERROR] R CMD INSTALL failed')
 
 .libPaths(c(lib_dir, .libPaths()))
 pkg_name <- basename(pkg_path)
+
+if (!is.na(expected_package) && nzchar(expected_package) &&
+    !identical(pkg_name, expected_package)) {
+  stop(
+    '[ERROR] Installed OrgDb package name does not match registry target. ',
+    'Expected: ', expected_package,
+    '; installed: ', pkg_name
+  )
+}
+
 message('[OK] Installed package: ', pkg_name, ' into ', lib_dir)
 
 suppressPackageStartupMessages({

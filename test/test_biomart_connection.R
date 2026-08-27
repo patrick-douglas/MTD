@@ -65,13 +65,17 @@ if (!("Taxon_ID" %in% names(host_sp))) {
   stop("HostSpecies.csv does not contain column Taxon_ID")
 }
 
+if (!("MartDatasets" %in% names(host_sp))) {
+  stop("HostSpecies.csv does not contain column MartDatasets")
+}
+
 row <- host_sp[as.character(host_sp$Taxon_ID) == as.character(taxid), ]
 
 if (nrow(row) == 0) {
   stop("TaxID ", taxid, " not found in HostSpecies.csv")
 }
 
-dataset_use <- as.character(row[1, 2])
+dataset_use <- as.character(row$MartDatasets[1])
 
 cat("\nDataset detected from HostSpecies.csv:\n")
 print(dataset_use)

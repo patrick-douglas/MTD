@@ -1199,36 +1199,41 @@ cd "$MTDIR" || {
 # ------------------------------------------------------------
 # Clean previous files from the same TaxID/reference
 # ------------------------------------------------------------
-get_orgdb_from_hostspecies() {
+get_hostspecies_value() {
     local taxid="$1"
     local host_csv="$2"
+    local column_name="$3"
 
     if [[ ! -s "$host_csv" ]]; then
         return 0
     fi
 
-    # HostSpecies.csv is expected to contain at least:
-    # Taxon_ID,...,OrgDb,...
-    # We remove Windows CR characters before awk to avoid CR-character regex portability issues.
-    tr -d '\r' < "$host_csv" | awk -F',' -v id="$taxid" '
+    # Read a HostSpecies.csv value by header name without assuming a fixed
+    # column position. Windows CR characters are removed for portability.
+    tr -d '\r' < "$host_csv" | awk -F',' -v id="$taxid" -v wanted="$column_name" '
         NR == 1 {
             for (i = 1; i <= NF; i++) {
                 gsub(/^[[:space:]]+|[[:space:]]+$/, "", $i)
                 if ($i == "Taxon_ID") tax_col = i
-                if ($i == "OrgDb") org_col = i
+                if ($i == wanted) value_col = i
             }
+
+            if (!tax_col || !value_col) {
+                exit 2
+            }
+
             next
         }
 
-        tax_col && org_col {
+        tax_col && value_col {
             tax_id = $tax_col
-            orgdb = $org_col
+            value = $value_col
 
             gsub(/^[[:space:]]+|[[:space:]]+$/, "", tax_id)
-            gsub(/^[[:space:]]+|[[:space:]]+$/, "", orgdb)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
 
-            if (tax_id == id && orgdb != "" && orgdb != "NA") {
-                print orgdb
+            if (tax_id == id && value != "" && value != "NA") {
+                print value
                 exit
             }
         }
@@ -1250,6 +1255,9 @@ cleanup_previous_reference() {
     local mtdir="$2"
     local host_csv="$mtdir/HostSpecies.csv"
     local orgdb_pkg=""
+    local eggnog_orgdb_pkg=""
+    local pkg=""
+    local seen=""
 
     echo "------------------------------------------------------------"
     echo "Cleaning previous files for TaxID ${taxid}"
@@ -1269,20 +1277,35 @@ cleanup_previous_reference() {
     remove_path_if_exists "$mtdir/build/orgdb_${taxid}"
     remove_path_if_exists "$mtdir/build/orgdb_taxid_${taxid}"
 
-    # Remove the custom OrgDb package from the custom R library, but only
-    # the package listed for this TaxID in HostSpecies.csv.
-    orgdb_pkg=$(get_orgdb_from_hostspecies "$taxid" "$host_csv" || true)
+    # Remove custom package artifacts associated with either annotation role.
+    # Official OrgDb packages live in the R412 environment, so these operations
+    # affect only repository-local custom_R_libs/source leftovers.
+    orgdb_pkg="$(
+        get_hostspecies_value "$taxid" "$host_csv" "OrgDb" || true
+    )"
+    eggnog_orgdb_pkg="$(
+        get_hostspecies_value "$taxid" "$host_csv" "EggNOG_OrgDb" || true
+    )"
 
-    if [[ -n "$orgdb_pkg" ]]; then
-        echo "[CLEAN] OrgDb listed for TaxID ${taxid}: $orgdb_pkg"
-        remove_path_if_exists "$mtdir/custom_R_libs/$orgdb_pkg"
-        remove_path_if_exists "$mtdir/custom_R_libs/00LOCK-$orgdb_pkg"
+    for pkg in "$orgdb_pkg" "$eggnog_orgdb_pkg"; do
+        [[ -z "$pkg" ]] && continue
+        case ":$seen:" in
+            *":$pkg:"*) continue ;;
+        esac
+        seen="${seen}:$pkg"
 
-        # Remove package source/sqlite leftovers in MTD root only if they match this OrgDb.
-        remove_path_if_exists "$mtdir/$orgdb_pkg"
-        remove_path_if_exists "$mtdir/${orgdb_pkg%.db}.sqlite"
-    else
-        echo "[CLEAN] No OrgDb package listed for TaxID ${taxid} in HostSpecies.csv."
+        echo "[CLEAN] Host annotation package listed for TaxID ${taxid}: $pkg"
+        remove_path_if_exists "$mtdir/custom_R_libs/$pkg"
+        remove_path_if_exists "$mtdir/custom_R_libs/00LOCK-$pkg"
+
+        # Remove package source/sqlite leftovers in MTD root only if they match
+        # this registered package name.
+        remove_path_if_exists "$mtdir/$pkg"
+        remove_path_if_exists "$mtdir/${pkg%.db}.sqlite"
+    done
+
+    if [[ -z "$orgdb_pkg" && -z "$eggnog_orgdb_pkg" ]]; then
+        echo "[CLEAN] No OrgDb packages listed for TaxID ${taxid} in HostSpecies.csv."
     fi
 
     echo "[CLEAN] Done."
@@ -1450,13 +1473,24 @@ if ! materialize_fasta_reference \
     exit 1
 fi
 
-# Extraia o nome científico da espécie baseado no Taxon_ID
-species_name=$(awk -F, -v taxid="$customized" '$1 == taxid {print $3}' "$MTDIR/HostSpecies.csv")
+# Extract the scientific name by HostSpecies.csv header, not column number.
+hostspecies_lookup_status=0
+species_name="$(
+    get_hostspecies_value \
+        "$customized" \
+        "$MTDIR/HostSpecies.csv" \
+        "Scientific_name"
+)" || hostspecies_lookup_status=$?
 
-# Verifique se o nome da espécie foi encontrado
-if [ -z "$species_name" ]; then
-  echo "Error: species name not found for Taxon_ID $customized."
-  exit 1
+if [[ "$hostspecies_lookup_status" -ne 0 ]]; then
+    echo "Error: could not read Taxon_ID/Scientific_name from HostSpecies.csv."
+    exit 1
+fi
+
+# Verify that the TaxID exists and has a scientific name.
+if [[ -z "$species_name" ]]; then
+    echo "Error: species name not found for Taxon_ID $customized."
+    exit 1
 fi
 
 # Extraia o assembly_name do cabeçalho da sequência de entrada
@@ -1492,8 +1526,8 @@ fi
 
 # ------------------------------------------------------------
 # Get scientific name from $MTDIR/HostSpecies.csv
-# Expected columns:
-# Taxon_ID,MartDatasets,Scientific_name,OrgDb,Common_name,kegg
+# Required columns are resolved by header name. Current schema includes:
+# Taxon_ID,MartDatasets,Scientific_name,OrgDb,EggNOG_OrgDb,Common_name,kegg
 # ------------------------------------------------------------
 
 species_from_taxid=$(
