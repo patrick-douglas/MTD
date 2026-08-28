@@ -218,6 +218,61 @@ go_df$Direction <- factor(
   )
 )
 
+## ------------------------------------------------------------
+## Publication-friendly labels for comparison facets
+##
+## Long comparison names such as:
+##   infected_vs_infection_failed_DOWN
+## are wrapped across multiple lines so that facet-strip text is
+## never clipped when several comparisons are shown together.
+## ------------------------------------------------------------
+
+format_direction_label <- function(x) {
+
+  x <- as.character(x)
+
+  x <- gsub(
+    "_vs_",
+    "\nvs\n",
+    x,
+    fixed = TRUE
+  )
+
+  x <- sub(
+    "_UP$",
+    "\nUP",
+    x
+  )
+
+  x <- sub(
+    "_DOWN$",
+    "\nDOWN",
+    x
+  )
+
+  x <- gsub(
+    "_",
+    " ",
+    x,
+    fixed = TRUE
+  )
+
+  x
+}
+
+direction_levels <- levels(
+  droplevels(go_df$Direction)
+)
+
+go_df$Direction_label <- factor(
+  format_direction_label(
+    as.character(go_df$Direction)
+  ),
+  levels = format_direction_label(
+    direction_levels
+  )
+)
+
 go_df$ONTOLOGY_label <- factor(
   go_df$ONTOLOGY,
   levels = c("BP", "CC", "MF"),
@@ -285,26 +340,20 @@ plot_df$Term_key <- factor(
 
 ## Wrap long GO descriptions.
 
-wrap_term <- function(x, width = 42) {
+## ------------------------------------------------------------
+## Clean GO descriptions for axis labels.
+##
+## Keep each GO term on a single line. The figure width is
+## increased dynamically below to provide enough room for long
+## descriptions without compressing the facet panels.
+## ------------------------------------------------------------
 
-  descriptions <- sub(
+format_term <- function(x) {
+
+  sub(
     "\\|\\|\\|.*$",
     "",
     x
-  )
-
-  vapply(
-    descriptions,
-    function(term) {
-      paste(
-        strwrap(
-          term,
-          width = width
-        ),
-        collapse = "\n"
-      )
-    },
-    FUN.VALUE = character(1)
   )
 }
 
@@ -328,20 +377,23 @@ p <- ggplot(
   ) +
   facet_grid(
     rows = vars(ONTOLOGY_label),
-    cols = vars(Direction),
+    cols = vars(Direction_label),
     scales = "free_y",
     space = "free_y",
     switch = "y"
   ) +
   scale_y_discrete(
-    labels = wrap_term
-  ) +
+  labels = format_term,
+  expand = expansion(
+    add = c(0.65, 0.65)
+  )
+) +
   scale_x_continuous(
     labels = function(x) {
       sprintf("%.3f", x)
     },
     expand = expansion(
-      mult = c(0.02, 0.10)
+      mult = c(0.08, 0.18)
     )
   ) +
   scale_size(
@@ -390,8 +442,9 @@ p <- ggplot(
     ),
 
     strip.text = element_text(
-      face = "bold",
-      size = 10
+    face = "bold",
+    size = 9,
+    lineheight = 0.95
     ),
 
     strip.text.y.left = element_text(
@@ -454,10 +507,22 @@ data_file <- paste0(
   "_data.csv"
 )
 
+n_direction_panels <- dplyr::n_distinct(
+  plot_df$Direction
+)
+
+## Extra width is deliberately reserved for long GO descriptions
+## on the left while preserving useful width for every comparison
+## panel.
+plot_width <- max(
+  16,
+  8 + 2.6 * n_direction_panels
+)
+
 ggsave(
   filename = pdf_file,
   plot = p,
-  width = 14,
+  width = plot_width,
   height = 13,
   units = "in",
   limitsize = FALSE
@@ -466,7 +531,7 @@ ggsave(
 ggsave(
   filename = tiff_file,
   plot = p,
-  width = 14,
+  width = plot_width,
   height = 13,
   units = "in",
   dpi = 600,
