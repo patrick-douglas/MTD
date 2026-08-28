@@ -112,15 +112,6 @@ The SRA accessions span:
 SRR35002006 – SRR35002020
 ```
 
-
-A simplified representation of the dataset used in the documentation is shown below:
-
-![PRJNA1306560 example dataset workflow](../assets/images/example-dataset/prjna1306560-example-dataset-workflow.png)
-
-*PRJNA1306560 example dataset workflow.* Overview of the 15 paired-end RNA-seq
-runs, the three deposited library groups, and the major MTD Explorer analysis
-layers illustrated throughout this documentation.
-
 ## Sample metadata
 
 All 15 runs are associated in the deposited SRA metadata with the BioSample
