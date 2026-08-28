@@ -10,13 +10,18 @@ Common_name:
 kegg:
     KEGG REST API /list/genome/<taxid>, with an exact scientific-name
     fallback against /list/genome when the TaxID is not a supported rank.
+    The resulting CSV is independently validated by audit_hostspecies_kegg.py
+    before it may be written.
 
 Safety
 ------
-- Existing values are preserved by default.
+- Existing values are preserved by default only when the final candidate CSV
+  passes the independent KEGG TaxID audit.
 - Use --replace-existing to replace existing values when a verified value is found.
-- Missing or ambiguous online matches never erase an existing value.
-- --in-place creates a timestamped backup before replacing HostSpecies.csv.
+- Missing or ambiguous online matches never erase an existing value by themselves.
+- --in-place audits the current input before any update is attempted.
+- Every prospective output CSV is audited before it is written.
+- --in-place creates a timestamped backup only after the safety audit passes.
 - A TSV audit report records every decision.
 
 Only Python 3 standard-library modules are required.
@@ -32,6 +37,7 @@ import os
 import re
 import shutil
 import socket
+import subprocess
 import sys
 import time
 import urllib.error
@@ -42,7 +48,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional, Sequence
 
 
-SCRIPT_VERSION = "1.2.0"
+SCRIPT_VERSION = "1.3.0"
 ENSEMBL_REST = "https://rest.ensembl.org"
 KEGG_REST = "https://rest.kegg.jp"
 
@@ -818,6 +824,89 @@ def choose_final_value(
     return old, "DIFFERS_PRESERVED_EXISTING"
 
 
+
+def run_kegg_safety_audit(
+    hostspecies_path: Path,
+    cache_dir: Path,
+    *,
+    cache_max_age_days: int,
+    timeout: int,
+    retries: int,
+    request_delay: float,
+    label: str,
+) -> None:
+    """
+    Validate a HostSpecies CSV with the independent KEGG auditor.
+
+    audit_hostspecies_kegg.py exits with status 2 when it detects a
+    WRONG_TAXON or INVALID_OR_RETIRED assignment. Any non-zero status blocks
+    this updater from writing the candidate CSV.
+    """
+    auditor_path = Path(__file__).resolve().with_name(
+        "audit_hostspecies_kegg.py"
+    )
+    if not auditor_path.is_file():
+        raise RuntimeError(
+            "KEGG safety auditor not found: "
+            f"{auditor_path}. Refusing to write HostSpecies data."
+        )
+
+    audit_cache_dir = cache_dir / "kegg_safety_audit"
+    audit_cache_dir.mkdir(parents=True, exist_ok=True)
+    audit_report = audit_cache_dir / (
+        f"update_hostspecies_kegg_safety_{os.getpid()}.tsv"
+    )
+
+    command = [
+        sys.executable,
+        str(auditor_path),
+        "--hostspecies",
+        str(hostspecies_path),
+        "--report",
+        str(audit_report),
+        "--cache-dir",
+        str(audit_cache_dir),
+        "--cache-max-age-days",
+        str(cache_max_age_days),
+        "--timeout",
+        str(timeout),
+        "--retries",
+        str(retries),
+        "--request-delay",
+        str(request_delay),
+        "--fail-on-problems",
+    ]
+
+    say(f"[INFO] KEGG safety audit ({label})...")
+
+    try:
+        completed = subprocess.run(command, check=False)
+    except OSError as exc:
+        raise RuntimeError(
+            f"Unable to run KEGG safety auditor for {label}: {exc}"
+        ) from exc
+
+    if completed.returncode == 0:
+        try:
+            audit_report.unlink()
+        except FileNotFoundError:
+            pass
+        say(f"[OK] KEGG safety audit passed ({label}).")
+        return
+
+    if completed.returncode == 2:
+        raise RuntimeError(
+            "KEGG safety audit detected WRONG_TAXON or "
+            f"INVALID_OR_RETIRED in {label}; refusing to write. "
+            f"Audit report: {audit_report}"
+        )
+
+    raise RuntimeError(
+        "KEGG safety audit could not complete successfully for "
+        f"{label} (exit status {completed.returncode}); refusing to write. "
+        f"Audit report: {audit_report}"
+    )
+
 def make_backup(path: Path) -> Path:
     timestamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     backup = path.with_name(f"{path.name}.bak.{timestamp}")
@@ -875,6 +964,20 @@ def main() -> int:
     say(f"Dry run:           {'yes' if args.dry_run else 'no'}")
     say(f"Cache directory:   {cache_dir}")
     say("============================================================")
+
+    # In-place updates must never start from a file that already contains a
+    # known-invalid KEGG assignment. This prevents the preserve-existing
+    # policy from silently carrying a WRONG_TAXON value forward.
+    if args.in_place:
+        run_kegg_safety_audit(
+            input_path,
+            cache_dir,
+            cache_max_age_days=args.cache_max_age_days,
+            timeout=args.timeout,
+            retries=args.retries,
+            request_delay=args.request_delay,
+            label="current input before --in-place",
+        )
 
     say("[INFO] Retrieving Ensembl species metadata...")
     ensembl_by_taxid = fetch_ensembl_species(downloader)
@@ -1007,6 +1110,29 @@ def main() -> int:
         )
 
     write_report(report_path.resolve(), reports)
+
+    # Audit exactly what this updater proposes to write. This is a second
+    # barrier: even if future KEGG-resolution logic selects a wrong organism
+    # code, the invalid candidate cannot reach --output or --in-place.
+    validation_candidate = cache_dir / (
+        f".HostSpecies.update_candidate_{os.getpid()}.csv"
+    )
+    try:
+        write_csv(validation_candidate, fieldnames, rows)
+        run_kegg_safety_audit(
+            validation_candidate,
+            cache_dir,
+            cache_max_age_days=args.cache_max_age_days,
+            timeout=args.timeout,
+            retries=args.retries,
+            request_delay=args.request_delay,
+            label="prospective updated CSV",
+        )
+    finally:
+        try:
+            validation_candidate.unlink()
+        except FileNotFoundError:
+            pass
 
     output_written: Optional[Path] = None
     backup_path: Optional[Path] = None
