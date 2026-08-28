@@ -25,8 +25,10 @@ Reference-status counts:
 
 ## Main host list
 
-Use this table to find the NCBI Taxon ID, scientific name, and common name of a
-host species.
+Use this table to find the NCBI Taxon ID, scientific name, common name,
+reference status, and curated KEGG organism code of a host species. A dash (`—`)
+in the KEGG column means that no compatible current KEGG organism code is
+assigned to that curated host entry.
 
 | NCBI Taxon ID | Scientific name | Common name | Reference status | KEGG |
 | --- | --- | --- | --- | --- |
@@ -53,7 +55,7 @@ host species.
 | 72004 | Bos mutus | Wild_yak | COMPLETE | bom |
 | 9913 | Bos taurus | Cattle | COMPLETE | bta |
 | 6239 | Caenorhabditis elegans | Nematode | COMPLETE | cel |
-| 198806 | Calidris pugnax | Ruff | COMPLETE | narq |
+| 198806 | Calidris pugnax | Ruff | COMPLETE | — |
 | 9483 | Callithrix jacchus | White_tufted_ear_marmoset | COMPLETE | cjc |
 | 7868 | Callorhinchus milii | Elephant_shark | COMPLETE | cmk |
 | 9838 | Camelus dromedarius | Arabian_camel | COMPLETE | cdk |
@@ -92,7 +94,7 @@ host species.
 | 9371 | Echinops telfairi | Small_Madagascar_hedgehog | COMPLETE | etf |
 | 8005 | Electrophorus electricus | Electric_eel | COMPLETE | eee |
 | 7764 | Eptatretus burgeri | Inshore_hagfish | COMPLETE | — |
-| 83772 | Equus asinus asinus | Donkey | COMPLETE_OVERRIDE | — |
+| 83772 | Equus asinus asinus | Donkey | COMPLETE_OVERRIDE | eai |
 | 9796 | Equus caballus | Horse | COMPLETE | ecb |
 | 9365 | Erinaceus europaeus | Western_European_hedgehog | COMPLETE | — |
 | 27687 | Erpetoichthys calabaricus | Reedfish | COMPLETE | — |
@@ -190,7 +192,7 @@ host species.
 | 1328070 | Prolemur simus | Greater_bamboo_lemur | COMPLETE | — |
 | 379532 | Propithecus coquereli | Coquerel_s_sifaka | COMPLETE | pcoq |
 | 8673 | Pseudonaja textilis | Eastern_brown_snake | COMPLETE | ptex |
-| 132908 | Pteropus vampyrus | Large_flying_fox | COMPLETE | pva |
+| 132908 | Pteropus vampyrus | Large_flying_fox | COMPLETE | pvp |
 | 303518 | Pundamilia nyererei | Makobe_Island_cichlid | COMPLETE | — |
 | 42514 | Pygocentrus nattereri | Red_bellied_piranha | COMPLETE | — |
 | 10116 | Rattus norvegicus | Norway_rat | COMPLETE | rno |
@@ -272,12 +274,20 @@ See [Custom host references](custom-host-references.md) for details.
 ## KEGG column
 
 The KEGG column is useful for checking whether species-specific [KEGG][kegg]
-mapping may be available.
+mapping may be available. KEGG organism codes in `HostSpecies.csv` are validated
+against current KEGG genome-to-NCBI-Taxonomy mappings by
+`aux_scripts/orgdb/audit_hostspecies_kegg.py`.
 
-A missing KEGG value does not necessarily mean the host cannot be used. It means
-KEGG-specific outputs may be limited. MTD Explorer can still use protein FASTA
-and GTF information to build [eggNOG][eggnog] and GO-derived resources, including
-a master GMT for [ssGSEA][ssgsea].
+A missing KEGG value (`—` in the table) does not mean that the host cannot be
+used. It means that no compatible current KEGG organism code was identified for
+that curated host entry, so species-specific KEGG outputs may be limited. MTD
+Explorer can still use protein FASTA and GTF information to build
+[eggNOG][eggnog] and GO-derived resources, including a master GMT for
+[ssGSEA][ssgsea].
+
+KEGG codes are not inferred from species names or abbreviations. Existing codes
+are checked against the NCBI Taxon ID, curated reference Taxon ID, and
+species-level taxonomy before they are accepted.
 
 ## Notes
 
