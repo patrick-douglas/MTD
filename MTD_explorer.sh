@@ -8803,6 +8803,8 @@ fi
 
                     Rscript "$EV_VOLCANO_SCRIPT" \
                     --de_results "$de_file" \
+                    --gtf "$gtf" \
+                    --offline \
                     --label_top "$EV_VOLCANO_LABEL_TOP" \
                     --padj "$EV_VOLCANO_PADJ" \
                     --logfc "$EV_VOLCANO_LOGFC" \

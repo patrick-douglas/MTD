@@ -78,6 +78,47 @@ def command_output(args: list[str], cwd: Path | None = None) -> str:
     return completed.stdout.strip() or "NA"
 
 
+def read_start_git_state(path: Path) -> dict[str, str]:
+    """Read provenance captured by MTD_benchmark_install.sh before the run."""
+    state = {
+        "commit": "NA",
+        "branch": "NA",
+        "dirty": "NA",
+        "mtd_script_sha256": "NA",
+    }
+    if not path.is_file():
+        return state
+
+    in_status = False
+    status_lines: list[str] = []
+    for raw_line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw_line.rstrip()
+        if line.startswith("commit: "):
+            state["commit"] = line.split(":", 1)[1].strip() or "NA"
+        elif line.startswith("branch: "):
+            state["branch"] = line.split(":", 1)[1].strip() or "NA"
+        elif line == "--- status --short ---":
+            in_status = True
+            continue
+        elif in_status and line.startswith("=== "):
+            in_status = False
+        elif in_status and line.strip():
+            status_lines.append(line)
+
+        parts = line.split(maxsplit=1)
+        if (
+            len(parts) == 2
+            and len(parts[0]) == 64
+            and all(ch in "0123456789abcdefABCDEF" for ch in parts[0])
+            and Path(parts[1]).name == "MTD_explorer.sh"
+        ):
+            state["mtd_script_sha256"] = parts[0].lower()
+
+    if state["commit"] != "NA":
+        state["dirty"] = "1" if status_lines else "0"
+    return state
+
+
 def strip_ansi(text: str) -> str:
     return ANSI_RE.sub("", text)
 
@@ -496,13 +537,43 @@ def main() -> int:
         else []
     )
     hpc_summary = {metric: value for metric, value, _unit in hpc_metric_rows}
-    git_commit = command_output(["git", "rev-parse", "HEAD"], cwd=repo)
-    git_branch = command_output(["git", "branch", "--show-current"], cwd=repo)
-    git_status = command_output(["git", "status", "--short"], cwd=repo)
-    git_dirty = 0 if git_status == "NA" or not git_status.strip() else 1
+
+    # Canonical Git provenance must describe the checkout that existed when
+    # the benchmark started, not whatever HEAD happens to be hours later when
+    # this report is generated. MTD_benchmark_install.sh captures git_state.txt
+    # immediately before launching the measured command.
+    start_git = read_start_git_state(run_dir / "git_state.txt")
+    git_commit_at_report = command_output(["git", "rev-parse", "HEAD"], cwd=repo)
+    git_branch_at_report = command_output(["git", "branch", "--show-current"], cwd=repo)
+    git_status_at_report = command_output(["git", "status", "--short"], cwd=repo)
+    git_dirty_at_report = 0 if git_status_at_report == "NA" or not git_status_at_report.strip() else 1
+
+    git_commit = start_git["commit"]
+    git_branch = start_git["branch"]
+    git_dirty = start_git["dirty"]
+
+    # Backward-compatible fallback for old/incomplete benchmark directories.
+    if git_commit == "NA":
+        git_commit = git_commit_at_report
+    if git_branch == "NA":
+        git_branch = git_branch_at_report
+    if git_dirty == "NA":
+        git_dirty = git_dirty_at_report
+    else:
+        git_dirty = int(git_dirty)
+
+    git_changed_during_run = int(
+        git_commit_at_report != "NA" and git_commit != git_commit_at_report
+    )
 
     mtd_script = repo / "MTD_explorer.sh"
-    script_sha = sha256_file(mtd_script) if mtd_script.is_file() else "NA"
+    script_sha_at_report = sha256_file(mtd_script) if mtd_script.is_file() else "NA"
+    script_sha = start_git["mtd_script_sha256"]
+    if script_sha == "NA":
+        script_sha = script_sha_at_report
+    mtd_script_changed_during_run = int(
+        script_sha_at_report != "NA" and script_sha != script_sha_at_report
+    )
     samplesheet_sha = sha256_file(samplesheet)
 
     output_exists = output.is_dir()
@@ -622,10 +693,16 @@ def main() -> int:
             generic_summary.get("peak_reported_temperature", "NA"),
             "degrees Celsius",
         ),
-        ("git_commit", git_commit, "text"),
-        ("git_branch", git_branch, "text"),
-        ("git_dirty", git_dirty, "0/1"),
-        ("mtd_explorer_sha256", script_sha, "SHA-256"),
+        ("git_commit", git_commit, "text; checkout at benchmark start"),
+        ("git_branch", git_branch, "text; branch at benchmark start"),
+        ("git_dirty", git_dirty, "0/1; working tree at benchmark start"),
+        ("git_commit_at_report", git_commit_at_report, "text; checkout when report was generated"),
+        ("git_branch_at_report", git_branch_at_report, "text; branch when report was generated"),
+        ("git_dirty_at_report", git_dirty_at_report, "0/1; working tree when report was generated"),
+        ("git_changed_during_run", git_changed_during_run, "0/1; start commit differs from report-time commit"),
+        ("mtd_explorer_sha256", script_sha, "SHA-256; script captured at benchmark start"),
+        ("mtd_explorer_sha256_at_report", script_sha_at_report, "SHA-256; script present when report was generated"),
+        ("mtd_script_changed_during_run", mtd_script_changed_during_run, "0/1; start script hash differs from report-time hash"),
     ]
 
     existing_metric_names = {metric for metric, _value, _unit in metrics}
@@ -714,7 +791,10 @@ def main() -> int:
         f"Output size: {output_total_bytes} bytes",
         f"Recorded stages: {stage_count}",
         f"Diagnostic hits: {diagnostic_hits}",
-        f"Git commit: {git_commit}",
+        f"Git commit at benchmark start: {git_commit}",
+        f"Git commit when report generated: {git_commit_at_report}",
+        f"Repository commit changed during run: {git_changed_during_run}",
+        f"MTD_explorer.sh changed during run: {mtd_script_changed_during_run}",
         "",
         "Important files:",
         f"  {run_dir / 'summary.tsv'}",

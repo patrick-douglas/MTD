@@ -6,7 +6,8 @@
 # One-step script:
 #   1) Reads a DESeq2-like differential expression/abundance table.
 #   2) Detects Ensembl gene IDs in the selected ID column.
-#   3) Optionally queries Ensembl REST to convert IDs into gene symbols.
+#   3) Preferentially maps Ensembl gene IDs to symbols from a local,
+#      reference-matched GTF. Ensembl REST remains an optional fallback.
 #   4) Writes a converted/proof table keeping the original ID column.
 #   5) Creates a volcano plot using gene symbols when available.
 #
@@ -35,10 +36,18 @@ print_help <- function() {
     cat("      Default: 1\n\n")
 
     cat("  --convert auto|yes|no\n")
-    cat("      auto: convert only values that look like Ensembl gene IDs.\n")
+    cat("      auto: convert values that look like Ensembl gene IDs.\n")
     cat("      yes : force conversion attempt for Ensembl-like IDs.\n")
-    cat("      no  : do not query Ensembl; use the input labels directly.\n")
+    cat("      no  : do not convert; use the input labels directly.\n")
     cat("      Default: auto\n\n")
+
+    cat("  --gtf FILE.gtf[.gz]\n")
+    cat("      Local reference-matched GTF used first for gene_id -> gene_name mapping.\n")
+    cat("      This is the preferred mapping source for MTD Explorer.\n\n")
+
+    cat("  --offline\n")
+    cat("      Disable all Ensembl REST requests. Local GTF/cache mappings are still used.\n")
+    cat("      MTD Explorer uses this mode so volcano generation does not depend on network access.\n\n")
 
     cat("  --xref_fallback\n")
     cat("      For IDs without display_name from /lookup/id, try /xrefs/id as fallback.\n")
@@ -141,6 +150,7 @@ print_help <- function() {
     cat("  Original_ID     = original value from the selected ID column\n")
     cat("  Gene_symbol     = converted gene symbol, when found\n")
     cat("  Mapping_status  = converted, unmapped_ensembl, not_ensembl_format, or conversion_disabled\n")
+    cat("  Mapping_source  = local_gtf, cache, ensembl_rest, or none\n")
     cat("  Label_in_plot   = TRUE/FALSE, whether the feature was eligible as a plot label\n\n")
 }
 
@@ -179,6 +189,8 @@ plot_height <- 8
 plot_dpi <- 300
 
 cache_file <- "ensembl_symbol_cache.csv"
+gtf_file <- NULL
+offline_mode <- FALSE
 server_url <- "https://rest.ensembl.org"
 batch_size <- 1000
 http_timeout <- 60
@@ -307,6 +319,18 @@ while (i <= length(args)) {
         next
     }
 
+    if (arg == "--gtf") {
+        gtf_file <- get_next(args, i, arg)
+        i <- i + 2
+        next
+    }
+
+    if (arg == "--offline") {
+        offline_mode <- TRUE
+        i <- i + 1
+        next
+    }
+
     if (arg == "--server") {
         server_url <- get_next(args, i, arg)
         i <- i + 2
@@ -381,6 +405,10 @@ if (!file.exists(de_results)) {
 
 if (!(convert_mode %in% c("auto", "yes", "no"))) {
     stop("Error: --convert must be one of: auto, yes, no.", call. = FALSE)
+}
+
+if (!is.null(gtf_file) && !file.exists(gtf_file)) {
+    stop(paste0("Error: --gtf file not found: ", gtf_file), call. = FALSE)
 }
 
 if (!(sep_option %in% c("auto", "comma", "tab", "semicolon"))) {
@@ -461,7 +489,7 @@ install_if_needed <- function(packages, install_missing = TRUE) {
     }
 }
 
-necessary_packages <- c("ggplot2", "ggrepel", "EnhancedVolcano", "httr", "jsonlite")
+necessary_packages <- c("ggplot2", "ggrepel", "EnhancedVolcano")
 install_if_needed(necessary_packages, install_missing = install_missing)
 
 # -----------------------------
@@ -543,6 +571,96 @@ make_default_output <- function(input_file) {
 make_default_table <- function(input_file) {
     base <- tools::file_path_sans_ext(input_file)
     paste0(base, "_gene_symbols_table.csv")
+}
+
+# -----------------------------
+# Local reference mapping
+# -----------------------------
+extract_gtf_attribute <- function(attributes, key) {
+    pattern <- paste0(
+        "(?:^|;[[:space:]]*)",
+        key,
+        '[[:space:]]+"([^"]+)"'
+    )
+    matches <- regexec(pattern, attributes, perl = TRUE)
+    values <- regmatches(attributes, matches)
+    vapply(
+        values,
+        function(x) if (length(x) >= 2) x[2] else NA_character_,
+        character(1)
+    )
+}
+
+read_gtf_symbol_map <- function(gtf_file, strip_version = TRUE) {
+    if (is.null(gtf_file) || gtf_file == "") {
+        return(character(0))
+    }
+
+    message("[INFO] Reading local GTF gene symbols: ", gtf_file)
+
+    con <- if (grepl("\\.gz$", gtf_file, ignore.case = TRUE)) {
+        gzfile(gtf_file, open = "rt")
+    } else {
+        file(gtf_file, open = "rt")
+    }
+    on.exit(close(con), add = TRUE)
+
+    all_gene_ids <- character(0)
+    all_gene_names <- character(0)
+
+    repeat {
+        lines <- readLines(con, n = 100000, warn = FALSE)
+        if (length(lines) == 0) break
+
+        # Ensembl GTFs contain one feature="gene" row per gene. Filter at
+        # the raw-line level first so transcript/exon attributes are never
+        # retained in memory.
+        gene_lines <- lines[grepl("^[^#][^\\t]*\\t[^\\t]*\\tgene\\t", lines, perl = TRUE)]
+        if (length(gene_lines) == 0) next
+
+        fields <- strsplit(gene_lines, "\t", fixed = TRUE)
+        attributes <- vapply(
+            fields,
+            function(x) if (length(x) >= 9) x[9] else NA_character_,
+            character(1)
+        )
+        attributes <- attributes[!is.na(attributes)]
+        if (length(attributes) == 0) next
+
+        gene_ids <- extract_gtf_attribute(attributes, "gene_id")
+        gene_names <- extract_gtf_attribute(attributes, "gene_name")
+
+        # Some GTF producers use gene_symbol instead of gene_name.
+        missing_name <- is.na(gene_names) | trimws(gene_names) == ""
+        if (any(missing_name)) {
+            alternate <- extract_gtf_attribute(attributes[missing_name], "gene_symbol")
+            gene_names[missing_name] <- alternate
+        }
+
+        all_gene_ids <- c(all_gene_ids, gene_ids)
+        all_gene_names <- c(all_gene_names, gene_names)
+    }
+
+    if (length(all_gene_ids) == 0) {
+        warning("Local GTF contained no feature='gene' rows with gene_id attributes.")
+        return(character(0))
+    }
+
+    gene_ids <- normalize_id(all_gene_ids, strip_version = strip_version)
+    gene_names <- trimws(as.character(all_gene_names))
+    keep <- !is.na(gene_ids) & gene_ids != "" &
+        !is.na(gene_names) & gene_names != "" &
+        gene_ids != gene_names & !looks_like_ensembl_gene(gene_names)
+
+    gene_ids <- gene_ids[keep]
+    gene_names <- gene_names[keep]
+
+    mapping <- gene_names
+    names(mapping) <- gene_ids
+    mapping <- mapping[!duplicated(names(mapping))]
+
+    message("[INFO] Local GTF gene_id -> symbol mappings: ", length(mapping))
+    mapping
 }
 
 # -----------------------------
@@ -838,28 +956,62 @@ message("Ensembl-like gene IDs detected: ", sum(ensembl_like, na.rm = TRUE))
 # -----------------------------
 gene_symbol <- rep(NA_character_, nrow(res_raw))
 mapping_status <- rep("not_ensembl_format", nrow(res_raw))
+mapping_source <- rep("none", nrow(res_raw))
 
 if (convert_mode == "no") {
     mapping_status[] <- "conversion_disabled"
-    message("Conversion mode: no. No online lookup will be performed.")
+    message("Conversion mode: no. No gene-symbol conversion will be performed.")
 } else if (!any(ensembl_like, na.rm = TRUE)) {
-    message("Conversion mode: ", convert_mode, ". No Ensembl-like IDs found, so no online lookup is needed.")
+    message("Conversion mode: ", convert_mode, ". No Ensembl-like IDs found, so no lookup is needed.")
 } else {
     ids_to_convert <- sort(unique(normalized_ids[ensembl_like & !is.na(normalized_ids) & normalized_ids != ""]))
 
     message("Conversion mode: ", convert_mode)
     message("Unique Ensembl-like IDs to convert: ", length(ids_to_convert))
 
+    resolved <- rep(NA_character_, length(ids_to_convert))
+    names(resolved) <- ids_to_convert
+    resolved_source <- rep("none", length(ids_to_convert))
+    names(resolved_source) <- ids_to_convert
+
+    # 1) Exact local reference first. This avoids network dependence and
+    # keeps labels matched to the same GTF used by featureCounts/DE analysis.
+    if (!is.null(gtf_file) && gtf_file != "") {
+        gtf_map <- read_gtf_symbol_map(gtf_file, strip_version = strip_version)
+        local_hits <- ids_to_convert[ids_to_convert %in% names(gtf_map)]
+        if (length(local_hits) > 0) {
+            local_symbols <- gtf_map[local_hits]
+            valid_local <- !is.na(local_symbols) & local_symbols != ""
+            local_hits <- local_hits[valid_local]
+            resolved[local_hits] <- gtf_map[local_hits]
+            resolved_source[local_hits] <- "local_gtf"
+        }
+        message("Mapped from local GTF: ", sum(resolved_source == "local_gtf"))
+    }
+
+    # 2) Existing local cache, if present. This is useful for standalone
+    # reruns while remaining independent of network availability.
     cache <- read_symbol_cache(cache_file)
-    found_in_cache <- ids_to_convert[ids_to_convert %in% names(cache)]
-    missing_from_cache <- setdiff(ids_to_convert, names(cache))
+    unresolved_ids <- ids_to_convert[is.na(resolved) | resolved == ""]
+    cache_hits <- unresolved_ids[unresolved_ids %in% names(cache)]
+    if (length(cache_hits) > 0) {
+        cache_symbols <- cache[cache_hits]
+        valid_cache <- !is.na(cache_symbols) & cache_symbols != ""
+        cache_hits <- cache_hits[valid_cache]
+        resolved[cache_hits] <- cache[cache_hits]
+        resolved_source[cache_hits] <- "cache"
+    }
+    message("Mapped from existing cache: ", sum(resolved_source == "cache"))
 
-    message("Found in cache: ", length(found_in_cache))
-    message("To query online: ", length(missing_from_cache))
+    # 3) Optional online fallback. MTD Explorer invokes this script with
+    # --offline, so production volcano generation never depends on REST.
+    missing_online <- ids_to_convert[is.na(resolved) | resolved == ""]
+    if (length(missing_online) > 0 && !offline_mode) {
+        install_if_needed(c("httr", "jsonlite"), install_missing = install_missing)
+        message("To query Ensembl REST: ", length(missing_online))
 
-    if (length(missing_from_cache) > 0) {
         lookup_symbols <- fetch_lookup_symbols(
-            ids = missing_from_cache,
+            ids = missing_online,
             server = server_url,
             batch_size = batch_size,
             timeout = http_timeout,
@@ -867,31 +1019,41 @@ if (convert_mode == "no") {
             sleep_seconds = sleep_seconds
         )
 
-        cache[names(lookup_symbols)] <- lookup_symbols
-        write_symbol_cache(cache_file, cache)
-    }
-
-    if (xref_fallback) {
-        still_missing <- ids_to_convert[is.na(cache[ids_to_convert]) | cache[ids_to_convert] == ""]
-        message("IDs needing /xrefs/id fallback: ", length(still_missing))
-
-        if (length(still_missing) > 0) {
-            xref_symbols <- fetch_xref_fallback_symbols(
-                ids = still_missing,
-                server = server_url,
-                timeout = http_timeout,
-                retries = http_retries,
-                sleep_seconds = sleep_seconds
-            )
-
-            has_xref <- !is.na(xref_symbols) & xref_symbols != ""
-            cache[names(xref_symbols)[has_xref]] <- xref_symbols[has_xref]
-            cache[names(xref_symbols)[!has_xref]] <- NA_character_
+        online_hits <- names(lookup_symbols)[!is.na(lookup_symbols) & lookup_symbols != ""]
+        if (length(online_hits) > 0) {
+            resolved[online_hits] <- lookup_symbols[online_hits]
+            resolved_source[online_hits] <- "ensembl_rest"
+            cache[online_hits] <- lookup_symbols[online_hits]
             write_symbol_cache(cache_file, cache)
         }
+
+        if (xref_fallback) {
+            still_missing <- ids_to_convert[is.na(resolved) | resolved == ""]
+            message("IDs needing /xrefs/id fallback: ", length(still_missing))
+
+            if (length(still_missing) > 0) {
+                xref_symbols <- fetch_xref_fallback_symbols(
+                    ids = still_missing,
+                    server = server_url,
+                    timeout = http_timeout,
+                    retries = http_retries,
+                    sleep_seconds = sleep_seconds
+                )
+                xref_hits <- names(xref_symbols)[!is.na(xref_symbols) & xref_symbols != ""]
+                if (length(xref_hits) > 0) {
+                    resolved[xref_hits] <- xref_symbols[xref_hits]
+                    resolved_source[xref_hits] <- "ensembl_rest"
+                    cache[xref_hits] <- xref_symbols[xref_hits]
+                    write_symbol_cache(cache_file, cache)
+                }
+            }
+        }
+    } else if (length(missing_online) > 0 && offline_mode) {
+        message("[INFO] Offline mode enabled; skipping Ensembl REST for ", length(missing_online), " unresolved IDs.")
     }
 
-    gene_symbol[ensembl_like] <- cache[normalized_ids[ensembl_like]]
+    gene_symbol[ensembl_like] <- resolved[normalized_ids[ensembl_like]]
+    mapping_source[ensembl_like] <- resolved_source[normalized_ids[ensembl_like]]
 
     converted_rows <- ensembl_like & !is.na(gene_symbol) & gene_symbol != ""
     unmapped_rows <- ensembl_like & !converted_rows
@@ -901,7 +1063,12 @@ if (convert_mode == "no") {
 
     message("Converted rows: ", sum(converted_rows, na.rm = TRUE))
     message("Unmapped Ensembl rows: ", sum(unmapped_rows, na.rm = TRUE))
-    message("Cache file: ", cache_file)
+    message("Mapping sources: local_gtf=", sum(mapping_source == "local_gtf"),
+            ", cache=", sum(mapping_source == "cache"),
+            ", ensembl_rest=", sum(mapping_source == "ensembl_rest"))
+    if (!offline_mode) {
+        message("Cache file: ", cache_file)
+    }
 }
 
 feature_id <- ifelse(!is.na(gene_symbol) & gene_symbol != "", gene_symbol, original_ids)
@@ -923,6 +1090,7 @@ res2 <- data.frame(
     Original_ID = original_ids,
     Gene_symbol = gene_symbol,
     Mapping_status = mapping_status,
+    Mapping_source = mapping_source,
     Label_in_plot = plot_label != "",
     remaining_cols,
     stringsAsFactors = FALSE,
