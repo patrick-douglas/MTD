@@ -1569,13 +1569,45 @@ data.alpha<-estimate_richness(data.adj, measures = c("Observed", "Shannon", "Sim
   # continue for beta diversity
   data1<-data
   vsd1 <- varianceStabilizingTransformation(dds1)
-  # normalized reads count with host transcriptome size and with avoiding removing variation associated with the other conditions
+  # Remove host transcriptome size as a numeric covariate while preserving the biological design.
   if (length(args) == 5){
     mm <- model.matrix(funNew(names(coldata)[2:(ncol(coldata)-1)]), colData(vsd))
   } else {
     mm <- model.matrix(funNew(names(coldata)[2]), colData(vsd))
   }
-  vsd1.df <- limma::removeBatchEffect(assay(vsd1), vsd$transcriptome_size, design=mm)
+  beta_samples <- colnames(assay(vsd1))
+
+  if (!all(beta_samples %in% rownames(mm))) {
+    stop("Could not align the beta-diversity design matrix to all samples.")
+  }
+  mm <- mm[beta_samples, , drop = FALSE]
+
+  transcriptome_values <- suppressWarnings(
+    as.numeric(as.character(colData(vsd)$transcriptome_size))
+  )
+  names(transcriptome_values) <- rownames(colData(vsd))
+
+  if (!all(beta_samples %in% names(transcriptome_values))) {
+    stop("Could not align transcriptome_size to all beta-diversity samples.")
+  }
+
+  beta_transcriptome_covariate <- matrix(
+    transcriptome_values[beta_samples],
+    ncol = 1,
+    dimnames = list(beta_samples, "transcriptome_size")
+  )
+
+  if (any(!is.finite(beta_transcriptome_covariate))) {
+    stop("transcriptome_size contains missing or non-finite beta-diversity values.")
+  }
+
+  vsd1.df <- limma::removeBatchEffect(
+    assay(vsd1),
+    covariates = beta_transcriptome_covariate,
+    design = mm
+  )
+
+  message("[BETA DIVERSITY] transcriptome_size removed as a numeric covariate.")
   vsd1.df[vsd1.df < 0.0] <- 0.0 #adjust negative values after vst
   otu_table(data1) <- otu_table(vsd1.df, taxa_are_rows = TRUE)
 

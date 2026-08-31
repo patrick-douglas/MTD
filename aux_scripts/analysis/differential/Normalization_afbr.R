@@ -74,13 +74,43 @@ normtrans<-assay(vsd)
 
 # norm<-counts(dds,normalized=T)
 
-# normalized reads count with host transcriptome size and with avoiding removing variation associated with the other conditions
+# Remove host transcriptome size as a numeric covariate while preserving the biological design.
 if (length(args) == 4){
   mm <- model.matrix(funNew(names(coldata)[2:(ncol(coldata)-1)]), colData(vsd))
 } else {
   mm <- model.matrix(funNew(names(coldata)[2]), colData(vsd))
 }
-norm <- limma::removeBatchEffect(normtrans, vsd$transcriptome_size, design=mm)
+norm_samples <- colnames(normtrans)
+
+if (!all(norm_samples %in% rownames(mm))) {
+  stop("Could not align the normalization design matrix to all samples.")
+}
+mm <- mm[norm_samples, , drop = FALSE]
+
+transcriptome_values <- suppressWarnings(
+  as.numeric(as.character(colData(vsd)$transcriptome_size))
+)
+names(transcriptome_values) <- rownames(colData(vsd))
+
+if (!all(norm_samples %in% names(transcriptome_values))) {
+  stop("Could not align transcriptome_size to all normalization samples.")
+}
+
+transcriptome_covariate <- matrix(
+  transcriptome_values[norm_samples],
+  ncol = 1,
+  dimnames = list(norm_samples, "transcriptome_size")
+)
+
+if (any(!is.finite(transcriptome_covariate))) {
+  stop("transcriptome_size contains missing or non-finite values.")
+}
+
+norm <- limma::removeBatchEffect(
+  normtrans,
+  covariates = transcriptome_covariate,
+  design = mm
+)
 # if (length(args) == 4){
 #   coldata.n<-coldata
 #   coldata.n[]<-lapply(coldata.n, as.numeric)
@@ -168,7 +198,8 @@ write_taxon_matrix(
 )
 
 
-# VST matrix with the transcriptome-size/batch component removed.
+# VST matrix with the numeric transcriptome-size covariate removed.
+# The legacy *.vst_batch_corrected.tsv filename is retained for compatibility.
 #
 # Negative values are valid here because this is a transformed
 # visualization matrix, not a count table.
@@ -199,11 +230,25 @@ metadata_output <- file.path(
     paste0(filename, ".sample_metadata.tsv")
 )
 
-metadata_table <- data.frame(
-    sample_name = rownames(as.data.frame(colData(vsd))),
-    as.data.frame(colData(vsd)),
-    check.names = FALSE
+metadata_table <- as.data.frame(
+    colData(vsd)
 )
+
+# Normal MTD runs already carry sample_name in colData. Add it from row names
+# only for standalone/backward-compatible inputs where it is absent.
+if (!"sample_name" %in% names(metadata_table)) {
+    metadata_table <- data.frame(
+        sample_name = rownames(metadata_table),
+        metadata_table,
+        check.names = FALSE
+    )
+} else {
+    metadata_table$sample_name <- as.character(metadata_table$sample_name)
+    metadata_table <- metadata_table[
+        , c("sample_name", setdiff(names(metadata_table), "sample_name")),
+        drop = FALSE
+    ]
+}
 
 write.table(
     metadata_table,
@@ -218,7 +263,7 @@ write.table(
 message("Transformation completed.")
 message("VST matrix: ", vst_output)
 message(
-    "Batch-corrected VST matrix: ",
+    "Transcriptome-size-corrected VST matrix: ",
     batch_corrected_output
 )
 message(
